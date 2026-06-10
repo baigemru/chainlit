@@ -102,7 +102,7 @@
         "using": "In gebruik",
         "used": "Gebruikt",
         "usedSteps": "{{count}} stappen gebruikt",
-        "usedTools": "{{count}} tools gebruikt"
+        "usedTools": "{{count}} hulpmiddelen gebruikt"
       },
       "actions": {
         "copy": {

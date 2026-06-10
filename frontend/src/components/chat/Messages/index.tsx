@@ -9,6 +9,7 @@ import {
 
 import BlinkingCursor from '@/components/BlinkingCursor';
 
+import { CompactSteps } from './CompactSteps';
 import { Message } from './Message';
 
 interface Props {
@@ -76,17 +77,60 @@ const Messages = memo(
             // Ignore on_chat_start for scorable run
             const scorableRun =
               !isRunning && m.name !== 'on_chat_start' ? m : undefined;
+
+            // Determine if compact mode should be used
+            const useCompact =
+              messageContext.cotDisplay === 'compact' &&
+              messageContext.cot !== 'hidden';
+
+            // Only use compact when there are 2+ steps worth grouping
+            const visibleStepCount = useCompact
+              ? (m.steps?.filter((s) => {
+                  const isStep = !s.type.includes('message');
+                  if (!isStep) return false;
+                  if (messageContext.cot === 'tool_call' && s.type !== 'tool')
+                    return false;
+                  return true;
+                }).length ?? 0)
+              : 0;
+
+            const showCompact = useCompact && visibleStepCount > 1;
+
             return (
               <React.Fragment key={m.id}>
                 {m.steps?.length ? (
-                  <Messages
-                    messages={m.steps}
-                    elements={elements}
-                    actions={actions}
-                    indent={indent}
-                    isRunning={isRunning}
-                    scorableRun={scorableRun}
-                  />
+                  showCompact ? (
+                    <>
+                      <CompactSteps
+                        steps={m.steps}
+                        elements={elements}
+                        actions={actions}
+                        indent={indent}
+                        isRunning={isRunning}
+                        scorableRun={scorableRun}
+                      />
+                      {/* Render message-type children at root level */}
+                      <Messages
+                        messages={m.steps.filter((s) =>
+                          s.type.includes('message')
+                        )}
+                        elements={elements}
+                        actions={actions}
+                        indent={indent}
+                        isRunning={isRunning}
+                        scorableRun={scorableRun}
+                      />
+                    </>
+                  ) : (
+                    <Messages
+                      messages={m.steps}
+                      elements={elements}
+                      actions={actions}
+                      indent={indent}
+                      isRunning={isRunning}
+                      scorableRun={scorableRun}
+                    />
+                  )
                 ) : null}
                 {(showToolCoTLoader || showHiddenCoTLoader) &&
                 m.name !== 'on_chat_start' ? (

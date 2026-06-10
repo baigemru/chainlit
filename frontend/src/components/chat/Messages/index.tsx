@@ -42,6 +42,17 @@ const hasAssistantMessage = (step: IStep): boolean => {
   );
 };
 
+const countVisibleSteps = (steps: IStep[], cot: string): number => {
+  let count = 0;
+  for (const s of steps) {
+    if (!s.type.includes('message')) {
+      if (cot !== 'tool_call' || s.type === 'tool') count++;
+    }
+    if (s.steps) count += countVisibleSteps(s.steps, cot);
+  }
+  return count;
+};
+
 const Messages = memo(
   ({ messages, elements, actions, indent, isRunning, scorableRun }: Props) => {
     const messageContext = useContext(MessageContext);
@@ -85,13 +96,7 @@ const Messages = memo(
 
             // Only use compact when there are 2+ steps worth grouping
             const visibleStepCount = useCompact
-              ? (m.steps?.filter((s) => {
-                  const isStep = !s.type.includes('message');
-                  if (!isStep) return false;
-                  if (messageContext.cot === 'tool_call' && s.type !== 'tool')
-                    return false;
-                  return true;
-                }).length ?? 0)
+              ? countVisibleSteps(m.steps || [], messageContext.cot)
               : 0;
 
             const showCompact = useCompact && visibleStepCount > 1;

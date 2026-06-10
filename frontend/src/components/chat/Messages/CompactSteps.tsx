@@ -24,25 +24,46 @@ interface Props {
   scorableRun?: IStep;
 }
 
+// Recursively collect tool/step-type nodes for counting and naming
+const collectVisible = (steps: IStep[], cot: string): IStep[] => {
+  const result: IStep[] = [];
+  for (const s of steps) {
+    if (!s.type.includes('message')) {
+      if (cot !== 'tool_call' || s.type === 'tool') result.push(s);
+    }
+    if (s.steps) result.push(...collectVisible(s.steps, cot));
+  }
+  return result;
+};
+
 const CompactSteps = memo(
   ({ steps, elements, actions, indent, isRunning, scorableRun }: Props) => {
     const { cot } = useContext(MessageContext);
     const [openValue, setOpenValue] = useState<string>('');
 
-    // Filter steps based on cot mode (same logic as Message/index.tsx)
+    // All non-message step children for rendering (Message skip logic drills through intermediates)
+    const stepChildren = useMemo(() => {
+      return steps.filter((s) => !s.type.includes('message'));
+    }, [steps]);
+
+    // Recursively collected visible steps for count and label
     const visibleSteps = useMemo(() => {
-      return steps.filter((s) => {
-        const isStep = !s.type.includes('message');
-        if (!isStep) return false;
-        if (cot === 'hidden') return false;
-        if (cot === 'tool_call' && s.type !== 'tool') return false;
-        return true;
-      });
+      return collectVisible(steps, cot);
     }, [steps, cot]);
 
-    // Show "Using" label while the run is still active (prevents flashing
-    // the finished label between sequential tool calls)
-    const showUsing = !!isRunning;
+    // Show "Using" until an assistant_message appears (meaning tools are done
+    // and the model is streaming). This avoids flashing between sequential tools
+    // (no assistant_message yet) while still switching once the answer begins.
+    const hasAnswer = useMemo(() => {
+      const check = (items: IStep[]): boolean =>
+        items.some(
+          (s) =>
+            s.type === 'assistant_message' || (s.steps ? check(s.steps) : false)
+        );
+      return check(steps);
+    }, [steps]);
+
+    const showUsing = !!isRunning && !hasAnswer;
 
     // Get the last visible step name for the "Using X" label
     const lastStep = visibleSteps[visibleSteps.length - 1];
@@ -93,7 +114,7 @@ const CompactSteps = memo(
                   <AccordionContent>
                     <div className="flex-grow mt-4 ml-1 pl-4 border-l-2 border-primary">
                       <Messages
-                        messages={visibleSteps}
+                        messages={stepChildren}
                         elements={elements}
                         actions={actions}
                         indent={indent + 1}

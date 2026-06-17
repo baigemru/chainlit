@@ -31,9 +31,9 @@ jobs:
         id: meta
         run: |
           VERSION=$(uv run python -c "from chainlit.version import __version__; print(__version__)")
-          WHEEL=$(ls dist/*.whl | head -1)
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "wheel=${WHEEL}" >> $GITHUB_OUTPUT
+          WHEEL=$(find dist/ -maxdepth 1 -name '*.whl' | head -1)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "wheel=${WHEEL}" >> "$GITHUB_OUTPUT"
         working-directory: ./backend
 
       - name: Delete existing 'latest' tag and release

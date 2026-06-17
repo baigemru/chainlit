@@ -1,0 +1,65 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build chainlit wheel and publish to GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Node, pnpm and dependencies
+        uses: ./.github/actions/pnpm-node-install
+
+      - name: Install Python, uv and Python dependencies
+        uses: ./.github/actions/uv-python-install
+        with:
+          working-directory: ./backend
+
+      - name: Build Python distribution
+        run: uv build
+        working-directory: ./backend
+
+      - name: Get version and wheel filename
+        id: meta
+        run: |
+          VERSION=$(python -c "from chainlit.version import __version__; print(__version__)")
+          WHEEL=$(ls dist/*.whl | head -1)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "wheel=${WHEEL}" >> $GITHUB_OUTPUT
+        working-directory: ./backend
+
+      - name: Delete existing 'latest' tag and release
+        continue-on-error: true
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create GitHub Release with wheel
+        run: |
+          gh release create latest backend/dist/* \
+            --title "chainlit v${{ steps.meta.outputs.version }} (latest build)" \
+            --notes "Automated build from commit ${{ github.sha }} on branch ${{ github.ref_name }}.
+
+          ## Install
+
+          \`\`\`bash
+          pip install https://github.com/${{ github.repository }}/releases/latest/download/$(basename '${{ steps.meta.outputs.wheel }}')
+          \`\`\`
+
+          Or install directly from git:
+
+          \`\`\`bash
+          pip install git+https://github.com/${{ github.repository }}.git@main
+          \`\`\`"
+        env:
+          GH_TOKEN: ${{ github.token }}

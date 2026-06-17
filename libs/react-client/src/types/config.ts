@@ -70,7 +70,7 @@ export interface IChainlitConfig {
       url: string;
       icon_url?: string;
       display_name?: string;
-      target?: '_blank' | '_self' | '_parent' | '_top';
+      target?: '_blank' | '_self' | '_parent' | '_top' | 'iframe';
     }[];
   };
   features: {

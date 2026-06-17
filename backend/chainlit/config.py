@@ -361,7 +361,7 @@ class UserMenuLink(BaseModel):
     url: str
     icon_url: Optional[str] = None
     display_name: Optional[str] = None
-    target: Optional[Literal["_blank", "_self", "_parent", "_top"]] = None
+    target: Optional[Literal["_blank", "_self", "_parent", "_top", "iframe"]] = None
 
 
 class UISettings(BaseModel):

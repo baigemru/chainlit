@@ -22,9 +22,10 @@ jobs:
         uses: ./.github/actions/uv-python-install
         with:
           working-directory: ./backend
+          uv-args: --extra dev
 
       - name: Build Python distribution
-        run: uv build
+        run: uv build --no-build-isolation
         working-directory: ./backend
 
       - name: Get version and wheel filename

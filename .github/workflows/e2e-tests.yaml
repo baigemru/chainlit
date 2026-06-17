@@ -45,6 +45,10 @@ jobs:
       CYPRESS_CACHE_FOLDER: ${{ github.workspace }}/.cypress-cache
     steps:
       - uses: actions/checkout@v6
+      - name: Exclude Cypress cache from Windows Defender
+        if: runner.os == 'Windows'
+        run: Add-MpPreference -ExclusionPath "$env:CYPRESS_CACHE_FOLDER"
+        shell: pwsh
       - name: Cache Cypress binary
         uses: actions/cache@v5
         with:
@@ -52,6 +56,9 @@ jobs:
           key: cypress-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - uses: ./.github/actions/pnpm-node-install
         name: Install Node, pnpm and dependencies.
+      - name: Ensure Cypress binary is installed
+        run: pnpm exec cypress install
+        shell: bash
       - uses: ./.github/actions/uv-python-install
         name: Install Python, uv and Python & pnpm (uv does it automatically) dependencies
         with:

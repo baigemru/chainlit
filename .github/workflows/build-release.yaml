@@ -22,7 +22,7 @@ jobs:
         uses: ./.github/actions/uv-python-install
         with:
           working-directory: ./backend
-          uv-args: --extra dev
+          uv-args: --group dev
 
       - name: Build Python distribution
         run: uv build --no-build-isolation

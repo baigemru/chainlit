@@ -61,7 +61,7 @@ jobs:
         id: meta
         run: |
           VERSION=$(uv run python -c "from chainlit.version import __version__; print(__version__)")
-          WHEEL=$(find dist/ -maxdepth 1 -name '*.whl' | head -1)
+          WHEEL=$(find ../dist/ -maxdepth 1 -name '*.whl' | head -1)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "wheel=${WHEEL}" >> "$GITHUB_OUTPUT"
         working-directory: ./backend
@@ -76,7 +76,7 @@ jobs:
 
       - name: Create GitHub Release with wheel
         run: |
-          gh release create latest backend/dist/* \
+          gh release create latest dist/* \
             --title "chainlit v${{ steps.meta.outputs.version }} (latest build)" \
             --notes "Automated build from commit ${{ github.sha }} on branch ${{ github.ref_name }}.
 

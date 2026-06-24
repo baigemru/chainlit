@@ -71,7 +71,7 @@ export default function ElementSideView() {
       <ResizableHandle className="sm:hidden md:block bg-transparent" />
       <ResizablePanel
         minSize={isCanvas ? 30 : 10}
-        defaultSize={isCanvas ? 50 : 40}
+        defaultSize={50}
         className={`md:flex flex-col flex-grow sm:hidden transform transition-transform duration-300 ease-in-out ${
           isVisible ? 'translate-x-0' : 'translate-x-full'
         }`}

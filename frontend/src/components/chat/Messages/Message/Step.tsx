@@ -1,5 +1,12 @@
 import { cn } from '@/lib/utils';
-import { PropsWithChildren, useEffect, useMemo, useState } from 'react';
+import { MessageContext } from 'contexts/MessageContext';
+import {
+  PropsWithChildren,
+  useContext,
+  useEffect,
+  useMemo,
+  useState
+} from 'react';
 
 import type { IStep } from '@chainlit/react-client';
 
@@ -21,6 +28,8 @@ export default function Step({
   children,
   isRunning
 }: PropsWithChildren<Props>) {
+  const { showStepDetails } = useContext(MessageContext);
+
   const using = useMemo(() => {
     return isRunning && step.start && !step.end && !step.isError;
   }, [step, isRunning]);
@@ -40,8 +49,8 @@ export default function Step({
     }
   }, [using, step.autoCollapse]);
 
-  // If there's no content, just render the status without accordion
-  if (!hasContent) {
+  // If there's no content or step details are disabled, just render the status without accordion
+  if (!hasContent || !showStepDetails) {
     return (
       <div className="flex flex-col flex-grow w-0">
         <p

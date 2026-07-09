@@ -53,6 +53,28 @@ const countVisibleSteps = (steps: IStep[], cot: string): number => {
   return count;
 };
 
+interface StepSegment {
+  isMessage: boolean;
+  items: IStep[];
+}
+
+// Group consecutive top-level children by message/step type, preserving
+// order, so compact mode only collapses runs of adjacent steps instead of
+// merging every step in the run into a single block up front.
+const segmentSteps = (steps: IStep[]): StepSegment[] => {
+  const segments: StepSegment[] = [];
+  for (const s of steps) {
+    const isMessage = s.type.includes('message');
+    const last = segments[segments.length - 1];
+    if (last && last.isMessage === isMessage) {
+      last.items.push(s);
+    } else {
+      segments.push({ isMessage, items: [s] });
+    }
+  }
+  return segments;
+};
+
 const Messages = memo(
   ({ messages, elements, actions, indent, isRunning, scorableRun }: Props) => {
     const messageContext = useContext(MessageContext);
@@ -94,38 +116,60 @@ const Messages = memo(
               messageContext.cotDisplay === 'compact' &&
               messageContext.cot !== 'hidden';
 
-            // Only use compact when there are 2+ steps worth grouping
-            const visibleStepCount = useCompact
-              ? countVisibleSteps(m.steps || [], messageContext.cot)
-              : 0;
-
-            const showCompact = useCompact && visibleStepCount > 1;
+            // Group consecutive step-only runs so only those runs collapse,
+            // instead of merging every step in the whole run into one block.
+            const segments = useCompact ? segmentSteps(m.steps || []) : null;
 
             return (
               <React.Fragment key={m.id}>
                 {m.steps?.length ? (
-                  showCompact ? (
-                    <>
-                      <CompactSteps
-                        steps={m.steps}
-                        elements={elements}
-                        actions={actions}
-                        indent={indent}
-                        isRunning={isRunning}
-                        scorableRun={scorableRun}
-                      />
-                      {/* Render message-type children at root level */}
-                      <Messages
-                        messages={m.steps.filter((s) =>
-                          s.type.includes('message')
-                        )}
-                        elements={elements}
-                        actions={actions}
-                        indent={indent}
-                        isRunning={isRunning}
-                        scorableRun={scorableRun}
-                      />
-                    </>
+                  segments ? (
+                    segments.map((segment, i) => {
+                      // A segment is only still "running" if nothing follows
+                      // it yet — an earlier step-only run followed by a
+                      // later segment has already completed.
+                      const segmentIsRunning =
+                        isRunning && i === segments.length - 1;
+
+                      if (segment.isMessage) {
+                        return (
+                          <Messages
+                            key={i}
+                            messages={segment.items}
+                            elements={elements}
+                            actions={actions}
+                            indent={indent}
+                            isRunning={segmentIsRunning}
+                            scorableRun={scorableRun}
+                          />
+                        );
+                      }
+                      const segmentStepCount = countVisibleSteps(
+                        segment.items,
+                        messageContext.cot
+                      );
+                      return segmentStepCount > 1 ? (
+                        <CompactSteps
+                          key={i}
+                          steps={segment.items}
+                          elements={elements}
+                          actions={actions}
+                          indent={indent}
+                          isRunning={segmentIsRunning}
+                          scorableRun={scorableRun}
+                        />
+                      ) : (
+                        <Messages
+                          key={i}
+                          messages={segment.items}
+                          elements={elements}
+                          actions={actions}
+                          indent={indent}
+                          isRunning={segmentIsRunning}
+                          scorableRun={scorableRun}
+                        />
+                      );
+                    })
                   ) : (
                     <Messages
                       messages={m.steps}

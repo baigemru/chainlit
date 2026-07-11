@@ -116,60 +116,18 @@ const Messages = memo(
               messageContext.cotDisplay === 'compact' &&
               messageContext.cot !== 'hidden';
 
-            // Group consecutive step-only runs so only those runs collapse,
-            // instead of merging every step in the whole run into one block.
-            const segments = useCompact ? segmentSteps(m.steps || []) : null;
-
             return (
               <React.Fragment key={m.id}>
                 {m.steps?.length ? (
-                  segments ? (
-                    segments.map((segment, i) => {
-                      // A segment is only still "running" if nothing follows
-                      // it yet — an earlier step-only run followed by a
-                      // later segment has already completed.
-                      const segmentIsRunning =
-                        isRunning && i === segments.length - 1;
-
-                      if (segment.isMessage) {
-                        return (
-                          <Messages
-                            key={i}
-                            messages={segment.items}
-                            elements={elements}
-                            actions={actions}
-                            indent={indent}
-                            isRunning={segmentIsRunning}
-                            scorableRun={scorableRun}
-                          />
-                        );
-                      }
-                      const segmentStepCount = countVisibleSteps(
-                        segment.items,
-                        messageContext.cot
-                      );
-                      return segmentStepCount > 1 ? (
-                        <CompactSteps
-                          key={i}
-                          steps={segment.items}
-                          elements={elements}
-                          actions={actions}
-                          indent={indent}
-                          isRunning={segmentIsRunning}
-                          scorableRun={scorableRun}
-                        />
-                      ) : (
-                        <Messages
-                          key={i}
-                          messages={segment.items}
-                          elements={elements}
-                          actions={actions}
-                          indent={indent}
-                          isRunning={segmentIsRunning}
-                          scorableRun={scorableRun}
-                        />
-                      );
-                    })
+                  useCompact ? (
+                    <SegmentedMessages
+                      steps={m.steps}
+                      elements={elements}
+                      actions={actions}
+                      indent={indent}
+                      isRunning={isRunning}
+                      scorableRun={scorableRun}
+                    />
                   ) : (
                     <Messages
                       messages={m.steps}
@@ -219,4 +177,71 @@ const Messages = memo(
   }
 );
 
-export { Messages };
+interface SegmentedProps {
+  steps: IStep[];
+  elements: IMessageElement[];
+  actions: IAction[];
+  indent: number;
+  isRunning?: boolean;
+  scorableRun?: IStep;
+}
+
+// Renders a list of sibling steps in compact mode: consecutive step-only
+// runs collapse into a single CompactSteps block, message segments render
+// as-is. Used for run children and for steps nested under a message.
+const SegmentedMessages = memo(
+  ({
+    steps,
+    elements,
+    actions,
+    indent,
+    isRunning,
+    scorableRun
+  }: SegmentedProps) => {
+    const messageContext = useContext(MessageContext);
+    const segments = useMemo(() => segmentSteps(steps), [steps]);
+
+    return (
+      <>
+        {segments.map((segment, i) => {
+          // A segment is only still "running" if nothing follows it yet — an
+          // earlier step-only run followed by a later segment has completed.
+          const segmentIsRunning = isRunning && i === segments.length - 1;
+
+          if (!segment.isMessage) {
+            const segmentStepCount = countVisibleSteps(
+              segment.items,
+              messageContext.cot
+            );
+            if (segmentStepCount > 1) {
+              return (
+                <CompactSteps
+                  key={i}
+                  steps={segment.items}
+                  elements={elements}
+                  actions={actions}
+                  indent={indent}
+                  isRunning={segmentIsRunning}
+                  scorableRun={scorableRun}
+                />
+              );
+            }
+          }
+          return (
+            <Messages
+              key={i}
+              messages={segment.items}
+              elements={elements}
+              actions={actions}
+              indent={indent}
+              isRunning={segmentIsRunning}
+              scorableRun={scorableRun}
+            />
+          );
+        })}
+      </>
+    );
+  }
+);
+
+export { Messages, SegmentedMessages };

@@ -10,7 +10,7 @@ import {
 
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 
-import { Messages } from '..';
+import { Messages, SegmentedMessages } from '..';
 import { AskActionButtons } from './AskActionButtons';
 import { AskFileButton } from './AskFileButton';
 import { MessageAvatar } from './Avatar';
@@ -41,7 +41,7 @@ const Message = memo(
     isScorable,
     scorableRun
   }: Props) => {
-    const { allowHtml, cot, latex, renderUserMarkdown, onError } =
+    const { allowHtml, cot, cotDisplay, latex, renderUserMarkdown, onError } =
       useContext(MessageContext);
     const layoutMaxWidth = useLayoutMaxWidth();
     const contentRef = useRef<HTMLDivElement>(null);
@@ -202,13 +202,25 @@ const Message = memo(
         ) : null}
         {/* Display the child steps if the message is not a step (usually a user message). */}
         {message.steps && !isStep ? (
-          <Messages
-            messages={message.steps}
-            elements={elements}
-            actions={actions}
-            indent={indent}
-            isRunning={isRunning}
-          />
+          cotDisplay === 'compact' && cot !== 'hidden' ? (
+            // Compact mode: collapse consecutive step-only runs nested under
+            // this message, same as for direct children of the run.
+            <SegmentedMessages
+              steps={message.steps}
+              elements={elements}
+              actions={actions}
+              indent={indent}
+              isRunning={isRunning}
+            />
+          ) : (
+            <Messages
+              messages={message.steps}
+              elements={elements}
+              actions={actions}
+              indent={indent}
+              isRunning={isRunning}
+            />
+          )
         ) : null}
       </>
     );

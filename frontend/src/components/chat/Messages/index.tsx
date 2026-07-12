@@ -54,22 +54,28 @@ const countVisibleSteps = (steps: IStep[], cot: string): number => {
 };
 
 interface StepSegment {
-  isMessage: boolean;
+  isPassthrough: boolean;
   items: IStep[];
 }
 
-// Group consecutive top-level children by message/step type, preserving
+// Messages and chainlit runs must never be swallowed into a CompactSteps
+// block: a run wraps the whole turn (including its assistant messages), so
+// collapsing it would hide the answer. Both render through Messages as-is.
+const isPassthroughStep = (s: IStep): boolean =>
+  s.type.includes('message') || CL_RUN_NAMES.includes(s.name);
+
+// Group consecutive top-level children by passthrough/step type, preserving
 // order, so compact mode only collapses runs of adjacent steps instead of
 // merging every step in the run into a single block up front.
 const segmentSteps = (steps: IStep[]): StepSegment[] => {
   const segments: StepSegment[] = [];
   for (const s of steps) {
-    const isMessage = s.type.includes('message');
+    const isPassthrough = isPassthroughStep(s);
     const last = segments[segments.length - 1];
-    if (last && last.isMessage === isMessage) {
+    if (last && last.isPassthrough === isPassthrough) {
       last.items.push(s);
     } else {
-      segments.push({ isMessage, items: [s] });
+      segments.push({ isPassthrough, items: [s] });
     }
   }
   return segments;
@@ -208,7 +214,7 @@ const SegmentedMessages = memo(
           // earlier step-only run followed by a later segment has completed.
           const segmentIsRunning = isRunning && i === segments.length - 1;
 
-          if (!segment.isMessage) {
+          if (!segment.isPassthrough) {
             const segmentStepCount = countVisibleSteps(
               segment.items,
               messageContext.cot

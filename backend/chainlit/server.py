@@ -692,6 +692,11 @@ async def oauth_callback(
         provider_id, token, raw_user_data, default_user
     )
 
+    if user is None:
+        response = _get_oauth_redirect_error(request, "Unauthorized")
+        clear_oauth_state_cookie(response)
+        return response
+
     response = await _authenticate_user(request, user, redirect_to_callback=True)
 
     clear_oauth_state_cookie(response)
@@ -740,6 +745,11 @@ async def oauth_azure_hf_callback(
     user = await config.code.oauth_callback(
         provider_id, token, raw_user_data, default_user, id_token
     )
+
+    if user is None:
+        response = _get_oauth_redirect_error(request, "Unauthorized")
+        clear_oauth_state_cookie(response)
+        return response
 
     response = await _authenticate_user(request, user, redirect_to_callback=True)
 

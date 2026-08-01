@@ -22,6 +22,10 @@ class OAuthProvider:
     default_prompt: Optional[str] = None
     registration_url: Optional[str] = None
     forgot_password_url: Optional[str] = None
+    # Stable env var prefix of the provider class (e.g. "KEYCLOAK"). Unlike the
+    # id-derived prefix it does not change when the provider is renamed via
+    # OAUTH_*_NAME, so flags stay aligned with the OAUTH_KEYCLOAK_* credentials.
+    env_prefix: Optional[str] = None
 
     def is_configured(self):
         return all([os.environ.get(env) for env in self.env])
@@ -44,8 +48,21 @@ class OAuthProvider:
 
         return self.id.replace("-", "_").upper()
 
+    def get_env_prefixes(self) -> List[str]:
+        """Accepted env prefixes: the class prefix first, then the id-derived
+        one (they differ when the provider is renamed via OAUTH_*_NAME)."""
+        prefixes = [self.env_prefix or self.get_env_prefix(), self.get_env_prefix()]
+        return list(dict.fromkeys(prefixes))
+
+    def _get_env_value(self, name: str) -> Optional[str]:
+        for prefix in self.get_env_prefixes():
+            value = os.environ.get(f"OAUTH_{prefix}_{name}")
+            if value is not None:
+                return value
+        return None
+
     def _get_env_flag(self, name: str, default: bool) -> bool:
-        value = os.environ.get(f"OAUTH_{self.get_env_prefix()}_{name}")
+        value = self._get_env_value(name)
         if value is None:
             return default
         return value.strip().lower() in ("true", "1", "yes", "on")
@@ -67,10 +84,11 @@ class OAuthProvider:
         theme is "light" or "dark"; the themed variant falls back to the
         theme-agnostic OAUTH_{PREFIX}_ICON_URL.
         """
-        prefix = f"OAUTH_{self.get_env_prefix()}_ICON_URL"
         if theme:
-            return os.environ.get(f"{prefix}_{theme.upper()}") or os.environ.get(prefix)
-        return os.environ.get(prefix)
+            return self._get_env_value(
+                f"ICON_URL_{theme.upper()}"
+            ) or self._get_env_value("ICON_URL")
+        return self._get_env_value("ICON_URL")
 
     def get_prompt(self) -> Optional[str]:
         """Return OAuth prompt param."""
@@ -740,6 +758,7 @@ class KeycloakOAuthProvider(OAuthProvider):
         "OAUTH_KEYCLOAK_BASE_URL",
     ]
     id = os.environ.get("OAUTH_KEYCLOAK_NAME", "keycloak")
+    env_prefix = "KEYCLOAK"
 
     def __init__(self):
         self.refresh_token = None
@@ -844,6 +863,7 @@ class GenericOAuthProvider(OAuthProvider):
         "OAUTH_GENERIC_SCOPES",
     ]
     id = os.environ.get("OAUTH_GENERIC_NAME", "generic")
+    env_prefix = "GENERIC"
 
     def __init__(self):
         self.client_id = os.environ.get("OAUTH_GENERIC_CLIENT_ID")

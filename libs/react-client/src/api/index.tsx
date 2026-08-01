@@ -376,6 +376,10 @@ export class ChainlitAPI extends APIBase {
   getOAuthEndpoint(provider: string) {
     return this.buildEndpoint(`/auth/oauth/${provider}`);
   }
+
+  getOAuthRegisterEndpoint(provider: string) {
+    return this.buildEndpoint(`/auth/oauth/${provider}/register`);
+  }
   async shareThread(
     threadId: string,
     isShared: boolean

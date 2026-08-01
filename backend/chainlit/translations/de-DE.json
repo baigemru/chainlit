@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "ODER"
-        }
+        },
+        "forgotPassword": "Passwort vergessen?"
       },
       "errors": {
         "default": "Anmeldung fehlgeschlagen",
@@ -49,11 +50,14 @@
         "emailSignin": "Die E-Mail konnte nicht gesendet werden",
         "emailVerify": "Es wurde eine neue E-Mail versandt. Bitte überprüfe dein E-Mail Postfach",
         "credentialsSignin": "Anmeldung fehlgeschlagen. Überprüfe, ob die angegebenen Benutzerdaten korrekt sind",
-        "sessionRequired": "Bitte melde dich an, um auf diese Seite zuzugreifen"
+        "sessionRequired": "Bitte melde dich an, um auf diese Seite zuzugreifen",
+        "credentialssignin": "Anmeldung fehlgeschlagen. Überprüfe, ob die angegebenen Benutzerdaten korrekt sind"
       }
     },
     "provider": {
-      "continue": "Fortfahren mit {{provider}}"
+      "continue": "Fortfahren mit {{provider}}",
+      "signin": "Mit {{provider}} anmelden",
+      "register": "Mit {{provider}} registrieren"
     }
   },
   "chat": {

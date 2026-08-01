@@ -35,7 +35,7 @@ import UserNav from './UserNav';
 const Header = memo(() => {
   const { audioConnection } = useAudio();
   const navigate = useNavigate();
-  const { data } = useAuth();
+  const { data, user } = useAuth();
   const { config } = useConfig();
   const { chatSettingsInputs } = useChatData();
   const { open, openMobile, isMobile } = useSidebar();
@@ -48,7 +48,9 @@ const Header = memo(() => {
   const historyEnabled = data?.requireLogin && config?.dataPersistence;
   const sidebarHidden = config?.ui?.default_sidebar_state === 'hidden';
 
-  const links = config?.ui?.header_links || [];
+  const links = (config?.ui?.header_links || []).filter(
+    (link) => !link.authenticated_only || !!user
+  );
 
   const showSettingsInHeader =
     config?.ui?.chat_settings_location === 'sidebar' &&
@@ -100,6 +102,7 @@ const Header = memo(() => {
               name={link.name}
               displayName={link.display_name}
               iconUrl={link.icon_url}
+              iconMask={link.icon_mask}
               url={link.url}
               target={link.target}
             />

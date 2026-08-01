@@ -1,9 +1,9 @@
 import { cn } from '@/lib/utils';
 import { Eye, EyeOff } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
-import { ClientError } from '@chainlit/react-client';
+import { ClientError, IOAuthProviderDetail } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,13 +16,16 @@ import { ProviderButton } from './ProviderButton';
 interface Props {
   error?: string;
   providers: string[];
+  providerDetails?: IOAuthProviderDetail[];
   callbackUrl: string;
+  forgotPasswordUrl?: string;
   onPasswordSignIn?: (
     email: string,
     password: string,
     callbackUrl: string
   ) => Promise<any>;
   onOAuthSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
+  onOAuthSignUp?: (provider: string, callbackUrl: string) => Promise<any>;
 }
 
 interface FormValues {
@@ -32,9 +35,12 @@ interface FormValues {
 
 export function LoginForm({
   providers,
+  providerDetails,
   onPasswordSignIn,
   onOAuthSignIn,
+  onOAuthSignUp,
   callbackUrl,
+  forgotPasswordUrl,
   error
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -75,7 +81,19 @@ export function LoginForm({
     }
   };
 
-  const oAuthReady = onOAuthSignIn && providers.length;
+  const providerItems: IOAuthProviderDetail[] = providerDetails?.length
+    ? providerDetails
+    : providers.map((provider) => ({
+        id: provider,
+        loginEnabled: true,
+        registrationEnabled: false
+      }));
+
+  const oAuthReady =
+    onOAuthSignIn &&
+    providerItems.some(
+      (provider) => provider.loginEnabled || provider.registrationEnabled
+    );
 
   return (
     <form
@@ -128,6 +146,14 @@ export function LoginForm({
                 <Label htmlFor="password">
                   <Translator path="auth.login.form.password.label" />
                 </Label>
+                {forgotPasswordUrl ? (
+                  <a
+                    href={forgotPasswordUrl}
+                    className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                  >
+                    <Translator path="auth.login.form.forgotPassword" />
+                  </a>
+                ) : null}
               </div>
               <div className="relative">
                 <Input
@@ -180,12 +206,22 @@ export function LoginForm({
 
         {oAuthReady ? (
           <div className="grid gap-2">
-            {providers.map((provider, index) => (
-              <ProviderButton
-                key={`provider-${index}`}
-                provider={provider}
-                onClick={() => onOAuthSignIn?.(provider, callbackUrl)}
-              />
+            {providerItems.map((provider) => (
+              <Fragment key={`provider-${provider.id}`}>
+                {provider.loginEnabled ? (
+                  <ProviderButton
+                    provider={provider.id}
+                    onClick={() => onOAuthSignIn?.(provider.id, callbackUrl)}
+                  />
+                ) : null}
+                {provider.registrationEnabled ? (
+                  <ProviderButton
+                    provider={provider.id}
+                    mode="register"
+                    onClick={() => onOAuthSignUp?.(provider.id, callbackUrl)}
+                  />
+                ) : null}
+              </Fragment>
             ))}
           </div>
         ) : null}

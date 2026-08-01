@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "O"
-        }
+        },
+        "forgotPassword": "Password dimenticata?"
       },
       "errors": {
         "default": "Impossibile effettuare l'accesso",
@@ -49,11 +50,14 @@
         "emailSignin": "Impossibile inviare l'email",
         "emailVerify": "Verifica la tua email, è stata inviata una nuova email",
         "credentialsSignin": "Accesso non riuscito. Verifica che i dati forniti siano corretti",
-        "sessionRequired": "Accedi per visualizzare questa pagina"
+        "sessionRequired": "Accedi per visualizzare questa pagina",
+        "credentialssignin": "Accesso non riuscito. Verifica che i dati forniti siano corretti"
       }
     },
     "provider": {
-      "continue": "Continua con {{provider}}"
+      "continue": "Continua con {{provider}}",
+      "signin": "Accedi con {{provider}}",
+      "register": "Registrati con {{provider}}"
     }
   },
   "chat": {

@@ -240,11 +240,18 @@ default_avatar_file_url = ""
 # Be careful: If this is a relative path, it should not start with a slash.
 # custom_build = "./public/build"
 
+# Optional link to a "Forgot password?" page, shown under the password field
+# of the login form. Can also be set with the CHAINLIT_FORGOT_PASSWORD_URL
+# environment variable, which takes precedence.
+# login_page_forgot_password_url = "https://example.com/reset-password"
+
 # Specify optional one or more custom links in the header.
 # [[UI.header_links]]
 #     name = "Issues"
 #     display_name = "Report Issue"
-#     icon_url = "https://avatars.githubusercontent.com/u/128686189?s=200&v=4"
+#     icon_url = "https://avatars.githubusercontent.com/u/128686189?s=200&v=4"  # Optional.
+#     icon_mask = false            # Optional. Render the icon with the current text color (theme-aware); requires a monochrome icon.
+#     authenticated_only = false   # Optional. Only show the link to authenticated users.
 #     url = "https://github.com/Chainlit/chainlit/issues"
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
 
@@ -356,9 +363,14 @@ class FeaturesSettings(BaseModel):
 
 class HeaderLink(BaseModel):
     name: str
-    icon_url: str
     url: str
+    icon_url: Optional[str] = None
+    # Render the icon through a CSS mask filled with the current text color,
+    # so it follows the active theme. Requires a monochrome icon.
+    icon_mask: bool = False
     display_name: Optional[str] = None
+    # Only show the link to authenticated users.
+    authenticated_only: bool = False
     target: Optional[Literal["_blank", "_self", "_parent", "_top"]] = None
 
 
@@ -395,6 +407,7 @@ class UISettings(BaseModel):
     login_page_image: Optional[str] = None
     login_page_image_filter: Optional[str] = None
     login_page_image_dark_filter: Optional[str] = None
+    login_page_forgot_password_url: Optional[str] = None
 
     custom_meta_url: Optional[str] = None
     custom_meta_image_url: Optional[str] = None

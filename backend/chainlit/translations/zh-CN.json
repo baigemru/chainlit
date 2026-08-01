@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "或"
-        }
+        },
+        "forgotPassword": "忘记密码？"
       },
       "errors": {
         "default": "无法登录",
@@ -49,11 +50,14 @@
         "emailSignin": "邮件发送失败",
         "emailVerify": "请验证您的邮箱，新的验证邮件已发送",
         "credentialsSignin": "登录失败。请检查您提供的信息是否正确",
-        "sessionRequired": "请登录以访问此页面"
+        "sessionRequired": "请登录以访问此页面",
+        "credentialssignin": "登录失败。请检查您提供的信息是否正确"
       }
     },
     "provider": {
-      "continue": "继续使用{{provider}}"
+      "continue": "继续使用{{provider}}",
+      "signin": "使用 {{provider}} 登录",
+      "register": "使用 {{provider}} 注册"
     }
   },
   "chat": {

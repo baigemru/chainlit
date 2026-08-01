@@ -58,7 +58,7 @@ from chainlit.data import get_data_layer
 from chainlit.data.acl import is_thread_author
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
-from chainlit.oauth_providers import get_oauth_provider
+from chainlit.oauth_providers import get_direct_grant_provider, get_oauth_provider
 from chainlit.secret import random_secret
 from chainlit.types import (
     AskFileSpec,
@@ -538,16 +538,26 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """
-    Login a user using the password auth callback.
+    Login a user using the password auth callback or an OAuth direct grant.
     """
-    if not config.code.password_auth_callback:
+    if config.code.password_auth_callback:
+        # An explicit @cl.password_auth_callback always takes precedence.
+        user = await config.code.password_auth_callback(
+            form_data.username, form_data.password
+        )
+    elif (provider := get_direct_grant_provider()) and config.code.oauth_callback:
+        token = await provider.get_token_with_password(
+            form_data.username, form_data.password
+        )
+        (raw_user_data, default_user) = await provider.get_user_info(token)
+        # Same unified post-login hook as the OAuth redirect flow.
+        user = await config.code.oauth_callback(
+            provider.id, token, raw_user_data, default_user
+        )
+    else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No auth_callback defined"
         )
-
-    user = await config.code.password_auth_callback(
-        form_data.username, form_data.password
-    )
 
     return await _authenticate_user(request, user)
 
@@ -606,9 +616,7 @@ async def header_auth(request: Request):
     return await _authenticate_user(request, user)
 
 
-@router.get("/auth/oauth/{provider_id}")
-async def oauth_login(provider_id: str, request: Request):
-    """Redirect the user to the oauth provider login page."""
+def _get_oauth_provider_or_raise(provider_id: str):
     if config.code.oauth_callback is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -622,23 +630,61 @@ async def oauth_login(provider_id: str, request: Request):
             detail=f"Provider {provider_id} not found",
         )
 
+    return provider
+
+
+def _oauth_authorize_response(provider, authorize_url: str, redirect_uri: str):
     random = random_secret(32)
 
     params = urllib.parse.urlencode(
         {
             "client_id": provider.client_id,
-            "redirect_uri": f"{get_user_facing_url(request.url)}/callback",
+            "redirect_uri": redirect_uri,
             "state": random,
             **provider.authorize_params,
         }
     )
     response = RedirectResponse(
-        url=f"{provider.authorize_url}?{params}",
+        url=f"{authorize_url}?{params}",
     )
 
     set_oauth_state_cookie(response, random)
 
     return response
+
+
+@router.get("/auth/oauth/{provider_id}")
+async def oauth_login(provider_id: str, request: Request):
+    """Redirect the user to the oauth provider login page."""
+    provider = _get_oauth_provider_or_raise(provider_id)
+
+    return _oauth_authorize_response(
+        provider,
+        provider.authorize_url,
+        f"{get_user_facing_url(request.url)}/callback",
+    )
+
+
+@router.get("/auth/oauth/{provider_id}/register")
+async def oauth_register(provider_id: str, request: Request):
+    """Redirect the user to the oauth provider registration page."""
+    provider = _get_oauth_provider_or_raise(provider_id)
+
+    if not provider.registration_url or not provider.is_registration_button_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Registration is not enabled for provider {provider_id}",
+        )
+
+    # The request URL ends in /register; the provider must redirect back to the
+    # shared /auth/oauth/{provider_id}/callback route.
+    base_url = get_user_facing_url(request.url).rstrip("/").removesuffix("/register")
+
+    return _oauth_authorize_response(
+        provider,
+        provider.registration_url,
+        f"{base_url}/callback",
+    )
 
 
 @router.get("/auth/oauth/{provider_id}/callback")

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "या"
-        }
+        },
+        "forgotPassword": "पासवर्ड भूल गए?"
       },
       "errors": {
         "default": "साइन इन करने में असमर्थ",
@@ -49,11 +50,14 @@
         "emailSignin": "ईमेल नहीं भेजा जा सका",
         "emailVerify": "कृपया अपना ईमेल सत्यापित करें, एक नया ईमेल भेजा गया है",
         "credentialsSignin": "साइन इन विफल। आपके द्वारा प्रदान किए गए विवरण की जांच करें",
-        "sessionRequired": "इस पृष्ठ तक पहुंचने के लिए कृपया साइन इन करें"
+        "sessionRequired": "इस पृष्ठ तक पहुंचने के लिए कृपया साइन इन करें",
+        "credentialssignin": "साइन इन विफल। आपके द्वारा प्रदान किए गए विवरण की जांच करें"
       }
     },
     "provider": {
-      "continue": "{{provider}} के साथ जारी रखें"
+      "continue": "{{provider}} के साथ जारी रखें",
+      "signin": "{{provider}} से साइन इन करें",
+      "register": "{{provider}} से पंजीकरण करें"
     }
   },
   "chat": {

@@ -1,11 +1,18 @@
 import os
+from typing import Optional, Union
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from chainlit.config import config
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
-from chainlit.oauth_providers import get_configured_oauth_providers
+from chainlit.oauth_providers import (
+    get_configured_oauth_providers,
+    get_direct_grant_provider,
+    get_forgot_password_url,
+    get_oauth_provider_details,
+)
+from chainlit.user import PersistedUser, User
 
 from .cookie import (
     OAuth2PasswordBearerWithCookie,
@@ -29,28 +36,50 @@ def is_oauth_enabled():
     return config.code.oauth_callback and len(get_configured_oauth_providers()) > 0
 
 
+def is_direct_grant_auth_enabled():
+    return bool(is_oauth_enabled() and get_direct_grant_provider())
+
+
+def is_password_auth_enabled():
+    return (
+        config.code.password_auth_callback is not None or is_direct_grant_auth_enabled()
+    )
+
+
 def require_login():
     return (
         bool(os.environ.get("CHAINLIT_CUSTOM_AUTH"))
-        or config.code.password_auth_callback is not None
+        or is_password_auth_enabled()
         or config.code.header_auth_callback is not None
         or is_oauth_enabled()
+    )
+
+
+def _resolve_forgot_password_url() -> Optional[str]:
+    return (
+        os.environ.get("CHAINLIT_FORGOT_PASSWORD_URL")
+        or config.ui.login_page_forgot_password_url
+        or get_forgot_password_url()
     )
 
 
 def get_configuration():
     return {
         "requireLogin": require_login(),
-        "passwordAuth": config.code.password_auth_callback is not None,
+        "passwordAuth": is_password_auth_enabled(),
         "headerAuth": config.code.header_auth_callback is not None,
         "oauthProviders": (
             get_configured_oauth_providers() if is_oauth_enabled() else []
+        ),
+        "oauthProviderDetails": (
+            get_oauth_provider_details() if is_oauth_enabled() else []
         ),
         "default_theme": config.ui.default_theme,
         "ui": {
             "login_page_image": config.ui.login_page_image,
             "login_page_image_filter": config.ui.login_page_image_filter,
             "login_page_image_dark_filter": config.ui.login_page_image_dark_filter,
+            "forgot_password_url": _resolve_forgot_password_url(),
         },
     }
 
@@ -90,9 +119,26 @@ async def get_current_user(token: str = Depends(reuseable_oauth)):
     return await authenticate_user(token)
 
 
+async def current_user(request: Request) -> Optional[Union[User, PersistedUser]]:
+    """Return the authenticated user for a raw request, or None.
+
+    Unlike the FastAPI dependencies, this never raises: missing, expired or
+    invalid credentials all yield None, so custom routes can decide how to
+    respond (e.g. redirect to /login) themselves.
+    """
+    token = await reuseable_oauth(request)
+    if not token:
+        return None
+    try:
+        return await get_current_user(token=token)
+    except HTTPException:
+        return None
+
+
 __all__ = [
     "clear_auth_cookie",
     "create_jwt",
+    "current_user",
     "get_configuration",
     "get_current_user",
     "get_token_from_cookies",

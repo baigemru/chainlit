@@ -93,11 +93,17 @@ export default function Login() {
               error={error}
               callbackUrl="/"
               providers={config?.oauthProviders || []}
+              providerDetails={config?.oauthProviderDetails}
+              forgotPasswordUrl={config?.ui?.forgot_password_url}
               onPasswordSignIn={
                 config?.passwordAuth ? handlePasswordLogin : undefined
               }
               onOAuthSignIn={async (provider: string) => {
                 window.location.href = apiClient.getOAuthEndpoint(provider);
+              }}
+              onOAuthSignUp={async (provider: string) => {
+                window.location.href =
+                  apiClient.getOAuthRegisterEndpoint(provider);
               }}
             />
           </div>

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "או"
-        }
+        },
+        "forgotPassword": "שכחת סיסמה?"
       },
       "errors": {
         "default": "לא ניתן להתחבר",
@@ -49,11 +50,14 @@
         "emailSignin": "לא ניתן היה לשלוח את האימייל",
         "emailVerify": "אנא אמת את האימייל שלך, נשלח אימייל חדש",
         "credentialsSignin": "ההתחברות נכשלה. בדוק שהפרטים שהזנת נכונים",
-        "sessionRequired": "אנא התחבר כדי לגשת לדף זה"
+        "sessionRequired": "אנא התחבר כדי לגשת לדף זה",
+        "credentialssignin": "ההתחברות נכשלה. בדוק שהפרטים שהזנת נכונים"
       }
     },
     "provider": {
-      "continue": "המשך עם {{provider}}"
+      "continue": "המשך עם {{provider}}",
+      "signin": "התחברות באמצעות {{provider}}",
+      "register": "הרשמה באמצעות {{provider}}"
     }
   },
   "chat": {

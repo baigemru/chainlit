@@ -25,11 +25,18 @@ export interface IAudioConfig {
   sample_rate: number;
 }
 
+export interface IOAuthProviderDetail {
+  id: string;
+  loginEnabled: boolean;
+  registrationEnabled: boolean;
+}
+
 export interface IAuthConfig {
   requireLogin: boolean;
   passwordAuth: boolean;
   headerAuth: boolean;
   oauthProviders: string[];
+  oauthProviderDetails?: IOAuthProviderDetail[];
   default_theme?: 'light' | 'dark';
   ui?: IChainlitConfig['ui'];
 }
@@ -56,14 +63,17 @@ export interface IChainlitConfig {
     login_page_image?: string;
     login_page_image_filter?: string;
     login_page_image_dark_filter?: string;
+    forgot_password_url?: string;
     custom_meta_image_url?: string;
     logo_file_url?: string;
     default_avatar_file_url?: string;
     avatar_size?: number;
     header_links?: {
       name: string;
-      display_name: string;
-      icon_url: string;
+      display_name?: string;
+      icon_url?: string;
+      icon_mask?: boolean;
+      authenticated_only?: boolean;
       url: string;
       target?: '_blank' | '_self' | '_parent' | '_top';
     }[];

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "أو"
-        }
+        },
+        "forgotPassword": "هل نسيت كلمة المرور؟"
       },
       "errors": {
         "default": "تعذر تسجيل الدخول",
@@ -49,11 +50,14 @@
         "emailSignin": "تعذر إرسال البريد الإلكتروني",
         "emailVerify": "يرجى التحقق من بريدك الإلكتروني، تم إرسال بريد إلكتروني جديد",
         "credentialsSignin": "فشل تسجيل الدخول. تحقق من صحة المعلومات المقدمة",
-        "sessionRequired": "يرجى تسجيل الدخول للوصول إلى هذه الصفحة"
+        "sessionRequired": "يرجى تسجيل الدخول للوصول إلى هذه الصفحة",
+        "credentialssignin": "فشل تسجيل الدخول. تحقق من صحة المعلومات المقدمة"
       }
     },
     "provider": {
-      "continue": "متابعة مع {{provider}}"
+      "continue": "متابعة مع {{provider}}",
+      "signin": "تسجيل الدخول باستخدام {{provider}}",
+      "register": "إنشاء حساب باستخدام {{provider}}"
     }
   },
   "chat": {

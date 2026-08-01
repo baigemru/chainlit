@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "OU"
-        }
+        },
+        "forgotPassword": "Mot de passe oublié ?"
       },
       "errors": {
         "default": "Impossible de se connecter",
@@ -49,11 +50,14 @@
         "emailSignin": "L'e-mail n'a pas pu être envoyé",
         "emailVerify": "Veuillez vérifier votre e-mail, un nouvel e-mail a été envoyé",
         "credentialsSignin": "La connexion a échoué. Vérifiez que les informations que vous avez fournies sont correctes",
-        "sessionRequired": "Veuillez vous connecter pour accéder à cette page"
+        "sessionRequired": "Veuillez vous connecter pour accéder à cette page",
+        "credentialssignin": "La connexion a échoué. Vérifiez que les informations que vous avez fournies sont correctes"
       }
     },
     "provider": {
-      "continue": "Continuer avec {{provider}}"
+      "continue": "Continuer avec {{provider}}",
+      "signin": "Se connecter avec {{provider}}",
+      "register": "S'inscrire avec {{provider}}"
     }
   },
   "chat": {

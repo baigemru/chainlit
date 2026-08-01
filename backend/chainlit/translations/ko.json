@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "또는"
-        }
+        },
+        "forgotPassword": "비밀번호를 잊으셨나요?"
       },
       "errors": {
         "default": "로그인할 수 없습니다",
@@ -49,11 +50,14 @@
         "emailSignin": "이메일을 보낼 수 없습니다",
         "emailVerify": "이메일을 확인해주세요. 새로운 이메일이 발송되었습니다",
         "credentialsSignin": "로그인 실패. 제공한 정보가 올바른지 확인하세요",
-        "sessionRequired": "이 페이지에 접근하려면 로그인해주세요"
+        "sessionRequired": "이 페이지에 접근하려면 로그인해주세요",
+        "credentialssignin": "로그인 실패. 제공한 정보가 올바른지 확인하세요"
       }
     },
     "provider": {
-      "continue": "{{provider}}로 계속하기"
+      "continue": "{{provider}}로 계속하기",
+      "signin": "{{provider}}(으)로 로그인",
+      "register": "{{provider}}(으)로 가입"
     }
   },
   "chat": {

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "Ou"
-        }
+        },
+        "forgotPassword": "Esqueceu-se da palavra-passe?"
       },
       "errors": {
         "default": "Não foi possível iniciar sessão",
@@ -49,11 +50,14 @@
         "emailSignin": "Não foi possível enviar o e-mail",
         "emailVerify": "Por favor, verifique o seu e-mail. Foi enviada uma nova mensagem",
         "credentialsSignin": "Erro ao iniciar sessão. Verifique se os dados fornecidos estão corretos",
-        "sessionRequired": "Por favor, inicie sessão para aceder a esta página"
+        "sessionRequired": "Por favor, inicie sessão para aceder a esta página",
+        "credentialssignin": "Erro ao iniciar sessão. Verifique se os dados fornecidos estão corretos"
       }
     },
     "provider": {
-      "continue": "Continuar com {{provider}}"
+      "continue": "Continuar com {{provider}}",
+      "signin": "Iniciar sessão com {{provider}}",
+      "register": "Registar-se com {{provider}}"
     }
   },
   "chat": {

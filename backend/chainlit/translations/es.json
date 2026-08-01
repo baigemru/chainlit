@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "O"
-        }
+        },
+        "forgotPassword": "¿Olvidaste tu contraseña?"
       },
       "errors": {
         "default": "No se pudo iniciar sesión",
@@ -49,11 +50,14 @@
         "emailSignin": "No se pudo enviar el correo electrónico",
         "emailVerify": "Por favor verifica tu correo, se ha enviado un nuevo correo",
         "credentialsSignin": "Error al iniciar sesión. Verifica que los datos proporcionados sean correctos",
-        "sessionRequired": "Por favor inicia sesión para acceder a esta página"
+        "sessionRequired": "Por favor inicia sesión para acceder a esta página",
+        "credentialssignin": "Error al iniciar sesión. Verifica que los datos proporcionados sean correctos"
       }
     },
     "provider": {
-      "continue": "Continuar con {{provider}}"
+      "continue": "Continuar con {{provider}}",
+      "signin": "Iniciar sesión con {{provider}}",
+      "register": "Registrarse con {{provider}}"
     }
   },
   "chat": {

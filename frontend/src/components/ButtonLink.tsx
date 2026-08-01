@@ -14,6 +14,7 @@ export interface ButtonLinkProps {
   name?: string;
   displayName?: string;
   iconUrl?: string;
+  iconMask?: boolean;
   url: string;
   target?: '_blank' | '_self' | '_parent' | '_top';
 }
@@ -22,10 +23,15 @@ export default function ButtonLink({
   name,
   displayName,
   iconUrl,
+  iconMask,
   url,
   target
 }: ButtonLinkProps) {
   const apiClient = useContext(ChainlitContext);
+
+  const resolvedIconUrl = iconUrl?.startsWith('/public')
+    ? apiClient.buildEndpoint(iconUrl)
+    : iconUrl;
 
   return (
     <TooltipProvider>
@@ -42,15 +48,27 @@ export default function ButtonLink({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1"
             >
-              <img
-                src={
-                  iconUrl?.startsWith('/public')
-                    ? apiClient.buildEndpoint(iconUrl)
-                    : iconUrl
-                }
-                className={'h-6 w-6'}
-                alt={name}
-              />
+              {resolvedIconUrl ? (
+                iconMask ? (
+                  <span
+                    aria-hidden="true"
+                    className="h-6 w-6 shrink-0"
+                    style={{
+                      backgroundColor: 'currentColor',
+                      maskImage: `url(${resolvedIconUrl})`,
+                      WebkitMaskImage: `url(${resolvedIconUrl})`,
+                      maskSize: 'contain',
+                      WebkitMaskSize: 'contain',
+                      maskRepeat: 'no-repeat',
+                      WebkitMaskRepeat: 'no-repeat',
+                      maskPosition: 'center',
+                      WebkitMaskPosition: 'center'
+                    }}
+                  />
+                ) : (
+                  <img src={resolvedIconUrl} className={'h-6 w-6'} alt={name} />
+                )
+              ) : null}
               {displayName && <span>{displayName}</span>}
             </a>
           </Button>

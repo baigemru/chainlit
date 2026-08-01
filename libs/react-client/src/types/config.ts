@@ -70,8 +70,10 @@ export interface IChainlitConfig {
     avatar_size?: number;
     header_links?: {
       name: string;
-      display_name: string;
-      icon_url: string;
+      display_name?: string;
+      icon_url?: string;
+      icon_mask?: boolean;
+      authenticated_only?: boolean;
       url: string;
       target?: '_blank' | '_self' | '_parent' | '_top';
     }[];

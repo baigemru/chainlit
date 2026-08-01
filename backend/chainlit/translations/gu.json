@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "અથવા"
-        }
+        },
+        "forgotPassword": "પાસવર્ડ ભૂલી ગયા છો?"
       },
       "errors": {
         "default": "સાઇન ઇન કરી શકાયું નથી",

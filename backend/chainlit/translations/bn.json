@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "অথবা"
-        }
+        },
+        "forgotPassword": "পাসওয়ার্ড ভুলে গেছেন?"
       },
       "errors": {
         "default": "সাইন ইন করা সম্ভব হচ্ছে না",

@@ -18,6 +18,7 @@ interface Props {
   providers: string[];
   providerDetails?: IOAuthProviderDetail[];
   callbackUrl: string;
+  forgotPasswordUrl?: string;
   onPasswordSignIn?: (
     email: string,
     password: string,
@@ -39,6 +40,7 @@ export function LoginForm({
   onOAuthSignIn,
   onOAuthSignUp,
   callbackUrl,
+  forgotPasswordUrl,
   error
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -144,6 +146,14 @@ export function LoginForm({
                 <Label htmlFor="password">
                   <Translator path="auth.login.form.password.label" />
                 </Label>
+                {forgotPasswordUrl ? (
+                  <a
+                    href={forgotPasswordUrl}
+                    className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                  >
+                    <Translator path="auth.login.form.forgotPassword" />
+                  </a>
+                ) : null}
               </div>
               <div className="relative">
                 <Input

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "OU"
-        }
+        },
+        "forgotPassword": "Mot de passe oublié ?"
       },
       "errors": {
         "default": "Impossible de se connecter",

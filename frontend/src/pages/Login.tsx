@@ -94,6 +94,7 @@ export default function Login() {
               callbackUrl="/"
               providers={config?.oauthProviders || []}
               providerDetails={config?.oauthProviderDetails}
+              forgotPasswordUrl={config?.ui?.forgot_password_url}
               onPasswordSignIn={
                 config?.passwordAuth ? handlePasswordLogin : undefined
               }

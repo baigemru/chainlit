@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "أو"
-        }
+        },
+        "forgotPassword": "هل نسيت كلمة المرور؟"
       },
       "errors": {
         "default": "تعذر تسجيل الدخول",

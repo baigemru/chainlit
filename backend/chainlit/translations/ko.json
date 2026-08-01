@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "또는"
-        }
+        },
+        "forgotPassword": "비밀번호를 잊으셨나요?"
       },
       "errors": {
         "default": "로그인할 수 없습니다",

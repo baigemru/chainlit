@@ -240,6 +240,11 @@ default_avatar_file_url = ""
 # Be careful: If this is a relative path, it should not start with a slash.
 # custom_build = "./public/build"
 
+# Optional link to a "Forgot password?" page, shown under the password field
+# of the login form. Can also be set with the CHAINLIT_FORGOT_PASSWORD_URL
+# environment variable, which takes precedence.
+# login_page_forgot_password_url = "https://example.com/reset-password"
+
 # Specify optional one or more custom links in the header.
 # [[UI.header_links]]
 #     name = "Issues"
@@ -395,6 +400,7 @@ class UISettings(BaseModel):
     login_page_image: Optional[str] = None
     login_page_image_filter: Optional[str] = None
     login_page_image_dark_filter: Optional[str] = None
+    login_page_forgot_password_url: Optional[str] = None
 
     custom_meta_url: Optional[str] = None
     custom_meta_image_url: Optional[str] = None

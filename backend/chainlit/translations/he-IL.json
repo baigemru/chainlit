@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "או"
-        }
+        },
+        "forgotPassword": "שכחת סיסמה?"
       },
       "errors": {
         "default": "לא ניתן להתחבר",

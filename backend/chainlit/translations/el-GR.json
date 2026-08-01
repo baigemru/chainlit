@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "ή"
-        }
+        },
+        "forgotPassword": "Ξεχάσατε τον κωδικό πρόσβασης;"
       },
       "errors": {
         "default": "Δεν είναι δυνατή η σύνδεση",

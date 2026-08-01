@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "OF"
-        }
+        },
+        "forgotPassword": "Wachtwoord vergeten?"
       },
       "errors": {
         "default": "Kan niet inloggen",

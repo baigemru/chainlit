@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "या"
-        }
+        },
+        "forgotPassword": "पासवर्ड भूल गए?"
       },
       "errors": {
         "default": "साइन इन करने में असमर्थ",

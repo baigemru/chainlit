@@ -21,6 +21,7 @@ class OAuthProvider:
     authorize_params: Dict[str, str]
     default_prompt: Optional[str] = None
     registration_url: Optional[str] = None
+    forgot_password_url: Optional[str] = None
 
     def is_configured(self):
         return all([os.environ.get(env) for env in self.env])
@@ -735,6 +736,12 @@ class KeycloakOAuthProvider(OAuthProvider):
             f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/registrations"
         )
 
+        if self._get_env_flag("FORGOT_PASSWORD", False):
+            self.forgot_password_url = (
+                f"{self.base_url}/realms/{self.realm}/login-actions/reset-credentials"
+                f"?client_id={self.client_id}"
+            )
+
         self.authorize_params = {
             "scope": "profile email openid",
             "response_type": "code",
@@ -884,3 +891,14 @@ def get_oauth_provider_details() -> List[Dict[str, object]]:
         for p in providers
         if p.is_configured()
     ]
+
+
+def get_forgot_password_url() -> Optional[str]:
+    return next(
+        (
+            p.forgot_password_url
+            for p in providers
+            if p.is_configured() and p.forgot_password_url
+        ),
+        None,
+    )

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "或"
-        }
+        },
+        "forgotPassword": "忘記密碼？"
       },
       "errors": {
         "default": "無法登入",

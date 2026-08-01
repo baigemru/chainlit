@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "OR"
-        }
+        },
+        "forgotPassword": "Forgot password?"
       },
       "errors": {
         "default": "Unable to sign in",

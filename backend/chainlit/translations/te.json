@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "లేదా"
-        }
+        },
+        "forgotPassword": "పాస్‌వర్డ్ మర్చిపోయారా?"
       },
       "errors": {
         "default": "సైన్ ఇన్ చేయలేకపోయాము",

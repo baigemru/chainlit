@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "ಅಥವಾ"
-        }
+        },
+        "forgotPassword": "ಪಾಸ್‌ವರ್ಡ್ ಮರೆತಿರಾ?"
       },
       "errors": {
         "default": "ಸೈನ್ ಇನ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",

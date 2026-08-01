@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "ELLER"
-        }
+        },
+        "forgotPassword": "Glemt adgangskode?"
       },
       "errors": {
         "default": "Kunne ikke logge ind",

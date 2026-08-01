@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "O"
-        }
+        },
+        "forgotPassword": "Password dimenticata?"
       },
       "errors": {
         "default": "Impossibile effettuare l'accesso",

@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "Ou"
-        }
+        },
+        "forgotPassword": "Esqueceu-se da palavra-passe?"
       },
       "errors": {
         "default": "Não foi possível iniciar sessão",

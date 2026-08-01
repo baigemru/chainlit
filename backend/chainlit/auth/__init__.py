@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 from fastapi import Depends, HTTPException
 
@@ -7,6 +8,7 @@ from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.oauth_providers import (
     get_configured_oauth_providers,
+    get_forgot_password_url,
     get_oauth_provider_details,
 )
 
@@ -42,6 +44,13 @@ def require_login():
     )
 
 
+def _resolve_forgot_password_url() -> Optional[str]:
+    return (
+        os.environ.get("CHAINLIT_FORGOT_PASSWORD_URL")
+        or config.ui.login_page_forgot_password_url
+        or get_forgot_password_url()
+    )
+
 
 def get_configuration():
     return {
@@ -59,6 +68,7 @@ def get_configuration():
             "login_page_image": config.ui.login_page_image,
             "login_page_image_filter": config.ui.login_page_image_filter,
             "login_page_image_dark_filter": config.ui.login_page_image_dark_filter,
+            "forgot_password_url": _resolve_forgot_password_url(),
         },
     }
 

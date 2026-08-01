@@ -34,7 +34,8 @@
         },
         "alternativeText": {
           "or": "അല്ലെങ്കിൽ"
-        }
+        },
+        "forgotPassword": "പാസ്‌വേഡ് മറന്നോ?"
       },
       "errors": {
         "default": "സൈൻ ഇൻ ചെയ്യാൻ കഴിയുന്നില്ല",

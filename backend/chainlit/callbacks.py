@@ -18,6 +18,72 @@ from chainlit.user import User
 from chainlit.utils import wrap_user_function
 
 
+def server_route(
+    path: str, methods: Optional[List[str]] = None, **route_kwargs
+) -> Callable:
+    """
+    Register a custom FastAPI route on the Chainlit app.
+
+    The route is inserted before the SPA catch-all route, so it takes
+    precedence over the UI for its path. Re-registering the same path and
+    methods (e.g. on file-watch reload) replaces the previous route.
+
+    Args:
+        path (str): The route path, e.g. "/billing/buy". If a --root-path is
+            configured it is prepended automatically.
+        methods (Optional[List[str]]): HTTP methods, defaults to ["GET"].
+        **route_kwargs: Extra keyword arguments forwarded to fastapi's APIRoute.
+
+    Example:
+        @cl.server_route("/billing/buy", methods=["GET"])
+        async def buy(request: Request):
+            user = await cl.current_user(request)
+            ...
+
+    Returns:
+        Callable: The decorated route handler.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        from fastapi.routing import APIRoute
+
+        # Lazy import to avoid a circular import at module load time.
+        from chainlit.server import app
+
+        methods_ = [method.upper() for method in (methods or ["GET"])]
+        route_path = path if path.startswith("/") else f"/{path}"
+        if config.run.root_path:
+            route_path = config.run.root_path.rstrip("/") + route_path
+
+        routes = app.router.routes
+        # Watch-mode reloads re-execute the user module on the same app:
+        # replace any route previously registered for the same path/methods.
+        routes[:] = [
+            route
+            for route in routes
+            if not (
+                isinstance(route, APIRoute)
+                and route.path == route_path
+                and set(route.methods or ()) & set(methods_)
+            )
+        ]
+
+        new_route = APIRoute(route_path, func, methods=methods_, **route_kwargs)
+        catch_all_index = next(
+            (
+                index
+                for index, route in enumerate(routes)
+                if isinstance(route, APIRoute)
+                and route.path.endswith("/{full_path:path}")
+            ),
+            len(routes),
+        )
+        routes.insert(catch_all_index, new_route)
+        return func
+
+    return decorator
+
+
 def on_app_startup(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable:
     """
     Hook to run code when the Chainlit application starts.

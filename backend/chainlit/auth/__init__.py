@@ -1,7 +1,7 @@
 import os
-from typing import Optional
+from typing import Optional, Union
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from chainlit.config import config
 from chainlit.data import get_data_layer
@@ -12,6 +12,7 @@ from chainlit.oauth_providers import (
     get_forgot_password_url,
     get_oauth_provider_details,
 )
+from chainlit.user import PersistedUser, User
 
 from .cookie import (
     OAuth2PasswordBearerWithCookie,
@@ -118,9 +119,26 @@ async def get_current_user(token: str = Depends(reuseable_oauth)):
     return await authenticate_user(token)
 
 
+async def current_user(request: Request) -> Optional[Union[User, PersistedUser]]:
+    """Return the authenticated user for a raw request, or None.
+
+    Unlike the FastAPI dependencies, this never raises: missing, expired or
+    invalid credentials all yield None, so custom routes can decide how to
+    respond (e.g. redirect to /login) themselves.
+    """
+    token = await reuseable_oauth(request)
+    if not token:
+        return None
+    try:
+        return await get_current_user(token=token)
+    except HTTPException:
+        return None
+
+
 __all__ = [
     "clear_auth_cookie",
     "create_jwt",
+    "current_user",
     "get_configuration",
     "get_current_user",
     "get_token_from_cookies",

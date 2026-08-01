@@ -20,6 +20,7 @@ from pydantic.dataclasses import dataclass
 
 import chainlit.input_widget as input_widget
 from chainlit.action import Action
+from chainlit.auth import current_user
 from chainlit.cache import cache
 from chainlit.chat_context import chat_context
 from chainlit.chat_settings import ChatSettings
@@ -90,6 +91,7 @@ from .callbacks import (
     on_window_message,
     password_auth_callback,
     send_window_message,
+    server_route,
     set_chat_profiles,
     set_starter_categories,
     set_starters,
@@ -183,6 +185,7 @@ __all__ = [
     "cache",
     "chat_context",
     "context",
+    "current_user",
     "data_layer",
     "header_auth_callback",
     "input_widget",
@@ -212,6 +215,7 @@ __all__ = [
     "password_auth_callback",
     "run_sync",
     "send_window_message",
+    "server_route",
     "set_chat_profiles",
     "set_starter_categories",
     "set_starters",

@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "{{provider}} மூலம் தொடரவும்"
+      "continue": "{{provider}} மூலம் தொடரவும்",
+      "signin": "{{provider}} மூலம் உள்நுழையவும்",
+      "register": "{{provider}} மூலம் பதிவு செய்யவும்"
     }
   },
   "chat": {

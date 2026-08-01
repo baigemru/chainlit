@@ -58,20 +58,29 @@ function renderProviderIcon(provider: string) {
 
 interface ProviderButtonProps {
   provider: string;
+  mode?: 'signin' | 'register';
   onClick: () => void;
 }
 
 const ProviderButton = ({
   provider,
+  mode = 'signin',
   onClick
 }: ProviderButtonProps): JSX.Element => {
   const { t } = useTranslation();
   return (
     <Button type="button" variant="outline" onClick={onClick}>
       {renderProviderIcon(provider.toLowerCase())}
-      {t('auth.provider.continue', {
-        provider: getProviderName(provider)
-      })}
+      {t(
+        // Fall back to the legacy key for translation bundles that predate
+        // the signin/register split.
+        mode === 'register'
+          ? ['auth.provider.register', 'auth.provider.continue']
+          : ['auth.provider.signin', 'auth.provider.continue'],
+        {
+          provider: getProviderName(provider)
+        }
+      )}
     </Button>
   );
 };

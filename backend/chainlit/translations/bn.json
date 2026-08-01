@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "{{provider}} দিয়ে চালিয়ে যান"
+      "continue": "{{provider}} দিয়ে চালিয়ে যান",
+      "signin": "{{provider}} দিয়ে সাইন ইন করুন",
+      "register": "{{provider}} দিয়ে নিবন্ধন করুন"
     }
   },
   "chat": {

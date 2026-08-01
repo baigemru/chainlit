@@ -5,7 +5,10 @@ from fastapi import Depends, HTTPException
 from chainlit.config import config
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
-from chainlit.oauth_providers import get_configured_oauth_providers
+from chainlit.oauth_providers import (
+    get_configured_oauth_providers,
+    get_oauth_provider_details,
+)
 
 from .cookie import (
     OAuth2PasswordBearerWithCookie,
@@ -29,6 +32,7 @@ def is_oauth_enabled():
     return config.code.oauth_callback and len(get_configured_oauth_providers()) > 0
 
 
+
 def require_login():
     return (
         bool(os.environ.get("CHAINLIT_CUSTOM_AUTH"))
@@ -38,6 +42,7 @@ def require_login():
     )
 
 
+
 def get_configuration():
     return {
         "requireLogin": require_login(),
@@ -45,6 +50,9 @@ def get_configuration():
         "headerAuth": config.code.header_auth_callback is not None,
         "oauthProviders": (
             get_configured_oauth_providers() if is_oauth_enabled() else []
+        ),
+        "oauthProviderDetails": (
+            get_oauth_provider_details() if is_oauth_enabled() else []
         ),
         "default_theme": config.ui.default_theme,
         "ui": {

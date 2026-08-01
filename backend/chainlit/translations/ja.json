@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "{{provider}}で続ける"
+      "continue": "{{provider}}で続ける",
+      "signin": "{{provider}}でサインイン",
+      "register": "{{provider}}で登録"
     }
   },
   "chat": {

@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "Fortsæt med {{provider}}"
+      "continue": "Fortsæt med {{provider}}",
+      "signin": "Log ind med {{provider}}",
+      "register": "Registrer dig med {{provider}}"
     }
   },
   "chat": {

@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "Doorgaan met {{provider}}"
+      "continue": "Doorgaan met {{provider}}",
+      "signin": "Inloggen met {{provider}}",
+      "register": "Registreren met {{provider}}"
     }
   },
   "chat": {

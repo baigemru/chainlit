@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "{{provider}} ನೊಂದಿಗೆ ಮುಂದುವರಿಸಿ"
+      "continue": "{{provider}} ನೊಂದಿಗೆ ಮುಂದುವರಿಸಿ",
+      "signin": "{{provider}} ಮೂಲಕ ಸೈನ್ ಇನ್ ಮಾಡಿ",
+      "register": "{{provider}} ಮೂಲಕ ನೋಂದಾಯಿಸಿ"
     }
   },
   "chat": {

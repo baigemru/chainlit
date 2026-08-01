@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "Συνέχεια με {{provider}}"
+      "continue": "Συνέχεια με {{provider}}",
+      "signin": "Σύνδεση με {{provider}}",
+      "register": "Εγγραφή με {{provider}}"
     }
   },
   "chat": {

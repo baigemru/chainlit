@@ -606,9 +606,7 @@ async def header_auth(request: Request):
     return await _authenticate_user(request, user)
 
 
-@router.get("/auth/oauth/{provider_id}")
-async def oauth_login(provider_id: str, request: Request):
-    """Redirect the user to the oauth provider login page."""
+def _get_oauth_provider_or_raise(provider_id: str):
     if config.code.oauth_callback is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -622,23 +620,61 @@ async def oauth_login(provider_id: str, request: Request):
             detail=f"Provider {provider_id} not found",
         )
 
+    return provider
+
+
+def _oauth_authorize_response(provider, authorize_url: str, redirect_uri: str):
     random = random_secret(32)
 
     params = urllib.parse.urlencode(
         {
             "client_id": provider.client_id,
-            "redirect_uri": f"{get_user_facing_url(request.url)}/callback",
+            "redirect_uri": redirect_uri,
             "state": random,
             **provider.authorize_params,
         }
     )
     response = RedirectResponse(
-        url=f"{provider.authorize_url}?{params}",
+        url=f"{authorize_url}?{params}",
     )
 
     set_oauth_state_cookie(response, random)
 
     return response
+
+
+@router.get("/auth/oauth/{provider_id}")
+async def oauth_login(provider_id: str, request: Request):
+    """Redirect the user to the oauth provider login page."""
+    provider = _get_oauth_provider_or_raise(provider_id)
+
+    return _oauth_authorize_response(
+        provider,
+        provider.authorize_url,
+        f"{get_user_facing_url(request.url)}/callback",
+    )
+
+
+@router.get("/auth/oauth/{provider_id}/register")
+async def oauth_register(provider_id: str, request: Request):
+    """Redirect the user to the oauth provider registration page."""
+    provider = _get_oauth_provider_or_raise(provider_id)
+
+    if not provider.registration_url or not provider.is_registration_button_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Registration is not enabled for provider {provider_id}",
+        )
+
+    # The request URL ends in /register; the provider must redirect back to the
+    # shared /auth/oauth/{provider_id}/callback route.
+    base_url = get_user_facing_url(request.url).rstrip("/").removesuffix("/register")
+
+    return _oauth_authorize_response(
+        provider,
+        provider.registration_url,
+        f"{base_url}/callback",
+    )
 
 
 @router.get("/auth/oauth/{provider_id}/callback")

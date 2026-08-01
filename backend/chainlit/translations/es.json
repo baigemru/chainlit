@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "Continuar con {{provider}}"
+      "continue": "Continuar con {{provider}}",
+      "signin": "Iniciar sesión con {{provider}}",
+      "register": "Registrarse con {{provider}}"
     }
   },
   "chat": {

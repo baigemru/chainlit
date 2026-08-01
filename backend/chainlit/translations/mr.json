@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "{{provider}} सह पुढे जा"
+      "continue": "{{provider}} सह पुढे जा",
+      "signin": "{{provider}} ने साइन इन करा",
+      "register": "{{provider}} ने नोंदणी करा"
     }
   },
   "chat": {

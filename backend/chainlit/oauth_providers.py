@@ -20,6 +20,7 @@ class OAuthProvider:
     authorize_url: str
     authorize_params: Dict[str, str]
     default_prompt: Optional[str] = None
+    registration_url: Optional[str] = None
 
     def is_configured(self):
         return all([os.environ.get(env) for env in self.env])
@@ -37,6 +38,20 @@ class OAuthProvider:
         """Return environment prefix, like AZURE_AD."""
 
         return self.id.replace("-", "_").upper()
+
+    def _get_env_flag(self, name: str, default: bool) -> bool:
+        value = os.environ.get(f"OAUTH_{self.get_env_prefix()}_{name}")
+        if value is None:
+            return default
+        return value.strip().lower() in ("true", "1", "yes", "on")
+
+    def is_login_button_enabled(self) -> bool:
+        return self._get_env_flag("LOGIN_BUTTON", True)
+
+    def is_registration_button_enabled(self) -> bool:
+        return self.registration_url is not None and self._get_env_flag(
+            "REGISTRATION_BUTTON", False
+        )
 
     def get_prompt(self) -> Optional[str]:
         """Return OAuth prompt param."""
@@ -716,6 +731,9 @@ class KeycloakOAuthProvider(OAuthProvider):
         self.authorize_url = (
             f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/auth"
         )
+        self.registration_url = (
+            f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/registrations"
+        )
 
         self.authorize_params = {
             "scope": "profile email openid",
@@ -854,3 +872,15 @@ def get_oauth_provider(provider: str) -> Optional[OAuthProvider]:
 
 def get_configured_oauth_providers():
     return [p.id for p in providers if p.is_configured()]
+
+
+def get_oauth_provider_details() -> List[Dict[str, object]]:
+    return [
+        {
+            "id": p.id,
+            "loginEnabled": p.is_login_button_enabled(),
+            "registrationEnabled": p.is_registration_button_enabled(),
+        }
+        for p in providers
+        if p.is_configured()
+    ]

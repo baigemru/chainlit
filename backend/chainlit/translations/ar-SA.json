@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "متابعة مع {{provider}}"
+      "continue": "متابعة مع {{provider}}",
+      "signin": "تسجيل الدخول باستخدام {{provider}}",
+      "register": "إنشاء حساب باستخدام {{provider}}"
     }
   },
   "chat": {

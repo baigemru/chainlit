@@ -53,7 +53,9 @@
       }
     },
     "provider": {
-      "continue": "המשך עם {{provider}}"
+      "continue": "המשך עם {{provider}}",
+      "signin": "התחברות באמצעות {{provider}}",
+      "register": "הרשמה באמצעות {{provider}}"
     }
   },
   "chat": {

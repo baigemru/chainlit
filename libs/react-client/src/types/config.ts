@@ -25,11 +25,18 @@ export interface IAudioConfig {
   sample_rate: number;
 }
 
+export interface IOAuthProviderDetail {
+  id: string;
+  loginEnabled: boolean;
+  registrationEnabled: boolean;
+}
+
 export interface IAuthConfig {
   requireLogin: boolean;
   passwordAuth: boolean;
   headerAuth: boolean;
   oauthProviders: string[];
+  oauthProviderDetails?: IOAuthProviderDetail[];
   default_theme?: 'light' | 'dark';
   ui?: IChainlitConfig['ui'];
 }

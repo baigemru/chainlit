@@ -102,6 +102,8 @@ const Header = memo(() => {
               name={link.name}
               displayName={link.display_name}
               iconUrl={link.icon_url}
+              iconUrlLight={link.icon_url_light}
+              iconUrlDark={link.icon_url_dark}
               iconMask={link.icon_mask}
               url={link.url}
               target={link.target}

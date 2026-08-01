@@ -29,6 +29,9 @@ export interface IOAuthProviderDetail {
   id: string;
   loginEnabled: boolean;
   registrationEnabled: boolean;
+  iconUrl?: string | null;
+  iconUrlLight?: string | null;
+  iconUrlDark?: string | null;
 }
 
 export interface IAuthConfig {
@@ -72,6 +75,8 @@ export interface IChainlitConfig {
       name: string;
       display_name?: string;
       icon_url?: string;
+      icon_url_light?: string;
+      icon_url_dark?: string;
       icon_mask?: boolean;
       authenticated_only?: boolean;
       url: string;
@@ -81,6 +86,9 @@ export interface IChainlitConfig {
       name: string;
       url: string;
       icon_url?: string;
+      icon_url_light?: string;
+      icon_url_dark?: string;
+      icon_mask?: boolean;
       display_name?: string;
       target?: '_blank' | '_self' | '_parent' | '_top' | 'iframe';
     }[];

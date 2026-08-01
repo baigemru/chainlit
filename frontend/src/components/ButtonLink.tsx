@@ -1,7 +1,4 @@
-import { useContext } from 'react';
-
-import { ChainlitContext } from '@chainlit/react-client';
-
+import LinkIcon from '@/components/LinkIcon';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -14,6 +11,8 @@ export interface ButtonLinkProps {
   name?: string;
   displayName?: string;
   iconUrl?: string;
+  iconUrlLight?: string;
+  iconUrlDark?: string;
   iconMask?: boolean;
   url: string;
   target?: '_blank' | '_self' | '_parent' | '_top';
@@ -23,16 +22,12 @@ export default function ButtonLink({
   name,
   displayName,
   iconUrl,
+  iconUrlLight,
+  iconUrlDark,
   iconMask,
   url,
   target
 }: ButtonLinkProps) {
-  const apiClient = useContext(ChainlitContext);
-
-  const resolvedIconUrl = iconUrl?.startsWith('/public')
-    ? apiClient.buildEndpoint(iconUrl)
-    : iconUrl;
-
   return (
     <TooltipProvider>
       <Tooltip>
@@ -48,27 +43,14 @@ export default function ButtonLink({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1"
             >
-              {resolvedIconUrl ? (
-                iconMask ? (
-                  <span
-                    aria-hidden="true"
-                    className="h-6 w-6 shrink-0"
-                    style={{
-                      backgroundColor: 'currentColor',
-                      maskImage: `url(${resolvedIconUrl})`,
-                      WebkitMaskImage: `url(${resolvedIconUrl})`,
-                      maskSize: 'contain',
-                      WebkitMaskSize: 'contain',
-                      maskRepeat: 'no-repeat',
-                      WebkitMaskRepeat: 'no-repeat',
-                      maskPosition: 'center',
-                      WebkitMaskPosition: 'center'
-                    }}
-                  />
-                ) : (
-                  <img src={resolvedIconUrl} className={'h-6 w-6'} alt={name} />
-                )
-              ) : null}
+              <LinkIcon
+                iconUrl={iconUrl}
+                iconUrlLight={iconUrlLight}
+                iconUrlDark={iconUrlDark}
+                iconMask={iconMask}
+                className="h-6 w-6"
+                alt={name}
+              />
               {displayName && <span>{displayName}</span>}
             </a>
           </Button>

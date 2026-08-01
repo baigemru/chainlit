@@ -1,3 +1,6 @@
+import { IOAuthProviderDetail } from '@chainlit/react-client';
+
+import LinkIcon from '@/components/LinkIcon';
 import { useTranslation } from 'components/i18n/Translator';
 import { Auth0 } from 'components/icons/Auth0';
 import { Cognito } from 'components/icons/Cognito';
@@ -59,18 +62,34 @@ function renderProviderIcon(provider: string) {
 interface ProviderButtonProps {
   provider: string;
   mode?: 'signin' | 'register';
+  icon?: Pick<IOAuthProviderDetail, 'iconUrl' | 'iconUrlLight' | 'iconUrlDark'>;
   onClick: () => void;
 }
 
 const ProviderButton = ({
   provider,
   mode = 'signin',
+  icon,
   onClick
 }: ProviderButtonProps): JSX.Element => {
   const { t } = useTranslation();
+  const hasCustomIcon = !!(
+    icon?.iconUrl ||
+    icon?.iconUrlLight ||
+    icon?.iconUrlDark
+  );
   return (
     <Button type="button" variant="outline" onClick={onClick}>
-      {renderProviderIcon(provider.toLowerCase())}
+      {hasCustomIcon ? (
+        <LinkIcon
+          iconUrl={icon?.iconUrl}
+          iconUrlLight={icon?.iconUrlLight}
+          iconUrlDark={icon?.iconUrlDark}
+          className="h-4 w-4"
+        />
+      ) : (
+        renderProviderIcon(provider.toLowerCase())
+      )}
       {t(
         // Fall back to the legacy key for translation bundles that predate
         // the signin/register split.

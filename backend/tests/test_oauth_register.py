@@ -77,8 +77,23 @@ class TestProviderDetails:
                 "id": "test",
                 "loginEnabled": True,
                 "registrationEnabled": True,
+                "iconUrl": None,
+                "iconUrlLight": None,
+                "iconUrlDark": None,
             }
         ]
+
+    def test_provider_details_custom_icons(self, monkeypatch: pytest.MonkeyPatch):
+        provider = StubProvider()
+        monkeypatch.setattr("chainlit.oauth_providers.providers", [provider])
+        monkeypatch.setenv("OAUTH_TEST_ICON_URL", "/public/test.svg")
+        monkeypatch.setenv("OAUTH_TEST_ICON_URL_DARK", "/public/test_dark.svg")
+
+        details = get_oauth_provider_details()[0]
+        assert details["iconUrl"] == "/public/test.svg"
+        # Themed variant falls back to the theme-agnostic icon.
+        assert details["iconUrlLight"] == "/public/test.svg"
+        assert details["iconUrlDark"] == "/public/test_dark.svg"
 
     def test_auth_config_exposes_details_and_legacy_list(
         self,
@@ -100,6 +115,9 @@ class TestProviderDetails:
                 "id": "test",
                 "loginEnabled": True,
                 "registrationEnabled": True,
+                "iconUrl": None,
+                "iconUrlLight": None,
+                "iconUrlDark": None,
             }
         ]
 

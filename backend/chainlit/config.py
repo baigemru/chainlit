@@ -250,6 +250,8 @@ default_avatar_file_url = ""
 #     name = "Issues"
 #     display_name = "Report Issue"
 #     icon_url = "https://avatars.githubusercontent.com/u/128686189?s=200&v=4"  # Optional.
+#     icon_url_light = "/public/icon_light.svg"  # Optional. Icon for the light theme; icon_url is the fallback.
+#     icon_url_dark = "/public/icon_dark.svg"    # Optional. Icon for the dark theme; icon_url is the fallback.
 #     icon_mask = false            # Optional. Render the icon with the current text color (theme-aware); requires a monochrome icon.
 #     authenticated_only = false   # Optional. Only show the link to authenticated users.
 #     url = "https://github.com/Chainlit/chainlit/issues"
@@ -261,6 +263,9 @@ default_avatar_file_url = ""
 #     name = "Account"
 #     url = "https://example.com/account"
 #     icon_url = "/public/account.svg"     # Optional. Renders to the right of the label.
+#     icon_url_light = "/public/account_light.svg"  # Optional. Icon for the light theme; icon_url is the fallback.
+#     icon_url_dark = "/public/account_dark.svg"    # Optional. Icon for the dark theme; icon_url is the fallback.
+#     icon_mask = false                    # Optional. Render the icon with the current text color (theme-aware); requires a monochrome icon.
 #     display_name = "Manage account"      # Optional. Defaults to `name`.
 #     target = "_blank"                    # Optional, defaults to "_blank". "_self", "_parent", "_top".
 
@@ -365,6 +370,9 @@ class HeaderLink(BaseModel):
     name: str
     url: str
     icon_url: Optional[str] = None
+    # Per-theme icon overrides; icon_url is the fallback for both themes.
+    icon_url_light: Optional[str] = None
+    icon_url_dark: Optional[str] = None
     # Render the icon through a CSS mask filled with the current text color,
     # so it follows the active theme. Requires a monochrome icon.
     icon_mask: bool = False
@@ -378,6 +386,12 @@ class UserMenuLink(BaseModel):
     name: str
     url: str
     icon_url: Optional[str] = None
+    # Per-theme icon overrides; icon_url is the fallback for both themes.
+    icon_url_light: Optional[str] = None
+    icon_url_dark: Optional[str] = None
+    # Render the icon through a CSS mask filled with the current text color,
+    # so it follows the active theme. Requires a monochrome icon.
+    icon_mask: bool = False
     display_name: Optional[str] = None
     target: Optional[Literal["_blank", "_self", "_parent", "_top", "iframe"]] = None
 

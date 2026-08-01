@@ -211,6 +211,7 @@ export function LoginForm({
                 {provider.loginEnabled ? (
                   <ProviderButton
                     provider={provider.id}
+                    icon={provider}
                     onClick={() => onOAuthSignIn?.(provider.id, callbackUrl)}
                   />
                 ) : null}
@@ -218,6 +219,7 @@ export function LoginForm({
                   <ProviderButton
                     provider={provider.id}
                     mode="register"
+                    icon={provider}
                     onClick={() => onOAuthSignUp?.(provider.id, callbackUrl)}
                   />
                 ) : null}

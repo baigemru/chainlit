@@ -61,6 +61,17 @@ class OAuthProvider:
     def is_direct_grant_enabled(self) -> bool:
         return False
 
+    def get_icon_url(self, theme: Optional[str] = None) -> Optional[str]:
+        """Return the custom button icon from OAUTH_{PREFIX}_ICON_URL env vars.
+
+        theme is "light" or "dark"; the themed variant falls back to the
+        theme-agnostic OAUTH_{PREFIX}_ICON_URL.
+        """
+        prefix = f"OAUTH_{self.get_env_prefix()}_ICON_URL"
+        if theme:
+            return os.environ.get(f"{prefix}_{theme.upper()}") or os.environ.get(prefix)
+        return os.environ.get(prefix)
+
     def get_prompt(self) -> Optional[str]:
         """Return OAuth prompt param."""
         if prompt := os.environ.get(f"OAUTH_{self.get_env_prefix()}_PROMPT"):
@@ -920,6 +931,9 @@ def get_oauth_provider_details() -> List[Dict[str, object]]:
             "id": p.id,
             "loginEnabled": p.is_login_button_enabled(),
             "registrationEnabled": p.is_registration_button_enabled(),
+            "iconUrl": p.get_icon_url(),
+            "iconUrlLight": p.get_icon_url("light"),
+            "iconUrlDark": p.get_icon_url("dark"),
         }
         for p in providers
         if p.is_configured()

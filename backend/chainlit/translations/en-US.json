@@ -50,7 +50,8 @@
         "emailSignin": "The e-mail could not be sent",
         "emailVerify": "Please verify your email, a new email has been sent",
         "credentialsSignin": "Sign in failed. Check the details you provided are correct",
-        "sessionRequired": "Please sign in to access this page"
+        "sessionRequired": "Please sign in to access this page",
+        "credentialssignin": "Sign in failed. Check the details you provided are correct"
       }
     },
     "provider": {

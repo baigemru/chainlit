@@ -50,7 +50,8 @@
         "emailSignin": "電子郵件發送失敗",
         "emailVerify": "請驗證您的電子信箱，新的驗證郵件已發送",
         "credentialsSignin": "登入失敗。請檢查您提供的資訊是否正確",
-        "sessionRequired": "請登入以存取此頁面"
+        "sessionRequired": "請登入以存取此頁面",
+        "credentialssignin": "登入失敗。請檢查您提供的資訊是否正確"
       }
     },
     "provider": {

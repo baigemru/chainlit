@@ -8,6 +8,7 @@ from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.oauth_providers import (
     get_configured_oauth_providers,
+    get_direct_grant_provider,
     get_forgot_password_url,
     get_oauth_provider_details,
 )
@@ -34,11 +35,20 @@ def is_oauth_enabled():
     return config.code.oauth_callback and len(get_configured_oauth_providers()) > 0
 
 
+def is_direct_grant_auth_enabled():
+    return bool(is_oauth_enabled() and get_direct_grant_provider())
+
+
+def is_password_auth_enabled():
+    return (
+        config.code.password_auth_callback is not None or is_direct_grant_auth_enabled()
+    )
+
 
 def require_login():
     return (
         bool(os.environ.get("CHAINLIT_CUSTOM_AUTH"))
-        or config.code.password_auth_callback is not None
+        or is_password_auth_enabled()
         or config.code.header_auth_callback is not None
         or is_oauth_enabled()
     )
@@ -55,7 +65,7 @@ def _resolve_forgot_password_url() -> Optional[str]:
 def get_configuration():
     return {
         "requireLogin": require_login(),
-        "passwordAuth": config.code.password_auth_callback is not None,
+        "passwordAuth": is_password_auth_enabled(),
         "headerAuth": config.code.header_auth_callback is not None,
         "oauthProviders": (
             get_configured_oauth_providers() if is_oauth_enabled() else []

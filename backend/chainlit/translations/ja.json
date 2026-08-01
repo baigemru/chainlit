@@ -50,7 +50,8 @@
         "emailSignin": "メールを送信できませんでした",
         "emailVerify": "メールアドレスを確認してください。新しいメールが送信されました",
         "credentialsSignin": "サインインに失敗しました。入力した情報が正しいか確認してください",
-        "sessionRequired": "このページにアクセスするにはサインインしてください"
+        "sessionRequired": "このページにアクセスするにはサインインしてください",
+        "credentialssignin": "サインインに失敗しました。入力した情報が正しいか確認してください"
       }
     },
     "provider": {

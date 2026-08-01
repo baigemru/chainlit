@@ -50,7 +50,8 @@
         "emailSignin": "E-mailen kunne ikke sendes",
         "emailVerify": "Bekræft venligst din e-mail, en ny e-mail er blevet sendt",
         "credentialsSignin": "Login mislykkedes. Kontroller at de angivne oplysninger er korrekte",
-        "sessionRequired": "Log venligst ind for at få adgang til denne side"
+        "sessionRequired": "Log venligst ind for at få adgang til denne side",
+        "credentialssignin": "Login mislykkedes. Kontroller at de angivne oplysninger er korrekte"
       }
     },
     "provider": {

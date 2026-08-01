@@ -58,7 +58,7 @@ from chainlit.data import get_data_layer
 from chainlit.data.acl import is_thread_author
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
-from chainlit.oauth_providers import get_oauth_provider
+from chainlit.oauth_providers import get_direct_grant_provider, get_oauth_provider
 from chainlit.secret import random_secret
 from chainlit.types import (
     AskFileSpec,
@@ -538,16 +538,26 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """
-    Login a user using the password auth callback.
+    Login a user using the password auth callback or an OAuth direct grant.
     """
-    if not config.code.password_auth_callback:
+    if config.code.password_auth_callback:
+        # An explicit @cl.password_auth_callback always takes precedence.
+        user = await config.code.password_auth_callback(
+            form_data.username, form_data.password
+        )
+    elif (provider := get_direct_grant_provider()) and config.code.oauth_callback:
+        token = await provider.get_token_with_password(
+            form_data.username, form_data.password
+        )
+        (raw_user_data, default_user) = await provider.get_user_info(token)
+        # Same unified post-login hook as the OAuth redirect flow.
+        user = await config.code.oauth_callback(
+            provider.id, token, raw_user_data, default_user
+        )
+    else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No auth_callback defined"
         )
-
-    user = await config.code.password_auth_callback(
-        form_data.username, form_data.password
-    )
 
     return await _authenticate_user(request, user)
 

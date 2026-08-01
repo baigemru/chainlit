@@ -50,7 +50,8 @@
         "emailSignin": "De e-mail kon niet worden verzonden",
         "emailVerify": "Verifieer je e-mail, er is een nieuwe e-mail verzonden",
         "credentialsSignin": "Inloggen mislukt. Controleer of de ingevoerde gegevens correct zijn",
-        "sessionRequired": "Log in om toegang te krijgen tot deze pagina"
+        "sessionRequired": "Log in om toegang te krijgen tot deze pagina",
+        "credentialssignin": "Inloggen mislukt. Controleer of de ingevoerde gegevens correct zijn"
       }
     },
     "provider": {

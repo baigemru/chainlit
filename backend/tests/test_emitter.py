@@ -209,3 +209,25 @@ async def test_send_toast_invalid_type(emitter: ChainlitEmitter) -> None:
     message = "This is a test message"
     with pytest.raises(ValueError, match="Invalid toast type: invalid"):
         await emitter.send_toast(message, type="invalid")  # type: ignore[arg-type]
+
+
+async def test_set_chat_profile_defaults(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.set_chat_profile("GPT-4")
+    mock_websocket_session.emit.assert_called_once_with(
+        "set_chat_profile",
+        {"name": "GPT-4", "startNew": True, "firstMessage": None},
+    )
+
+
+async def test_set_chat_profile_with_options(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.set_chat_profile(
+        "Search", start_new=False, first_message="knife sharpener"
+    )
+    mock_websocket_session.emit.assert_called_once_with(
+        "set_chat_profile",
+        {"name": "Search", "startNew": False, "firstMessage": "knife sharpener"},
+    )

@@ -3,6 +3,7 @@ import { useRecoilValue } from 'recoil';
 
 import { sideViewState, useAuth, useConfig } from '@chainlit/react-client';
 
+import ChatProfileSwitchListener from '@/components/ChatProfileSwitchListener';
 import ChatSettingsSidebar from '@/components/ChatSettings/ChatSettingsSidebar';
 import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
@@ -60,6 +61,7 @@ const Page = ({ children }: Props) => {
     <SidebarProvider
       defaultOpen={config?.ui.default_sidebar_state !== 'closed'}
     >
+      <ChatProfileSwitchListener />
       {historyEnabled && !sidebarHidden ? (
         <>
           <LeftSidebar />

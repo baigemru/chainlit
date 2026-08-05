@@ -24,3 +24,10 @@ export const persistentCommandState = atom<ICommand | undefined>({
   key: 'PersistentCommand',
   default: undefined
 });
+
+// User message to send once the chat started after a server-side
+// `set_chat_profile` switch (survives the reconnection remounts).
+export const pendingFirstMessageState = atom<string | undefined>({
+  key: 'PendingFirstMessage',
+  default: undefined
+});

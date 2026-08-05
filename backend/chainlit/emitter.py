@@ -147,6 +147,15 @@ class BaseChainlitEmitter:
         """Stub method to send the available modes to the UI."""
         pass
 
+    async def set_chat_profile(
+        self,
+        name: str,
+        start_new: bool = True,
+        first_message: Optional[str] = None,
+    ) -> None:
+        """Stub method to switch the chat profile in the UI."""
+        pass
+
     async def send_window_message(self, data: Any):
         """Stub method to send custom data to the host window."""
         pass
@@ -452,6 +461,30 @@ class ChainlitEmitter(BaseChainlitEmitter):
         return self.emit(
             "set_modes",
             [mode.to_dict() for mode in modes],
+        )
+
+    def set_chat_profile(
+        self,
+        name: str,
+        start_new: bool = True,
+        first_message: Optional[str] = None,
+    ):
+        """Ask the UI to switch the chat profile.
+
+        Args:
+            name: Profile name as declared in `@cl.set_chat_profiles`.
+            start_new: Start a fresh chat in that profile (default) instead of
+                only switching the selector.
+            first_message: Optional user message to send once the new chat is
+                ready — keeps the user's intent when they are redirected.
+        """
+        return self.emit(
+            "set_chat_profile",
+            {
+                "name": name,
+                "startNew": start_new,
+                "firstMessage": first_message,
+            },
         )
 
     def set_favorites(self, steps: List[StepDict]):

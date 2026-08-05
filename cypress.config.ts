@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { defineConfig } from 'cypress';
 import cypressSplit from 'cypress-split';
 import fkill from 'fkill';
@@ -11,6 +12,18 @@ async function killChainlit() {
     force: true,
     silent: true
   });
+  // fkill can silently fail to resolve the port owner (seen on macOS),
+  // leaving a stale server behind — fall back to lsof.
+  if (process.platform !== 'win32') {
+    try {
+      execSync(
+        `lsof -ti tcp:${CHAINLIT_APP_PORT} -sTCP:LISTEN | xargs kill -9`,
+        { stdio: 'ignore' }
+      );
+    } catch {
+      // no process on the port
+    }
+  }
 }
 
 ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGBREAK'].forEach((signal) => {

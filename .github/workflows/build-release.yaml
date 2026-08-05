@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
+  release:
+    types: [published]
 
 permissions:
   contents: write
+
+# Creating a release with a new tag in the GitHub UI fires both `push` (tag)
+# and `release: published` — serialize them so the second run just re-uploads.
+concurrency:
+  group: build-release-${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
@@ -14,6 +22,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            TAG="$RELEASE_TAG"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG=""
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: ${TAG:-<none>}"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v5.0.0
@@ -49,6 +72,16 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Set package version from tag
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "__version__ = \"${VERSION}\"" > chainlit/version.py
+          echo "Package version set to ${VERSION}"
+        working-directory: ./backend
+
       - name: Install Python dependencies
         run: uv sync --group dev
         working-directory: ./backend
@@ -66,22 +99,37 @@ jobs:
           echo "wheel=${WHEEL}" >> "$GITHUB_OUTPUT"
         working-directory: ./backend
 
-      - name: Create GitHub Release with wheel
+      - name: Publish assets to GitHub Release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          gh release create ${{ github.ref_name }} dist/* \
-            --title "chainlit v${{ steps.meta.outputs.version }}" \
-            --notes "Automated build from tag ${{ github.ref_name }} (commit ${{ github.sha }}).
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading assets"
+            gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" dist/* \
+              --title "chainlit v${{ steps.meta.outputs.version }}" \
+              --notes "Automated build from tag $TAG (commit ${{ github.sha }}).
 
           ## Install
 
           \`\`\`bash
-          pip install https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$(basename '${{ steps.meta.outputs.wheel }}')
+          pip install https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename '${{ steps.meta.outputs.wheel }}')
           \`\`\`
 
           Or install directly from git:
 
           \`\`\`bash
-          pip install git+https://github.com/${{ github.repository }}.git@${{ github.ref_name }}
+          pip install git+https://github.com/${{ github.repository }}.git@$TAG
           \`\`\`"
-        env:
-          GH_TOKEN: ${{ github.token }}
+          fi
+
+      - name: Upload build artifact (no release tag)
+        if: steps.tag.outputs.tag == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: chainlit-dist
+          path: dist/*

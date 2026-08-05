@@ -105,16 +105,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — uploading assets"
-            gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
-          else
-            echo "Creating release $TAG"
-            gh release create "$TAG" dist/* \
-              --title "chainlit v${{ steps.meta.outputs.version }}" \
-              --notes "Automated build from tag $TAG (commit ${{ github.sha }}).
-
-          ## Install
+          INSTALL_NOTES="## Install
 
           \`\`\`bash
           pip install https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename '${{ steps.meta.outputs.wheel }}')
@@ -125,6 +116,25 @@ jobs:
           \`\`\`bash
           pip install git+https://github.com/${{ github.repository }}.git@$TAG
           \`\`\`"
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading assets"
+            gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+            BODY=$(gh release view "$TAG" --repo "${{ github.repository }}" --json body --jq .body)
+            if [[ "$BODY" != *"## Install"* ]]; then
+              echo "Appending install instructions to release notes"
+              gh release edit "$TAG" --repo "${{ github.repository }}" \
+                --notes "${BODY}
+
+          ${INSTALL_NOTES}"
+            fi
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" dist/* \
+              --title "chainlit v${{ steps.meta.outputs.version }}" \
+              --notes "Automated build from tag $TAG (commit ${{ github.sha }}).
+
+          ${INSTALL_NOTES}"
           fi
 
       - name: Upload build artifact (no release tag)

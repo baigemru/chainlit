@@ -17,6 +17,10 @@ async def chat_profile(current_user):
             name="AskSearch",
             markdown_description="Product search that asks first",
         ),
+        cl.ChatProfile(
+            name="ActionSearch",
+            markdown_description="Product search that asks for an action first",
+        ),
     ]
 
 
@@ -29,6 +33,22 @@ async def on_chat_start():
         res = await cl.AskUserMessage(content="What are you looking for?").send()
         if res:
             await cl.Message(content=f"ask answered: {res['output']}").send()
+    elif profile == "ActionSearch":
+        # A non-text ask cannot be answered with a text step: the first
+        # message must wait instead of being sent as the reply.
+        res = await cl.AskActionMessage(
+            content="Pick a search mode",
+            actions=[
+                cl.Action(
+                    id="first-action",
+                    name="by_photo",
+                    payload={"value": "by_photo"},
+                    label="By photo",
+                )
+            ],
+        ).send()
+        if res:
+            await cl.Message(content=f"action answered: {res['name']}").send()
 
 
 @cl.on_message
@@ -40,6 +60,10 @@ async def on_message(msg: cl.Message):
     elif msg.content.startswith("go ask"):
         await cl.context.emitter.set_chat_profile(
             "AskSearch", start_new=True, first_message="knife please"
+        )
+    elif msg.content.startswith("go action"):
+        await cl.context.emitter.set_chat_profile(
+            "ActionSearch", start_new=True, first_message="knife via action"
         )
     elif msg.content.startswith("go unknown"):
         await cl.context.emitter.set_chat_profile("Nope", first_message="lost")

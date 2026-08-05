@@ -25,9 +25,16 @@ export const persistentCommandState = atom<ICommand | undefined>({
   default: undefined
 });
 
+export interface IPendingFirstMessage {
+  text: string;
+  createdAt: number;
+}
+
 // User message to send once the chat started after a server-side
 // `set_chat_profile` switch (survives the reconnection remounts).
-export const pendingFirstMessageState = atom<string | undefined>({
+// createdAt lets a message whose delivery never happened expire instead of
+// surfacing in an unrelated conversation later on.
+export const pendingFirstMessageState = atom<IPendingFirstMessage | undefined>({
   key: 'PendingFirstMessage',
   default: undefined
 });

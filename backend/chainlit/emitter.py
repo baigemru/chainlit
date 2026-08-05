@@ -473,11 +473,28 @@ class ChainlitEmitter(BaseChainlitEmitter):
 
         Args:
             name: Profile name as declared in `@cl.set_chat_profiles`.
-            start_new: Start a fresh chat in that profile (default) instead of
-                only switching the selector.
+            start_new: Start a fresh chat in that profile (default). Set to
+                False to move only the UI selector — see the caveats below.
             first_message: Optional user message to send once the new chat is
                 ready — keeps the user's intent when they are redirected.
+                Requires `start_new=True`.
+
+        With `start_new=False` nothing but the selector changes: the running
+        session keeps its profile, so `cl.user_session.get("chat_profile")`,
+        the thread tags and the thread metadata all still report the previous
+        one, the profile's `config_overrides` are not re-applied, and a
+        pending `AskUserMessage` is cancelled without its answer ever reaching
+        the server. Use `start_new=True` to actually move the user to another
+        profile.
+
+        The `first_message` must differ from whatever text makes the app call
+        this method, otherwise the delivered message re-triggers the switch.
         """
+        if first_message and not start_new:
+            logger.warning(
+                "set_chat_profile: first_message is ignored when start_new is False."
+            )
+
         return self.emit(
             "set_chat_profile",
             {

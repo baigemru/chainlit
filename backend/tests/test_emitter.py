@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -227,6 +228,21 @@ async def test_set_chat_profile_with_options(
     await emitter.set_chat_profile(
         "Search", start_new=False, first_message="knife sharpener"
     )
+    mock_websocket_session.emit.assert_called_once_with(
+        "set_chat_profile",
+        {"name": "Search", "startNew": False, "firstMessage": "knife sharpener"},
+    )
+
+
+async def test_set_chat_profile_warns_on_ignored_first_message(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock, caplog
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="chainlit"):
+        await emitter.set_chat_profile(
+            "Search", start_new=False, first_message="knife sharpener"
+        )
+
+    assert "first_message is ignored" in caplog.text
     mock_websocket_session.emit.assert_called_once_with(
         "set_chat_profile",
         {"name": "Search", "startNew": False, "firstMessage": "knife sharpener"},

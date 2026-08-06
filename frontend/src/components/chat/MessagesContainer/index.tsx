@@ -111,9 +111,15 @@ const MessagesContainer = ({ navigate }: Props) => {
     const sideElements = elements.filter((e) => e.display === 'side');
 
     if (sideElements.length === 0) {
+      // Only clear a side view this effect put there. The sidebar is also
+      // driven straight from the socket (ElementSidebar.set_elements), and
+      // when those events arrive before this component mounts, clearing
+      // unconditionally would wipe a sidebar that has no message elements
+      // behind it at all.
+      const ownedBySideElements = knownSideOrderRef.current.length > 0;
       knownSideElementsRef.current = new Map();
       knownSideOrderRef.current = [];
-      setSideView(undefined);
+      if (ownedBySideElements) setSideView(undefined);
       return;
     }
 

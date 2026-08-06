@@ -150,7 +150,8 @@ class BaseChainlitEmitter:
     async def set_chat_profile(
         self,
         name: str,
-        start_new: bool = True,
+        *,
+        keep_transcript: bool = False,
         first_message: Optional[str] = None,
     ) -> None:
         """Stub method to switch the chat profile in the UI."""
@@ -466,23 +467,35 @@ class ChainlitEmitter(BaseChainlitEmitter):
     def set_chat_profile(
         self,
         name: str,
-        start_new: bool = True,
+        *,
+        keep_transcript: bool = False,
         first_message: Optional[str] = None,
     ):
         """Ask the UI to switch the chat profile.
 
+        Both modes start a brand-new session and thread on `name`, so the new
+        profile's `on_chat_start` runs and the new thread records that profile.
+        They differ only in what stays on screen.
+
         Args:
             name: Profile name as declared in `@cl.set_chat_profiles`.
-            start_new: Start a fresh chat in that profile (default) instead of
-                only switching the selector.
+            keep_transcript: Keep the messages already on screen and mark the
+                switch with a divider, instead of clearing them (default).
             first_message: Optional user message to send once the new chat is
-                ready — keeps the user's intent when they are redirected.
+                ready — keeps the user's intent when they are redirected. It
+                must differ from whatever text makes the app call this method,
+                otherwise the delivered message re-triggers the switch.
+
+        The transcript kept by `keep_transcript` is client-side only: it
+        belongs to the previous thread, is dropped on reload or when a thread
+        is opened from the history, cannot be edited, and loses elements that
+        were served by the previous session.
         """
         return self.emit(
             "set_chat_profile",
             {
                 "name": name,
-                "startNew": start_new,
+                "keepTranscript": keep_transcript,
                 "firstMessage": first_message,
             },
         )

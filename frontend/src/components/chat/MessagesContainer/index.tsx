@@ -18,6 +18,7 @@ import {
   messagesState,
   sessionIdState,
   sideViewState,
+  threadIdToResumeState,
   updateMessageById,
   useChatData,
   useChatInteract,
@@ -210,6 +211,17 @@ const MessagesContainer = ({ navigate }: Props) => {
     [messages, boundaries]
   );
 
+  // Boundaries describe the live transcript only. Opening a thread from the
+  // history replays persisted steps, and one of them can carry the id a
+  // boundary points at — which would draw a divider inside a conversation
+  // that never had a profile switch. A soft switch clears idToResume, so it
+  // is not affected.
+  const idToResume = useRecoilValue(threadIdToResumeState);
+  const setBoundaries = useSetRecoilState(chatBoundariesState);
+  useEffect(() => {
+    if (idToResume) setBoundaries([]);
+  }, [idToResume, setBoundaries]);
+
   // Bring a freshly drawn divider into view once. Autoscroll pins the last
   // user message to the top, and that message belongs to the new chat, so
   // without this the line the user is meant to notice starts off-screen.
@@ -232,7 +244,15 @@ const MessagesContainer = ({ navigate }: Props) => {
   // from this context and ignores the prop, so without `loading: false` an
   // unfinished run kept on screen blinks whenever the new chat generates.
   const endedChatContext = useMemo(
-    () => ({ ...memoizedContext, editable: false, loading: false }),
+    () => ({
+      ...memoizedContext,
+      editable: false,
+      loading: false,
+      // Feedback and favorites post against the live session, which never
+      // saw these steps — the server would reject them after the UI already
+      // showed them as accepted.
+      showFeedbackButtons: false
+    }),
     [memoizedContext]
   );
 

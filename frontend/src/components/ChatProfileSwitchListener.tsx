@@ -75,9 +75,6 @@ const freezeStreaming = (steps: IStep[]): IStep[] => {
   return changed ? frozen : steps;
 };
 
-// How far back to look for the trigger message when trimming it.
-const TRIGGER_LOOKBACK = 3;
-
 /**
  * Drops the message that triggered the switch, plus whatever the interrupted
  * turn left after it, when that same text is about to be redelivered to the
@@ -87,8 +84,7 @@ const TRIGGER_LOOKBACK = 3;
 const trimRedeliveredTrigger = (steps: IStep[], text?: string): IStep[] => {
   if (!text) return steps;
 
-  const oldest = Math.max(0, steps.length - TRIGGER_LOOKBACK);
-  for (let index = steps.length - 1; index >= oldest; index--) {
+  for (let index = steps.length - 1; index >= 0; index--) {
     const step = steps[index];
     if (step.type === 'user_message' && step.output === text) {
       return steps.slice(0, index);
@@ -220,10 +216,21 @@ export default function ChatProfileSwitchListener() {
       // The real teardown, so this path inherits whatever it grows upstream.
       clear();
 
+      if (keepTranscript && kept === undefined) {
+        console.error(
+          'set_chat_profile: could not read the transcript; keeping the chat cleared.'
+        );
+      }
+
       const afterMessageId = kept?.at(-1)?.id;
       if (kept?.length && afterMessageId) {
         setMessages(kept);
-        setBoundaries([...keptBoundaries, { afterMessageId, profile: name }]);
+        // A boundary already on that message would be overwritten by the new
+        // one, silently dropping the divider it drew.
+        setBoundaries([
+          ...keptBoundaries.filter((b) => b.afterMessageId !== afterMessageId),
+          { afterMessageId, profile: name }
+        ]);
       } else {
         setBoundaries([]);
       }

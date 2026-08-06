@@ -7,6 +7,9 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   IStep,
   askUserState,
+  callFnState,
+  loadingState,
+  messagesState,
   useAuth,
   useChatData,
   useChatInteract,
@@ -16,8 +19,11 @@ import {
 
 import {
   IAttachment,
+  IChatBoundary,
   attachmentsState,
-  pendingFirstMessageState
+  chatBoundariesState,
+  pendingFirstMessageState,
+  persistentCommandState
 } from '@/state/chat';
 
 interface SetChatProfilePayload {
@@ -44,6 +50,54 @@ const PENDING_MESSAGE_TTL_MS = 60000;
 // loop: deliver -> on_message -> switch -> deliver.
 const LOOP_GUARD_MS = 5000;
 
+/**
+ * Clears the `streaming` flag left over on messages kept from a chat whose
+ * socket is gone — it would otherwise render a cursor forever and hide the
+ * message buttons. New objects are built along the path of every change:
+ * mutating in place is allowed by the atom but defeats the memo comparators,
+ * so the cursor would never actually disappear.
+ */
+const freezeStreaming = (steps: IStep[]): IStep[] => {
+  let changed = false;
+
+  const frozen = steps.map((step) => {
+    const nested = step.steps ? freezeStreaming(step.steps) : undefined;
+    const nestedChanged = !!nested && nested !== step.steps;
+    if (!step.streaming && !nestedChanged) return step;
+    changed = true;
+    return {
+      ...step,
+      streaming: false,
+      ...(nestedChanged ? { steps: nested } : {})
+    };
+  });
+
+  return changed ? frozen : steps;
+};
+
+// How far back to look for the trigger message when trimming it.
+const TRIGGER_LOOKBACK = 3;
+
+/**
+ * Drops the message that triggered the switch, plus whatever the interrupted
+ * turn left after it, when that same text is about to be redelivered to the
+ * new chat — otherwise the user sees their own words on both sides of the
+ * divider.
+ */
+const trimRedeliveredTrigger = (steps: IStep[], text?: string): IStep[] => {
+  if (!text) return steps;
+
+  const oldest = Math.max(0, steps.length - TRIGGER_LOOKBACK);
+  for (let index = steps.length - 1; index >= oldest; index--) {
+    const step = steps[index];
+    if (step.type === 'user_message' && step.output === text) {
+      return steps.slice(0, index);
+    }
+  }
+
+  return steps;
+};
+
 export default function ChatProfileSwitchListener() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -52,6 +106,11 @@ export default function ChatProfileSwitchListener() {
   const { clear, sendMessage, replyMessage } = useChatInteract();
   const { askUser, connected } = useChatData();
   const setAskUser = useSetRecoilState(askUserState);
+  const setCallFn = useSetRecoilState(callFnState);
+  const setLoading = useSetRecoilState(loadingState);
+  const setMessages = useSetRecoilState(messagesState);
+  const setBoundaries = useSetRecoilState(chatBoundariesState);
+  const setPersistentCommand = useSetRecoilState(persistentCommandState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
   const [pendingFirstMessage, setPendingFirstMessage] = useRecoilState(
     pendingFirstMessageState
@@ -116,19 +175,9 @@ export default function ChatProfileSwitchListener() {
 
     const alreadyActive = chatProfile === name;
 
-    if (keepTranscript) {
-      // Only move the selector, leave the current chat untouched. Note this
-      // does not change the profile of the running server session.
-      if (firstMessage) {
-        console.warn(
-          'set_chat_profile: firstMessage is ignored when keepTranscript is true.'
-        );
-      }
-      if (!alreadyActive) setChatProfile(name);
-      return;
-    }
-
-    if (alreadyActive && !firstMessage) return;
+    // Keeping the transcript is never a no-op: it draws a line and starts a
+    // new thread, which is meaningful even within the same profile.
+    if (alreadyActive && !firstMessage && !keepTranscript) return;
 
     // Same path as a manual selection (ChatProfiles.handleConfirm), minus
     // the confirmation dialog: the server already made the decision.
@@ -145,9 +194,40 @@ export default function ChatProfileSwitchListener() {
         firstMessage ? { text: firstMessage, createdAt: Date.now() } : undefined
       );
       setAskUser(undefined);
+      setCallFn(undefined);
+      setLoading(false);
       setChatProfile(name);
       setAttachments([]);
+      setPersistentCommand(undefined);
+
+      // Read through updaters so these are the values before clear() wipes
+      // them, without subscribing this component to every streamed token.
+      let kept: IStep[] | undefined;
+      let keptBoundaries: IChatBoundary[] = [];
+      if (keepTranscript) {
+        setMessages((previous) => {
+          kept = freezeStreaming(
+            trimRedeliveredTrigger(previous, firstMessage || undefined)
+          );
+          return previous;
+        });
+        setBoundaries((previous) => {
+          keptBoundaries = previous;
+          return previous;
+        });
+      }
+
+      // The real teardown, so this path inherits whatever it grows upstream.
       clear();
+
+      const afterMessageId = kept?.at(-1)?.id;
+      if (kept?.length && afterMessageId) {
+        setMessages(kept);
+        setBoundaries([...keptBoundaries, { afterMessageId, profile: name }]);
+      } else {
+        setBoundaries([]);
+      }
+
       navigate('/');
     });
   };

@@ -67,8 +67,18 @@ async def on_message(msg: cl.Message):
         )
     elif msg.content.startswith("go unknown"):
         await cl.context.emitter.set_chat_profile("Nope", first_message="lost")
-    elif msg.content.startswith("go selector"):
-        await cl.context.emitter.set_chat_profile("Search", keep_transcript=True)
+    elif msg.content.startswith("go echo"):
+        # Redelivers the very text that triggered the switch, the case where
+        # the trigger must not be shown on both sides of the divider.
+        await cl.context.emitter.set_chat_profile(
+            "Search", keep_transcript=True, first_message=msg.content
+        )
+    elif msg.content.startswith("go soft same"):
+        await cl.context.emitter.set_chat_profile("Assistant", keep_transcript=True)
+    elif msg.content.startswith("go soft"):
+        await cl.context.emitter.set_chat_profile(
+            "Search", keep_transcript=True, first_message="searching knife"
+        )
     else:
         await cl.Message(
             content=f"profile: {cl.user_session.get('chat_profile')}"

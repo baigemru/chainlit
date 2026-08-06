@@ -1,5 +1,12 @@
 import { MessageContext } from '@/contexts/MessageContext';
-import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef
+} from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 
@@ -21,6 +28,11 @@ import {
 import { Messages } from '@/components/chat/Messages';
 import { useTranslation } from 'components/i18n/Translator';
 
+import { chatBoundariesState } from '@/state/chat';
+
+import ChatBoundaryDivider from './ChatBoundaryDivider';
+import { splitAtBoundaries } from './transcript';
+
 interface Props {
   navigate?: (to: string) => void;
 }
@@ -34,6 +46,7 @@ const MessagesContainer = ({ navigate }: Props) => {
   const setMessages = useSetRecoilState(messagesState);
   const setSideView = useSetRecoilState(sideViewState);
   const sessionId = useRecoilValue(sessionIdState);
+  const boundaries = useRecoilValue(chatBoundariesState);
 
   const { t } = useTranslation();
 
@@ -186,15 +199,66 @@ const MessagesContainer = ({ navigate }: Props) => {
     onFeedbackUpdated
   ]);
 
+  const sections = useMemo(
+    () => splitAtBoundaries(messages, boundaries),
+    [messages, boundaries]
+  );
+
+  // Bring a freshly drawn divider into view once. Autoscroll pins the last
+  // user message to the top, and that message belongs to the new chat, so
+  // without this the line the user is meant to notice starts off-screen.
+  // Only fires while the new chat is still empty, leaving autoscroll to take
+  // over as soon as it produces anything.
+  const boundaryCountRef = useRef(boundaries.length);
+  useEffect(() => {
+    const added = boundaries.length > boundaryCountRef.current;
+    boundaryCountRef.current = boundaries.length;
+    if (!added) return;
+
+    requestAnimationFrame(() => {
+      const dividers = document.querySelectorAll('.chat-boundary');
+      dividers[dividers.length - 1]?.scrollIntoView({ block: 'start' });
+    });
+  }, [boundaries.length]);
+
+  // Transcripts of chats that already ended are read-only, and must not react
+  // to the current chat's activity: Messages recomputes a run's "is running"
+  // from this context and ignores the prop, so without `loading: false` an
+  // unfinished run kept on screen blinks whenever the new chat generates.
+  const endedChatContext = useMemo(
+    () => ({ ...memoizedContext, editable: false, loading: false }),
+    [memoizedContext]
+  );
+
   return (
     <MessageContext.Provider value={memoizedContext}>
-      <Messages
-        indent={0}
-        isRunning={loading}
-        messages={messages}
-        elements={elements}
-        actions={actions}
-      />
+      {sections.map((section, index) => {
+        const isCurrent = index === sections.length - 1;
+        const body = (
+          <Messages
+            indent={0}
+            isRunning={loading && isCurrent}
+            messages={section.messages}
+            elements={elements}
+            actions={actions}
+          />
+        );
+
+        return (
+          <Fragment key={section.key}>
+            {isCurrent ? (
+              body
+            ) : (
+              <MessageContext.Provider value={endedChatContext}>
+                {body}
+              </MessageContext.Provider>
+            )}
+            {section.startedProfile !== undefined ? (
+              <ChatBoundaryDivider profile={section.startedProfile} />
+            ) : null}
+          </Fragment>
+        );
+      })}
     </MessageContext.Provider>
   );
 };

@@ -102,6 +102,8 @@
       }
     },
     "messages": {
+      "newChat": "Новый чат",
+      "newChatIn": "Новый чат · {{profile}}",
       "status": {
         "using": "Используется",
         "used": "Использовано",

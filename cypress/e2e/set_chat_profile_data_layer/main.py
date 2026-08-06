@@ -169,7 +169,11 @@ async def on_chat_resume(thread: ThreadDict):
 async def on_message(msg: cl.Message):
     # The trigger and first_message must differ, otherwise the delivered
     # message re-triggers this handler and the switch loops.
-    if msg.content.startswith("go search"):
+    if msg.content.startswith("go soft"):
+        await cl.context.emitter.set_chat_profile(
+            "Search", keep_transcript=True, first_message="searching knife"
+        )
+    elif msg.content.startswith("go search"):
         await cl.context.emitter.set_chat_profile(
             "Search", first_message="searching knife"
         )

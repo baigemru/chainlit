@@ -96,17 +96,88 @@ describe('Programmatic chat profile switch', () => {
     cy.get('.step').eq(2).should('contain', 'profile: Assistant');
   });
 
-  it('should only move the selector when keep_transcript is true', () => {
+  it('should keep the transcript and mark where the new chat starts', () => {
     cy.get('#chat-input').should('exist');
 
     submitMessage('hello');
     cy.get('.step').should('have.length', 2);
 
-    submitMessage('go selector');
+    submitMessage('go soft');
 
     cy.get('#chat-profiles').should('contain.text', 'Search');
-    // The current chat is kept
+
+    // The previous conversation stays on screen, above a single divider
+    cy.get('.chat-boundary').should('have.length', 1);
+    cy.get('.chat-boundary').should('contain.text', 'Search');
+    cy.get('.chat-boundary').prevAll('.step').should('contain', 'hello');
+
+    // The new chat runs below it
+    cy.get('.step').should('contain', 'search ready');
+    cy.get('.step').should('contain', 'searching knife');
+
+    submitMessage('ping');
+    // 3 kept (hello, its answer, the trigger) + 3 from the new chat + 2 for ping
+    cy.get('.step').should('have.length', 8);
+
+    // The trigger is not shown on both sides of the divider
+    cy.get('.step:contains("go soft")').should('have.length', 1);
+    // ...and the retained half cannot be edited into the new session
+    cy.get('.chat-boundary')
+      .prevAll('.step')
+      .find('.edit-message')
+      .should('not.exist');
+  });
+
+  it('should not show the trigger on both sides of the divider', () => {
+    cy.get('#chat-input').should('exist');
+
+    submitMessage('hello');
+    submitMessage('go echo');
+
+    cy.get('.step').should('contain', 'search ready');
+    cy.get('.step').should('have.length', 4);
+
+    // The trigger was redelivered to the new chat, so it is only shown there
+    cy.get('.step:contains("go echo")').should('have.length', 1);
+    cy.get('.chat-boundary')
+      .prevAll('.step')
+      .should('not.contain', 'go echo')
+      .and('contain', 'hello');
+
+    // The app re-matches its own trigger on the redelivered message, so this
+    // also proves the loop guard: no second switch, no second divider.
+    cy.get('.chat-boundary').should('have.length', 1);
+  });
+
+  it('should start a new chat in the same profile when keeping the transcript', () => {
+    cy.get('#chat-input').should('exist');
+
+    submitMessage('hello');
+    cy.get('.step').should('have.length', 2);
+
+    submitMessage('go soft same');
+
+    cy.get('.chat-boundary').should('have.length', 1);
+    cy.get('#chat-profiles').should('contain.text', 'Assistant');
     cy.get('.step').should('contain', 'hello');
-    cy.get('.step').should('contain', 'profile: Assistant');
+
+    submitMessage('ping');
+    cy.get('.chat-boundary')
+      .nextAll('.step')
+      .should('contain', 'profile: Assistant');
+  });
+
+  it('should drop the retained transcript on reload', () => {
+    cy.get('#chat-input').should('exist');
+
+    submitMessage('hello');
+    submitMessage('go soft');
+    cy.get('.chat-boundary').should('have.length', 1);
+
+    cy.reload();
+
+    cy.get('#chat-input').should('exist');
+    cy.get('.chat-boundary').should('not.exist');
+    cy.get('.step').should('not.exist');
   });
 });

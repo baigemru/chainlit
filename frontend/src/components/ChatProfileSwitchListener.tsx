@@ -22,6 +22,8 @@ import {
 
 interface SetChatProfilePayload {
   name: string;
+  keepTranscript?: boolean;
+  /** @deprecated superseded by keepTranscript; read for older backends. */
   startNew?: boolean;
   firstMessage?: string | null;
 }
@@ -88,7 +90,10 @@ export default function ChatProfileSwitchListener() {
   // only re-registered when the socket itself changes.
   const switchRef = useRef<(payload: SetChatProfilePayload) => void>();
   switchRef.current = (payload) => {
-    const { name, startNew = true, firstMessage } = payload || {};
+    const { name, firstMessage } = payload || {};
+    // Older backends only send startNew; keepTranscript is its inverse.
+    const keepTranscript =
+      payload?.keepTranscript ?? !(payload?.startNew ?? true);
 
     if (!config?.chatProfiles?.some((profile) => profile.name === name)) {
       console.warn(
@@ -111,12 +116,12 @@ export default function ChatProfileSwitchListener() {
 
     const alreadyActive = chatProfile === name;
 
-    if (!startNew) {
+    if (keepTranscript) {
       // Only move the selector, leave the current chat untouched. Note this
       // does not change the profile of the running server session.
       if (firstMessage) {
         console.warn(
-          'set_chat_profile: firstMessage is ignored when startNew is false.'
+          'set_chat_profile: firstMessage is ignored when keepTranscript is true.'
         );
       }
       if (!alreadyActive) setChatProfile(name);

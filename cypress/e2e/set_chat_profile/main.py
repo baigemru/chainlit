@@ -55,20 +55,20 @@ async def on_chat_start():
 async def on_message(msg: cl.Message):
     if msg.content.startswith("go search"):
         await cl.context.emitter.set_chat_profile(
-            "Search", start_new=True, first_message="searching knife"
+            "Search", first_message="searching knife"
         )
     elif msg.content.startswith("go ask"):
         await cl.context.emitter.set_chat_profile(
-            "AskSearch", start_new=True, first_message="knife please"
+            "AskSearch", first_message="knife please"
         )
     elif msg.content.startswith("go action"):
         await cl.context.emitter.set_chat_profile(
-            "ActionSearch", start_new=True, first_message="knife via action"
+            "ActionSearch", first_message="knife via action"
         )
     elif msg.content.startswith("go unknown"):
         await cl.context.emitter.set_chat_profile("Nope", first_message="lost")
     elif msg.content.startswith("go selector"):
-        await cl.context.emitter.set_chat_profile("Search", start_new=False)
+        await cl.context.emitter.set_chat_profile("Search", keep_transcript=True)
     else:
         await cl.Message(
             content=f"profile: {cl.user_session.get('chat_profile')}"

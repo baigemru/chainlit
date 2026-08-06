@@ -171,7 +171,7 @@ async def on_message(msg: cl.Message):
     # message re-triggers this handler and the switch loops.
     if msg.content.startswith("go search"):
         await cl.context.emitter.set_chat_profile(
-            "Search", start_new=True, first_message="searching knife"
+            "Search", first_message="searching knife"
         )
     else:
         await cl.Message(

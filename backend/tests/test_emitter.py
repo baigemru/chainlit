@@ -1,4 +1,3 @@
-import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -218,7 +217,7 @@ async def test_set_chat_profile_defaults(
     await emitter.set_chat_profile("GPT-4")
     mock_websocket_session.emit.assert_called_once_with(
         "set_chat_profile",
-        {"name": "GPT-4", "startNew": True, "firstMessage": None},
+        {"name": "GPT-4", "keepTranscript": False, "firstMessage": None},
     )
 
 
@@ -226,24 +225,20 @@ async def test_set_chat_profile_with_options(
     emitter: ChainlitEmitter, mock_websocket_session: MagicMock
 ) -> None:
     await emitter.set_chat_profile(
-        "Search", start_new=False, first_message="knife sharpener"
+        "Search", keep_transcript=True, first_message="knife sharpener"
     )
     mock_websocket_session.emit.assert_called_once_with(
         "set_chat_profile",
-        {"name": "Search", "startNew": False, "firstMessage": "knife sharpener"},
+        {
+            "name": "Search",
+            "keepTranscript": True,
+            "firstMessage": "knife sharpener",
+        },
     )
 
 
-async def test_set_chat_profile_warns_on_ignored_first_message(
-    emitter: ChainlitEmitter, mock_websocket_session: MagicMock, caplog
+async def test_set_chat_profile_rejects_positional_flags(
+    emitter: ChainlitEmitter,
 ) -> None:
-    with caplog.at_level(logging.WARNING, logger="chainlit"):
-        await emitter.set_chat_profile(
-            "Search", start_new=False, first_message="knife sharpener"
-        )
-
-    assert "first_message is ignored" in caplog.text
-    mock_websocket_session.emit.assert_called_once_with(
-        "set_chat_profile",
-        {"name": "Search", "startNew": False, "firstMessage": "knife sharpener"},
-    )
+    with pytest.raises(TypeError):
+        await emitter.set_chat_profile("Search", True)  # type: ignore[misc]

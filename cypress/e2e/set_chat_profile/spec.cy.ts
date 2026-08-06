@@ -96,7 +96,7 @@ describe('Programmatic chat profile switch', () => {
     cy.get('.step').eq(2).should('contain', 'profile: Assistant');
   });
 
-  it('should only move the selector when start_new is false', () => {
+  it('should only move the selector when keep_transcript is true', () => {
     cy.get('#chat-input').should('exist');
 
     submitMessage('hello');

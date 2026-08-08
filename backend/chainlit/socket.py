@@ -1,11 +1,13 @@
 import asyncio
 import json
+import uuid
 from typing import Any, Dict, Literal, Optional, Tuple, TypedDict, Union
 from urllib.parse import unquote
 
 from starlette.requests import cookie_parser
 from typing_extensions import TypeAlias
 
+import chainlit.transit as transit
 from chainlit.auth import (
     get_current_user,
     get_token_from_cookies,
@@ -205,6 +207,62 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
     return True
 
 
+async def apply_transit_message(context):
+    """Move a claimed transit message into the user session, opening a thread.
+
+    Runs before `on_chat_start` is scheduled, so the callback can read
+    `cl.user_session.get("transit_message")`. Claiming counts as the first
+    interaction: the thread is created and named immediately (steps produced
+    by `on_chat_start` then persist right away instead of queueing).
+
+    Only a session that has not interacted yet may take the record — a flap
+    of the previous socket between `store` and the claim re-enters
+    `connection_successful` on the old session, which must not swallow the
+    record it just parked for its successor.
+    """
+    session = context.session
+    if session.has_first_interaction:
+        return
+
+    owner = session.user.identifier if session.user else None
+    value = transit.pop(session.id, owner)
+    if value is transit.NO_TRANSIT:
+        return
+
+    user_sessions.setdefault(session.id, {})["transit_message"] = value
+
+    session.has_first_interaction = True
+    name = value if isinstance(value, str) and value else session.chat_profile
+    # Awaited on purpose: on_chat_start steps persist immediately now, and
+    # must not reach the data layer before the thread row exists.
+    await context.emitter.init_thread(name or "transit")
+
+
+@sio.on("claim_transit_message")  # pyright: ignore [reportOptionalCall]
+async def claim_transit_message(sid, payload):
+    """Re-park this session's transit message for the session about to open."""
+    session = WebsocketSession.require(sid)
+
+    next_id = (payload or {}).get("sessionId")
+    if not isinstance(next_id, str):
+        return
+    try:
+        if uuid.UUID(next_id).version != 4:
+            return
+    except ValueError:
+        return
+    # A live session under that id means the client did not mint a fresh
+    # uuid — with auth disabled this would let one session plant a value
+    # into another existing one.
+    if WebsocketSession.get_by_id(next_id):
+        logger.warning(
+            "claim_transit_message: target session already exists, ignoring."
+        )
+        return
+
+    transit.reassign(session.id, next_id)
+
+
 @sio.on("connection_successful")  # pyright: ignore [reportOptionalCall]
 async def connection_successful(sid):
     context = init_ws_context(sid)
@@ -214,6 +272,7 @@ async def connection_successful(sid):
     await context.emitter.clear("clear_call_fn")
 
     if context.session.restored and not context.session.has_first_interaction:
+        await apply_transit_message(context)
         if config.code.on_chat_start and not context.session.chat_started:
             context.session.chat_started = True
             task = asyncio.create_task(config.code.on_chat_start())
@@ -223,6 +282,16 @@ async def connection_successful(sid):
     if context.session.thread_id_to_resume and config.code.on_chat_resume:
         thread = await resume_thread(context.session)
         if thread:
+            # A transit record parked for this session would outlive the
+            # resume (which never reads it) and leak into a later reconnect —
+            # drop it instead.
+            owner = context.session.user.identifier if context.session.user else None
+            if transit.pop(context.session.id, owner) is not transit.NO_TRANSIT:
+                logger.warning(
+                    "Dropping a transit message on thread resume; it would "
+                    "otherwise be delivered late into an unrelated chat."
+                )
+
             context.session.has_first_interaction = True
             await context.emitter.emit(
                 "first_interaction",
@@ -238,6 +307,8 @@ async def connection_successful(sid):
             return
         else:
             await context.emitter.send_resume_thread_error("Thread not found.")
+
+    await apply_transit_message(context)
 
     if config.code.on_chat_start and not context.session.chat_started:
         context.session.chat_started = True

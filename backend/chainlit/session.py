@@ -215,6 +215,11 @@ class BaseSession:
             # Remove user environment variables (API keys) before persisting to database
             user_session_copy["env"] = {}
 
+        # The transit message is a hand-off between two live sessions, not
+        # thread state: persisted, it would resurrect on every resume of this
+        # thread through the metadata copy in `resume_thread`.
+        user_session_copy.pop("transit_message", None)
+
         metadata = clean_metadata(user_session_copy)
         return metadata
 

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
 
 from socketio.exceptions import TimeoutError
 
+import chainlit.transit as transit
 from chainlit.chat_context import chat_context
 from chainlit.config import config
 from chainlit.data import get_data_layer
@@ -152,7 +153,7 @@ class BaseChainlitEmitter:
         name: str,
         *,
         keep_transcript: bool = False,
-        first_message: Optional[str] = None,
+        transit_message: Any = None,
     ) -> None:
         """Stub method to switch the chat profile in the UI."""
         pass
@@ -464,13 +465,13 @@ class ChainlitEmitter(BaseChainlitEmitter):
             [mode.to_dict() for mode in modes],
         )
 
-    def set_chat_profile(
+    async def set_chat_profile(
         self,
         name: str,
         *,
         keep_transcript: bool = False,
-        first_message: Optional[str] = None,
-    ):
+        transit_message: Any = None,
+    ) -> None:
         """Ask the UI to switch the chat profile.
 
         Both modes start a brand-new session and thread on `name`, so the new
@@ -481,22 +482,35 @@ class ChainlitEmitter(BaseChainlitEmitter):
             name: Profile name as declared in `@cl.set_chat_profiles`.
             keep_transcript: Keep the messages already on screen and mark the
                 switch with a divider, instead of clearing them (default).
-            first_message: Optional user message to send once the new chat is
-                ready — keeps the user's intent when they are redirected. It
-                must differ from whatever text makes the app call this method,
-                otherwise the delivered message re-triggers the switch.
+            transit_message: Optional value handed to the new session — it
+                never travels through the browser. Read it in the new
+                profile's `on_chat_start` via
+                `cl.user_session.get("transit_message")`; any object works,
+                not just text. Passing `None` (the default) also clears a
+                value parked by an earlier call on this session.
+
+        Claiming a transit message creates and names the new thread right
+        away (the value itself when it is a non-empty string, the profile
+        name otherwise) — an `on_chat_start` that then renders nothing leaves
+        a named empty thread in the history. There is no auto-answer into
+        `AskUserMessage` anymore: read the transit value instead of asking.
+        If the frontend never claims the value (dead socket, copilot — which
+        does not support `set_chat_profile` at all), it expires after
+        `transit.TRANSIT_TTL_SECONDS`.
 
         The transcript kept by `keep_transcript` is client-side only: it
         belongs to the previous thread, is dropped on reload or when a thread
         is opened from the history, cannot be edited, and loses elements that
         were served by the previous session.
         """
-        return self.emit(
+        owner = self.session.user.identifier if self.session.user else None
+        transit.store(self.session.id, transit_message, owner)
+        await self.emit(
             "set_chat_profile",
             {
                 "name": name,
                 "keepTranscript": keep_transcript,
-                "firstMessage": first_message,
+                "hasTransitMessage": transit_message is not None,
             },
         )
 

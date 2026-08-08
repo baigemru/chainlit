@@ -157,6 +157,18 @@ async def chat_profiles(current_user):
 async def on_chat_start():
     if cl.user_session.get("chat_profile") == "Search":
         await cl.Message(content="search ready").send()
+        transit = cl.user_session.get("transit_message")
+        if transit is not None:
+            cl.user_session.set("transit_message", None)
+            # Rendered as a user bubble on purpose: it persists as a real
+            # user step, so the reopened thread shows the query that
+            # started it.
+            await cl.Message(
+                content=str(transit), type="user_message", author="user1"
+            ).send()
+            await cl.Message(
+                content=f"profile: {cl.user_session.get('chat_profile')}"
+            ).send()
 
 
 @cl.on_chat_resume
@@ -167,15 +179,13 @@ async def on_chat_resume(thread: ThreadDict):
 
 @cl.on_message
 async def on_message(msg: cl.Message):
-    # The trigger and first_message must differ, otherwise the delivered
-    # message re-triggers this handler and the switch loops.
     if msg.content.startswith("go soft"):
         await cl.context.emitter.set_chat_profile(
-            "Search", keep_transcript=True, first_message="searching knife"
+            "Search", keep_transcript=True, transit_message="searching knife"
         )
     elif msg.content.startswith("go search"):
         await cl.context.emitter.set_chat_profile(
-            "Search", first_message="searching knife"
+            "Search", transit_message="searching knife"
         )
     else:
         await cl.Message(

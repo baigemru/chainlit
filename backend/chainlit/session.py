@@ -254,6 +254,12 @@ class HTTPSession(BaseSession):
 
     async def delete(self):
         """Delete the session."""
+        from chainlit.chat_context import chat_contexts
+
+        # Keyed by session id and never dropped anywhere else: leaving the
+        # entry behind leaks the full message history for the process
+        # lifetime.
+        chat_contexts.pop(self.id, None)
         if self.files_dir.is_dir():
             shutil.rmtree(self.files_dir)
 
@@ -377,6 +383,12 @@ class WebsocketSession(BaseSession):
 
     async def delete(self):
         """Delete the session."""
+        from chainlit.chat_context import chat_contexts
+
+        # Same fate as user_sessions (popped in the disconnect handler):
+        # chat_contexts is keyed by session id and grows with every message,
+        # so a surviving entry leaks the full transcript until restart.
+        chat_contexts.pop(self.id, None)
         if self.files_dir.is_dir():
             shutil.rmtree(self.files_dir)
         ws_sessions_sid.pop(self.socket_id, None)

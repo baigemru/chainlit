@@ -2,9 +2,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import chainlit.transit as transit
 from chainlit.element import ElementDict
 from chainlit.emitter import ChainlitEmitter
 from chainlit.step import StepDict
+
+
+@pytest.fixture(autouse=True)
+def clean_transit_store():
+    # The transit store is module-level state; without this, records parked
+    # by one test leak into the next.
+    transit.clear()
+    yield
+    transit.clear()
 
 
 @pytest.fixture
@@ -214,27 +224,50 @@ async def test_send_toast_invalid_type(emitter: ChainlitEmitter) -> None:
 async def test_set_chat_profile_defaults(
     emitter: ChainlitEmitter, mock_websocket_session: MagicMock
 ) -> None:
+    mock_websocket_session.id = "session-defaults"
+    mock_websocket_session.user = None
+
     await emitter.set_chat_profile("GPT-4")
+
     mock_websocket_session.emit.assert_called_once_with(
         "set_chat_profile",
-        {"name": "GPT-4", "keepTranscript": False, "firstMessage": None},
+        {"name": "GPT-4", "keepTranscript": False, "hasTransitMessage": False},
     )
+    # No transit message was parked for the next session.
+    assert transit.pop("session-defaults", None) is transit.NO_TRANSIT
 
 
 async def test_set_chat_profile_with_options(
     emitter: ChainlitEmitter, mock_websocket_session: MagicMock
 ) -> None:
+    mock_websocket_session.id = "session-options"
+    mock_websocket_session.user = None
+
     await emitter.set_chat_profile(
-        "Search", keep_transcript=True, first_message="knife sharpener"
+        "Search", keep_transcript=True, transit_message="knife sharpener"
     )
+
     mock_websocket_session.emit.assert_called_once_with(
         "set_chat_profile",
         {
             "name": "Search",
             "keepTranscript": True,
-            "firstMessage": "knife sharpener",
+            "hasTransitMessage": True,
         },
     )
+    assert transit.pop("session-options", None) == "knife sharpener"
+
+
+async def test_set_chat_profile_none_clears_parked_transit(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    mock_websocket_session.id = "session-clears"
+    mock_websocket_session.user = None
+
+    await emitter.set_chat_profile("Search", transit_message="first")
+    await emitter.set_chat_profile("Search")
+
+    assert transit.pop("session-clears", None) is transit.NO_TRANSIT
 
 
 async def test_set_chat_profile_rejects_positional_flags(

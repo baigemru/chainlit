@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { useRecoilState, useSetRecoilState } from 'recoil';
+import { useSetRecoilState } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
@@ -10,8 +10,7 @@ import {
   callFnState,
   loadingState,
   messagesState,
-  useAuth,
-  useChatData,
+  sessionIdState,
   useChatInteract,
   useChatSession,
   useConfig
@@ -22,7 +21,6 @@ import {
   IChatBoundary,
   attachmentsState,
   chatBoundariesState,
-  pendingFirstMessageState,
   persistentCommandState
 } from '@/state/chat';
 
@@ -31,24 +29,11 @@ interface SetChatProfilePayload {
   keepTranscript?: boolean;
   /** @deprecated superseded by keepTranscript; read for older backends. */
   startNew?: boolean;
+  /** Set when the backend parked a transit message for the next session. */
+  hasTransitMessage?: boolean;
+  /** @deprecated older backends deliver the message through the browser. */
   firstMessage?: string | null;
 }
-
-// On a fresh connection the server emits an initial `task_end`
-// (connection_successful) and, when an on_chat_start callback exists,
-// schedules it right away — its `task_start` follows on the same socket.
-// If no `task_start` shows up within this grace period after the initial
-// `task_end`, there is no on_chat_start to wait for.
-const CHAT_START_GRACE_MS = 500;
-
-// A pending message whose delivery never happened (dead socket, on_chat_start
-// that never returned) must not resurface in a later, unrelated conversation.
-const PENDING_MESSAGE_TTL_MS = 60000;
-
-// A switch carrying the message we just delivered is an echo of that delivery
-// (the app re-matched its own trigger), not a new request. Honouring it would
-// loop: deliver -> on_message -> switch -> deliver.
-const LOOP_GUARD_MS = 5000;
 
 /**
  * Clears the `streaming` flag left over on messages kept from a chat whose
@@ -75,77 +60,25 @@ const freezeStreaming = (steps: IStep[]): IStep[] => {
   return changed ? frozen : steps;
 };
 
-/**
- * Drops the message that triggered the switch, plus whatever the interrupted
- * turn left after it, when that same text is about to be redelivered to the
- * new chat — otherwise the user sees their own words on both sides of the
- * divider.
- */
-const trimRedeliveredTrigger = (steps: IStep[], text?: string): IStep[] => {
-  if (!text) return steps;
-
-  for (let index = steps.length - 1; index >= 0; index--) {
-    const step = steps[index];
-    if (step.type === 'user_message' && step.output === text) {
-      return steps.slice(0, index);
-    }
-  }
-
-  return steps;
-};
-
 export default function ChatProfileSwitchListener() {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { config } = useConfig();
   const { session, chatProfile, setChatProfile } = useChatSession();
-  const { clear, sendMessage, replyMessage } = useChatInteract();
-  const { askUser, connected } = useChatData();
+  const { clear } = useChatInteract();
   const setAskUser = useSetRecoilState(askUserState);
   const setCallFn = useSetRecoilState(callFnState);
   const setLoading = useSetRecoilState(loadingState);
   const setMessages = useSetRecoilState(messagesState);
+  const setSessionId = useSetRecoilState(sessionIdState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
   const setPersistentCommand = useSetRecoilState(persistentCommandState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
-  const [pendingFirstMessage, setPendingFirstMessage] = useRecoilState(
-    pendingFirstMessageState
-  );
-
-  // Last message handed to the backend, used to break the delivery -> trigger
-  // -> switch -> delivery loop described above.
-  const lastDeliveredRef = useRef<{ text: string; at: number }>();
-
-  const buildUserMessage = (output: string): IStep => ({
-    threadId: '',
-    id: uuidv4(),
-    name: user?.identifier || 'User',
-    type: 'user_message',
-    output,
-    createdAt: new Date().toISOString(),
-    metadata: { location: window.location.href }
-  });
-
-  // Returns the pending message if it is still fresh, and clears it either way.
-  const takePending = (): string | undefined => {
-    if (!pendingFirstMessage) return undefined;
-    setPendingFirstMessage(undefined);
-    if (Date.now() - pendingFirstMessage.createdAt > PENDING_MESSAGE_TTL_MS) {
-      console.warn('set_chat_profile: dropping a stale pending first message.');
-      return undefined;
-    }
-    return pendingFirstMessage.text;
-  };
-
-  const markDelivered = (text: string) => {
-    lastDeliveredRef.current = { text, at: Date.now() };
-  };
 
   // Latest switch logic lives in a ref so the socket subscription below is
   // only re-registered when the socket itself changes.
   const switchRef = useRef<(payload: SetChatProfilePayload) => void>();
   switchRef.current = (payload) => {
-    const { name, firstMessage } = payload || {};
+    const { name, hasTransitMessage } = payload || {};
     // Older backends only send startNew; keepTranscript is its inverse.
     const keepTranscript =
       payload?.keepTranscript ?? !(payload?.startNew ?? true);
@@ -157,23 +90,37 @@ export default function ChatProfileSwitchListener() {
       return;
     }
 
-    const lastDelivered = lastDeliveredRef.current;
-    if (
-      firstMessage &&
-      lastDelivered?.text === firstMessage &&
-      Date.now() - lastDelivered.at < LOOP_GUARD_MS
-    ) {
+    if (payload?.firstMessage && !hasTransitMessage) {
+      // An older backend expects this frontend to impersonate the user with
+      // firstMessage; that delivery path is gone. The switch still happens.
       console.warn(
-        'set_chat_profile: ignoring a switch triggered by the message just delivered.'
+        'set_chat_profile: firstMessage is not supported anymore and will be dropped; upgrade the backend to transit_message.'
       );
-      return;
     }
 
     const alreadyActive = chatProfile === name;
 
     // Keeping the transcript is never a no-op: it draws a line and starts a
-    // new thread, which is meaningful even within the same profile.
-    if (alreadyActive && !firstMessage && !keepTranscript) return;
+    // new thread, which is meaningful even within the same profile. So is a
+    // parked transit message — leaving it unclaimed would strand it.
+    if (alreadyActive && !keepTranscript && !hasTransitMessage) return;
+
+    // The backend parked the transit message under the emitting session's
+    // id; re-key it to the session we are about to open. Emitted
+    // synchronously inside this socket callback on purpose: socket.io only
+    // delivers events while connected, so a synchronous emit is guaranteed
+    // to hit the live socket (and its write buffer is flushed before the
+    // disconnect below closes the transport). Deferring this to an effect
+    // or timer would risk queueing it on a socket that never reconnects.
+    // It also runs after every early return above — claiming for a switch
+    // that is not going to happen would strand the message on a session id
+    // nobody will ever connect with.
+    const nextSessionId = hasTransitMessage ? uuidv4() : undefined;
+    if (nextSessionId) {
+      session?.socket.emit('claim_transit_message', {
+        sessionId: nextSessionId
+      });
+    }
 
     // Same path as a manual selection (ChatProfiles.handleConfirm), minus
     // the confirmation dialog: the server already made the decision.
@@ -186,9 +133,6 @@ export default function ChatProfileSwitchListener() {
     // but with the thread id already cleared, which makes Thread mount
     // AutoResumeThread and resume the previous thread over the new chat.
     flushSync(() => {
-      setPendingFirstMessage(
-        firstMessage ? { text: firstMessage, createdAt: Date.now() } : undefined
-      );
       setAskUser(undefined);
       setCallFn(undefined);
       setLoading(false);
@@ -202,9 +146,7 @@ export default function ChatProfileSwitchListener() {
       let keptBoundaries: IChatBoundary[] = [];
       if (keepTranscript) {
         setMessages((previous) => {
-          kept = freezeStreaming(
-            trimRedeliveredTrigger(previous, firstMessage || undefined)
-          );
+          kept = freezeStreaming(previous);
           return previous;
         });
         setBoundaries((previous) => {
@@ -215,6 +157,13 @@ export default function ChatProfileSwitchListener() {
 
       // The real teardown, so this path inherits whatever it grows upstream.
       clear();
+
+      // clear() resets the session id to a random one; overwrite it with the
+      // id the transit message was claimed for. Recoil applies these set
+      // calls in order, so the last write wins, and flushSync commits once.
+      if (nextSessionId) {
+        setSessionId(nextSessionId);
+      }
 
       if (keepTranscript && kept === undefined) {
         console.error(
@@ -249,70 +198,6 @@ export default function ChatProfileSwitchListener() {
       socket.off('set_chat_profile', handler);
     };
   }, [session?.socket]);
-
-  // If the new profile's on_chat_start asks a text question, answer it with
-  // the pending message. Other ask types (file/action/element) cannot be
-  // answered with a text step — the backend would raise on the reply — so
-  // those fall through to the regular delivery below.
-  useEffect(() => {
-    if (!pendingFirstMessage || !connected || !askUser) return;
-    if (askUser.spec.type !== 'text') return;
-    const text = takePending();
-    if (!text) return;
-    replyMessage(buildUserMessage(text));
-    markDelivered(text);
-  }, [pendingFirstMessage, connected, askUser, replyMessage]);
-
-  const deliverRef = useRef<() => void>();
-  deliverRef.current = () => {
-    const text = takePending();
-    if (!text) return;
-    sendMessage(buildUserMessage(text));
-    markDelivered(text);
-  };
-
-  // Otherwise send the pending message as regular user input, but only
-  // after on_chat_start (if any) has finished, so the new profile has set
-  // up its session first.
-  useEffect(() => {
-    const socket = session?.socket;
-    if (!socket || !pendingFirstMessage) return;
-
-    let ackReceived = false;
-    let chatStartRunning = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const onTaskEnd = () => {
-      if (!ackReceived) {
-        ackReceived = true;
-        timer = setTimeout(() => deliverRef.current?.(), CHAT_START_GRACE_MS);
-      } else if (chatStartRunning) {
-        chatStartRunning = false;
-        deliverRef.current?.();
-      }
-    };
-    const onTaskStart = () => {
-      chatStartRunning = true;
-      if (timer) clearTimeout(timer);
-    };
-    const onAsk = ({ spec }: { spec?: { type?: string } }) => {
-      // Only a text ask consumes the pending message (see the effect above).
-      if (spec?.type !== 'text') return;
-      chatStartRunning = false;
-      if (timer) clearTimeout(timer);
-    };
-
-    socket.on('task_end', onTaskEnd);
-    socket.on('task_start', onTaskStart);
-    socket.on('ask', onAsk);
-
-    return () => {
-      socket.off('task_end', onTaskEnd);
-      socket.off('task_start', onTaskStart);
-      socket.off('ask', onAsk);
-      if (timer) clearTimeout(timer);
-    };
-  }, [session?.socket, pendingFirstMessage]);
 
   return null;
 }

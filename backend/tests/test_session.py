@@ -364,6 +364,23 @@ class TestHTTPSession:
 
                 assert not session.files_dir.exists()
 
+    @pytest.mark.asyncio
+    async def test_http_session_delete_clears_chat_context(self):
+        """Deleting the session must drop its chat context entry entirely."""
+        from chainlit.chat_context import chat_contexts
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = HTTPSession(
+                    id="http_ctx_id",
+                    client_type="copilot",
+                )
+                chat_contexts["http_ctx_id"] = [Mock()]
+
+                await session.delete()
+
+                assert "http_ctx_id" not in chat_contexts
+
 
 class TestWebsocketSession:
     """Test suite for WebsocketSession class."""
@@ -466,6 +483,33 @@ class TestWebsocketSession:
                 assert not session.files_dir.exists()
                 assert ws_sessions_sid.get("socket_123") is None
                 assert ws_sessions_id.get("ws_id") is None
+
+    @pytest.mark.asyncio
+    async def test_websocket_session_delete_clears_chat_context(self):
+        """Deleting the session must drop its chat context entry entirely.
+
+        chat_contexts is keyed by session id and grows with every message;
+        leaving the entry behind leaks the full transcript for the process
+        lifetime (user_sessions gets popped on disconnect — this is its
+        forgotten sibling).
+        """
+        from chainlit.chat_context import chat_contexts
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = WebsocketSession(
+                    id="ws_ctx_id",
+                    socket_id="socket_ctx",
+                    emit=Mock(),
+                    emit_call=Mock(),
+                    user_env={},
+                    client_type="webapp",
+                )
+                chat_contexts["ws_ctx_id"] = [Mock()]
+
+                await session.delete()
+
+                assert "ws_ctx_id" not in chat_contexts
 
     def test_websocket_session_get(self):
         """Test WebsocketSession.get class method."""

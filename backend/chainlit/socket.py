@@ -410,6 +410,14 @@ async def edit_message(sid, payload: MessagePayload):
             await message.update()
             orig_message = message
 
+    if orig_message is None:
+        # The edited message is not in this session's context — e.g. the page
+        # reconnected with the same session id after the server already timed
+        # the session out. Ignore the edit instead of handing None to the
+        # app's on_message. (The leak this fix removed used to mask the case:
+        # the fresh session silently adopted the undeleted context.)
+        return
+
     await context.emitter.task_start()
 
     if config.code.on_message:

@@ -1,3 +1,5 @@
+import { useApi } from '@chainlit/react-client';
+
 import LinkIcon from '@/components/LinkIcon';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,6 +18,12 @@ export interface ButtonLinkProps {
   iconMask?: boolean;
   url: string;
   target?: '_blank' | '_self' | '_parent' | '_top';
+  // Endpoint returning {"label": "..."} used as the button text. When set,
+  // the label is fetched on mount and a click re-fetches it instead of
+  // navigating; displayName is shown until the first response.
+  labelUrl?: string;
+  // Re-fetch the label every N seconds.
+  labelRefreshInterval?: number;
 }
 
 export default function ButtonLink({
@@ -26,22 +34,38 @@ export default function ButtonLink({
   iconUrlDark,
   iconMask,
   url,
-  target
+  target,
+  labelUrl,
+  labelRefreshInterval
 }: ButtonLinkProps) {
+  const { data, mutate } = useApi<{ label: string }>(labelUrl ?? null, {
+    refreshInterval: labelRefreshInterval ? labelRefreshInterval * 1000 : 0
+  });
+
+  const label = (labelUrl && data?.label) || displayName;
+
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
-            size={displayName ? 'default' : 'icon'}
+            size={label ? 'default' : 'icon'}
             className="text-muted-foreground hover:text-muted-foreground"
           >
             <a
-              href={url}
-              target={target ?? '_blank'}
+              href={labelUrl ? undefined : url}
+              target={labelUrl ? undefined : (target ?? '_blank')}
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1"
+              className="inline-flex items-center gap-1 cursor-pointer"
+              onClick={
+                labelUrl
+                  ? (e) => {
+                      e.preventDefault();
+                      mutate();
+                    }
+                  : undefined
+              }
             >
               <LinkIcon
                 iconUrl={iconUrl}
@@ -51,7 +75,7 @@ export default function ButtonLink({
                 className="h-6 w-6"
                 alt={name}
               />
-              {displayName && <span>{displayName}</span>}
+              {label && <span>{label}</span>}
             </a>
           </Button>
         </TooltipTrigger>

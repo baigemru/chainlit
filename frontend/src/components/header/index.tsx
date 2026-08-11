@@ -107,6 +107,8 @@ const Header = memo(() => {
               iconMask={link.icon_mask}
               url={link.url}
               target={link.target}
+              labelUrl={link.label_url}
+              labelRefreshInterval={link.label_refresh_interval}
             />
           ))}
         {showSettingsInHeader && (

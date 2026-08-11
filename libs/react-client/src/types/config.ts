@@ -81,6 +81,8 @@ export interface IChainlitConfig {
       authenticated_only?: boolean;
       url: string;
       target?: '_blank' | '_self' | '_parent' | '_top';
+      label_url?: string;
+      label_refresh_interval?: number;
     }[];
     user_menu_links?: {
       name: string;

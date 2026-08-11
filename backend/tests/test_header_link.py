@@ -32,6 +32,22 @@ class TestHeaderLink:
         assert link.icon_mask is True
         assert link.authenticated_only is True
 
+    def test_label_url_fields(self):
+        assert HeaderLink(name="x", url="y").label_url is None
+        assert HeaderLink(name="x", url="y").label_refresh_interval is None
+
+        link = HeaderLink(
+            name="Balance",
+            display_name="Баланс",
+            url="/billing/balance",
+            label_url="/billing/balance",
+            label_refresh_interval=60,
+            authenticated_only=True,
+        )
+
+        assert link.label_url == "/billing/balance"
+        assert link.label_refresh_interval == 60
+
     def test_per_theme_icons(self):
         link = HeaderLink(
             name="Buy",

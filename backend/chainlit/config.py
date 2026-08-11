@@ -256,6 +256,8 @@ default_avatar_file_url = ""
 #     authenticated_only = false   # Optional. Only show the link to authenticated users.
 #     url = "https://github.com/Chainlit/chainlit/issues"
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
+#     label_url = "/my/endpoint"   # Optional. Endpoint returning {{"label": "..."}} used as the button text; a click re-fetches instead of navigating.
+#     label_refresh_interval = 60  # Optional. Re-fetch the label every N seconds.
 
 # Specify optional one or more custom links inside the user menu (the dropdown
 # opened by clicking the avatar in the top-right corner).
@@ -380,6 +382,12 @@ class HeaderLink(BaseModel):
     # Only show the link to authenticated users.
     authenticated_only: bool = False
     target: Optional[Literal["_blank", "_self", "_parent", "_top"]] = None
+    # Endpoint returning {"label": "..."} used as the button text. When set,
+    # the label is fetched on mount, a click re-fetches it instead of
+    # navigating, and `display_name` is shown until the first response.
+    label_url: Optional[str] = None
+    # Re-fetch the label every N seconds; None disables periodic refresh.
+    label_refresh_interval: Optional[int] = None
 
 
 class UserMenuLink(BaseModel):

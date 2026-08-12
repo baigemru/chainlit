@@ -53,6 +53,12 @@
         "sessionRequired": "Por favor inicia sesión para acceder a esta página",
         "credentialssignin": "Error al iniciar sesión. Verifica que los datos proporcionados sean correctos",
         "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
+      },
+      "completeSetup": {
+        "title": "Complete your registration",
+        "description": "Your registration is not complete: your e-mail needs to be verified. Redirect you to finish the registration?",
+        "confirm": "Yes, redirect",
+        "cancel": "No, stay here"
       }
     },
     "provider": {

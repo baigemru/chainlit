@@ -53,6 +53,12 @@
         "sessionRequired": "આ પેજને ઍક્સેસ કરવા માટે કૃપા કરી સાઇન ઇન કરો",
         "credentialssignin": "સાઇન ઇન નિષ્ફળ. આપેલી વિગતો સાચી છે કે નહીં તે ચકાસો",
         "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
+      },
+      "completeSetup": {
+        "title": "Complete your registration",
+        "description": "Your registration is not complete: your e-mail needs to be verified. Redirect you to finish the registration?",
+        "confirm": "Yes, redirect",
+        "cancel": "No, stay here"
       }
     },
     "provider": {

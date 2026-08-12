@@ -6,6 +6,17 @@ import { ClientError } from '@chainlit/react-client';
 import { LoginForm } from '@/components/LoginForm';
 import { Logo } from '@/components/Logo';
 import { useTheme } from '@/components/ThemeProvider';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
+import { Translator } from 'components/i18n';
 
 import { useQuery } from 'hooks/query';
 
@@ -19,6 +30,11 @@ export default function Login() {
   const query = useQuery();
   const { data: config, user, setUserFromAPI } = useAuth();
   const [error, setError] = useState('');
+  // E-mail of a user whose account setup is incomplete (e.g. unverified
+  // email): we ask for confirmation before redirecting to the provider.
+  const [pendingSetupEmail, setPendingSetupEmail] = useState<string | null>(
+    null
+  );
   const apiClient = useContext(ChainlitContext);
   const navigate = useNavigate();
   const { variant } = useTheme();
@@ -65,18 +81,29 @@ export default function Login() {
       handleCookieAuth(json);
     } catch (error: any) {
       // The credentials are correct but the account has pending required
-      // actions (e.g. unverified email). Send the user through the browser
-      // flow so the oauth provider walks them through completing the setup
-      // (resend verification email, etc).
+      // actions (e.g. unverified email). Ask for confirmation, then send the
+      // user through the browser flow so the oauth provider walks them
+      // through completing the setup (resend verification email, etc).
       if (error instanceof ClientError && error.detail === 'accountnotsetup') {
         const provider =
           config?.oauthProviderDetails?.[0]?.id || config?.oauthProviders?.[0];
         if (provider) {
-          window.location.href = apiClient.getOAuthEndpoint(provider, email);
+          setPendingSetupEmail(email);
           return;
         }
       }
       setError(error.detail || error.message);
+    }
+  };
+
+  const completeSetupRedirect = () => {
+    const provider =
+      config?.oauthProviderDetails?.[0]?.id || config?.oauthProviders?.[0];
+    if (provider && pendingSetupEmail) {
+      window.location.href = apiClient.getOAuthEndpoint(
+        provider,
+        pendingSetupEmail
+      );
     }
   };
 
@@ -130,6 +157,31 @@ export default function Login() {
           </div>
         </div>
       </div>
+      <AlertDialog
+        open={pendingSetupEmail !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingSetupEmail(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              <Translator path="auth.login.completeSetup.title" />
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <Translator path="auth.login.completeSetup.description" />
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingSetupEmail(null)}>
+              <Translator path="auth.login.completeSetup.cancel" />
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={completeSetupRedirect}>
+              <Translator path="auth.login.completeSetup.confirm" />
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {!config?.headerAuth ? (
         <div className="relative hidden bg-muted lg:block overflow-hidden">
           <img

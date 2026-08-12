@@ -1,6 +1,8 @@
 import { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { ClientError } from '@chainlit/react-client';
+
 import { LoginForm } from '@/components/LoginForm';
 import { Logo } from '@/components/Logo';
 import { useTheme } from '@/components/ThemeProvider';
@@ -58,8 +60,24 @@ export default function Login() {
     formData.append('username', email);
     formData.append('password', password);
 
-    const jsonPromise = apiClient.passwordAuth(formData);
-    await handleAuth(jsonPromise);
+    try {
+      const json = await apiClient.passwordAuth(formData);
+      handleCookieAuth(json);
+    } catch (error: any) {
+      // The credentials are correct but the account has pending required
+      // actions (e.g. unverified email). Send the user through the browser
+      // flow so the oauth provider walks them through completing the setup
+      // (resend verification email, etc).
+      if (error instanceof ClientError && error.detail === 'accountnotsetup') {
+        const provider =
+          config?.oauthProviderDetails?.[0]?.id || config?.oauthProviders?.[0];
+        if (provider) {
+          window.location.href = apiClient.getOAuthEndpoint(provider, email);
+          return;
+        }
+      }
+      setError(error.detail || error.message);
+    }
   };
 
   useEffect(() => {

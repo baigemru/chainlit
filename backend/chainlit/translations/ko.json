@@ -51,7 +51,8 @@
         "emailVerify": "이메일을 확인해주세요. 새로운 이메일이 발송되었습니다",
         "credentialsSignin": "로그인 실패. 제공한 정보가 올바른지 확인하세요",
         "sessionRequired": "이 페이지에 접근하려면 로그인해주세요",
-        "credentialssignin": "로그인 실패. 제공한 정보가 올바른지 확인하세요"
+        "credentialssignin": "로그인 실패. 제공한 정보가 올바른지 확인하세요",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

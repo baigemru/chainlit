@@ -161,3 +161,20 @@ class TestOAuthVkRoute:
             urllib.parse.urlparse(response.headers["location"]).query
         )
         assert "kc_idp_hint" not in params
+
+
+class TestLoginHint:
+    def test_login_hint_forwarded_to_authorize_url(
+        self, test_client: TestClient, stub_provider: StubProvider
+    ):
+        response = test_client.get(
+            "/auth/oauth/test?login_hint=user%40example.com", follow_redirects=False
+        )
+
+        assert response.status_code == 307
+        params = urllib.parse.parse_qs(
+            urllib.parse.urlparse(response.headers["location"]).query
+        )
+        assert params["login_hint"] == ["user@example.com"]
+        # The hint must not leak into the callback redirect_uri.
+        assert params["redirect_uri"][0].endswith("/auth/oauth/test/callback")

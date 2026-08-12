@@ -51,7 +51,8 @@
         "emailVerify": "Es wurde eine neue E-Mail versandt. Bitte überprüfe dein E-Mail Postfach",
         "credentialsSignin": "Anmeldung fehlgeschlagen. Überprüfe, ob die angegebenen Benutzerdaten korrekt sind",
         "sessionRequired": "Bitte melde dich an, um auf diese Seite zuzugreifen",
-        "credentialssignin": "Anmeldung fehlgeschlagen. Überprüfe, ob die angegebenen Benutzerdaten korrekt sind"
+        "credentialssignin": "Anmeldung fehlgeschlagen. Überprüfe, ob die angegebenen Benutzerdaten korrekt sind",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

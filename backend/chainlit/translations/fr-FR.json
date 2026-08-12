@@ -51,7 +51,8 @@
         "emailVerify": "Veuillez vérifier votre e-mail, un nouvel e-mail a été envoyé",
         "credentialsSignin": "La connexion a échoué. Vérifiez que les informations que vous avez fournies sont correctes",
         "sessionRequired": "Veuillez vous connecter pour accéder à cette page",
-        "credentialssignin": "La connexion a échoué. Vérifiez que les informations que vous avez fournies sont correctes"
+        "credentialssignin": "La connexion a échoué. Vérifiez que les informations que vous avez fournies sont correctes",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

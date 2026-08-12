@@ -373,8 +373,11 @@ export class ChainlitAPI extends APIBase {
     return this.buildEndpoint(`/logo?theme=${theme}`);
   }
 
-  getOAuthEndpoint(provider: string) {
-    return this.buildEndpoint(`/auth/oauth/${provider}`);
+  getOAuthEndpoint(provider: string, loginHint?: string) {
+    const endpoint = this.buildEndpoint(`/auth/oauth/${provider}`);
+    return loginHint
+      ? `${endpoint}?login_hint=${encodeURIComponent(loginHint)}`
+      : endpoint;
   }
 
   getOAuthRegisterEndpoint(provider: string) {

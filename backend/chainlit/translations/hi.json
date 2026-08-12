@@ -51,7 +51,8 @@
         "emailVerify": "कृपया अपना ईमेल सत्यापित करें, एक नया ईमेल भेजा गया है",
         "credentialsSignin": "साइन इन विफल। आपके द्वारा प्रदान किए गए विवरण की जांच करें",
         "sessionRequired": "इस पृष्ठ तक पहुंचने के लिए कृपया साइन इन करें",
-        "credentialssignin": "साइन इन विफल। आपके द्वारा प्रदान किए गए विवरण की जांच करें"
+        "credentialssignin": "साइन इन विफल। आपके द्वारा प्रदान किए गए विवरण की जांच करें",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

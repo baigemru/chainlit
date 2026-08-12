@@ -51,7 +51,8 @@
         "emailVerify": "உங்கள் மின்னஞ்சலை சரிபார்க்கவும், புதிய மின்னஞ்சல் அனுப்பப்பட்டுள்ளது",
         "credentialsSignin": "உள்நுழைவு தோல்வியடைந்தது. நீங்கள் வழங்கிய விவரங்கள் சரியானவை என சரிபார்க்கவும்",
         "sessionRequired": "இந்தப் பக்கத்தை அணுக உள்நுழையவும்",
-        "credentialssignin": "உள்நுழைவு தோல்வியடைந்தது. நீங்கள் வழங்கிய விவரங்கள் சரியானவை என சரிபார்க்கவும்"
+        "credentialssignin": "உள்நுழைவு தோல்வியடைந்தது. நீங்கள் வழங்கிய விவரங்கள் சரியானவை என சரிபார்க்கவும்",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

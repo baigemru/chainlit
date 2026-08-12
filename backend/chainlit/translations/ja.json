@@ -51,7 +51,8 @@
         "emailVerify": "メールアドレスを確認してください。新しいメールが送信されました",
         "credentialsSignin": "サインインに失敗しました。入力した情報が正しいか確認してください",
         "sessionRequired": "このページにアクセスするにはサインインしてください",
-        "credentialssignin": "サインインに失敗しました。入力した情報が正しいか確認してください"
+        "credentialssignin": "サインインに失敗しました。入力した情報が正しいか確認してください",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

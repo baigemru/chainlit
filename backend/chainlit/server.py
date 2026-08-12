@@ -660,7 +660,9 @@ def _oauth_authorize_response(
 
 
 @router.get("/auth/oauth/{provider_id}")
-async def oauth_login(provider_id: str, request: Request):
+async def oauth_login(
+    provider_id: str, request: Request, login_hint: Optional[str] = None
+):
     """Redirect the user to the oauth provider login page."""
     provider = _get_oauth_provider_or_raise(provider_id)
 
@@ -668,6 +670,7 @@ async def oauth_login(provider_id: str, request: Request):
         provider,
         provider.authorize_url,
         f"{get_user_facing_url(request.url)}/callback",
+        extra_params={"login_hint": login_hint} if login_hint else None,
     )
 
 

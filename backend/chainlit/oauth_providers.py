@@ -843,6 +843,16 @@ class KeycloakOAuthProvider(OAuthProvider):
                 data=payload,
             )
         if response.status_code in (400, 401):
+            try:
+                error_description = response.json().get("error_description", "")
+            except Exception:
+                error_description = ""
+            if "not fully set up" in error_description.lower():
+                # The credentials are correct, but the account has pending
+                # required actions (unverified email, terms, ...). Direct
+                # grant cannot complete them - the frontend should send the
+                # user through the browser flow instead.
+                raise HTTPException(status_code=403, detail="accountnotsetup")
             # invalid_grant: do not disclose whether the user exists.
             raise HTTPException(status_code=401, detail="credentialssignin")
         response.raise_for_status()

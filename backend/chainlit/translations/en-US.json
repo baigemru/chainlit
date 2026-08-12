@@ -51,7 +51,8 @@
         "emailVerify": "Please verify your email, a new email has been sent",
         "credentialsSignin": "Sign in failed. Check the details you provided are correct",
         "sessionRequired": "Please sign in to access this page",
-        "credentialssignin": "Sign in failed. Check the details you provided are correct"
+        "credentialssignin": "Sign in failed. Check the details you provided are correct",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

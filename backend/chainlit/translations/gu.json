@@ -51,7 +51,8 @@
         "emailVerify": "કૃપા કરી તમારો ઈમેલ ચકાસો, નવો ઈમેલ મોકલવામાં આવ્યો છે",
         "credentialsSignin": "સાઇન ઇન નિષ્ફળ. આપેલી વિગતો સાચી છે કે નહીં તે ચકાસો",
         "sessionRequired": "આ પેજને ઍક્સેસ કરવા માટે કૃપા કરી સાઇન ઇન કરો",
-        "credentialssignin": "સાઇન ઇન નિષ્ફળ. આપેલી વિગતો સાચી છે કે નહીં તે ચકાસો"
+        "credentialssignin": "સાઇન ઇન નિષ્ફળ. આપેલી વિગતો સાચી છે કે નહીં તે ચકાસો",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

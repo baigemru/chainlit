@@ -51,7 +51,8 @@
         "emailVerify": "Verifieer je e-mail, er is een nieuwe e-mail verzonden",
         "credentialsSignin": "Inloggen mislukt. Controleer of de ingevoerde gegevens correct zijn",
         "sessionRequired": "Log in om toegang te krijgen tot deze pagina",
-        "credentialssignin": "Inloggen mislukt. Controleer of de ingevoerde gegevens correct zijn"
+        "credentialssignin": "Inloggen mislukt. Controleer of de ingevoerde gegevens correct zijn",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

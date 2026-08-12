@@ -51,7 +51,8 @@
         "emailVerify": "אנא אמת את האימייל שלך, נשלח אימייל חדש",
         "credentialsSignin": "ההתחברות נכשלה. בדוק שהפרטים שהזנת נכונים",
         "sessionRequired": "אנא התחבר כדי לגשת לדף זה",
-        "credentialssignin": "ההתחברות נכשלה. בדוק שהפרטים שהזנת נכונים"
+        "credentialssignin": "ההתחברות נכשלה. בדוק שהפרטים שהזנת נכונים",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

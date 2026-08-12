@@ -51,7 +51,8 @@
         "emailVerify": "దయచేసి మీ ఇమెయిల్‌ని ధృవీకరించండి, కొత్త ఇమెయిల్ పంపబడింది",
         "credentialsSignin": "సైన్ ఇన్ విఫలమైంది. మీరు అందించిన వివరాలు సరైనవేనా అని తనిఖీ చేయండి",
         "sessionRequired": "ఈ పేజీని యాక్సెస్ చేయడానికి దయచేసి సైన్ ఇన్ చేయండి",
-        "credentialssignin": "సైన్ ఇన్ విఫలమైంది. మీరు అందించిన వివరాలు సరైనవేనా అని తనిఖీ చేయండి"
+        "credentialssignin": "సైన్ ఇన్ విఫలమైంది. మీరు అందించిన వివరాలు సరైనవేనా అని తనిఖీ చేయండి",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

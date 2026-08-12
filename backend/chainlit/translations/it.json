@@ -51,7 +51,8 @@
         "emailVerify": "Verifica la tua email, è stata inviata una nuova email",
         "credentialsSignin": "Accesso non riuscito. Verifica che i dati forniti siano corretti",
         "sessionRequired": "Accedi per visualizzare questa pagina",
-        "credentialssignin": "Accesso non riuscito. Verifica che i dati forniti siano corretti"
+        "credentialssignin": "Accesso non riuscito. Verifica che i dati forniti siano corretti",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

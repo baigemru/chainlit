@@ -51,7 +51,8 @@
         "emailVerify": "يرجى التحقق من بريدك الإلكتروني، تم إرسال بريد إلكتروني جديد",
         "credentialsSignin": "فشل تسجيل الدخول. تحقق من صحة المعلومات المقدمة",
         "sessionRequired": "يرجى تسجيل الدخول للوصول إلى هذه الصفحة",
-        "credentialssignin": "فشل تسجيل الدخول. تحقق من صحة المعلومات المقدمة"
+        "credentialssignin": "فشل تسجيل الدخول. تحقق من صحة المعلومات المقدمة",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

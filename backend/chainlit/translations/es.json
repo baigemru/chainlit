@@ -51,7 +51,8 @@
         "emailVerify": "Por favor verifica tu correo, se ha enviado un nuevo correo",
         "credentialsSignin": "Error al iniciar sesión. Verifica que los datos proporcionados sean correctos",
         "sessionRequired": "Por favor inicia sesión para acceder a esta página",
-        "credentialssignin": "Error al iniciar sesión. Verifica que los datos proporcionados sean correctos"
+        "credentialssignin": "Error al iniciar sesión. Verifica que los datos proporcionados sean correctos",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

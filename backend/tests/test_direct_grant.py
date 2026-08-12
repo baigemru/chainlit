@@ -230,3 +230,66 @@ class TestKeycloakDirectGrant:
         assert seen["data"]["grant_type"] == "password"
         assert seen["data"]["username"] == "user"
         assert seen["data"]["client_id"] == "kc-client"
+
+
+class TestKeycloakDirectGrantErrors:
+    """Error mapping of KeycloakOAuthProvider.get_token_with_password."""
+
+    def _provider(self, monkeypatch: pytest.MonkeyPatch):
+        from chainlit.oauth_providers import KeycloakOAuthProvider
+
+        monkeypatch.setenv("OAUTH_KEYCLOAK_BASE_URL", "https://kc.example.com")
+        monkeypatch.setenv("OAUTH_KEYCLOAK_REALM", "realm")
+        monkeypatch.setenv("OAUTH_KEYCLOAK_CLIENT_ID", "client-id")
+        monkeypatch.setenv("OAUTH_KEYCLOAK_CLIENT_SECRET", "client-secret")
+        return KeycloakOAuthProvider()
+
+    def _mock_token_response(self, monkeypatch, status_code, json_body):
+        import httpx
+
+        async def post(self, url, data=None, **kwargs):
+            return httpx.Response(
+                status_code,
+                json=json_body,
+                request=httpx.Request("POST", url),
+            )
+
+        monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    async def test_pending_required_actions_map_to_accountnotsetup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        provider = self._provider(monkeypatch)
+        self._mock_token_response(
+            monkeypatch,
+            400,
+            {
+                "error": "invalid_grant",
+                "error_description": "Account is not fully set up",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await provider.get_token_with_password("user@example.com", "pw")
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "accountnotsetup"
+
+    async def test_wrong_credentials_still_map_to_credentialssignin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        provider = self._provider(monkeypatch)
+        self._mock_token_response(
+            monkeypatch,
+            401,
+            {
+                "error": "invalid_grant",
+                "error_description": "Invalid user credentials",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await provider.get_token_with_password("user@example.com", "bad")
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "credentialssignin"

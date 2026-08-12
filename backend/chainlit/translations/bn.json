@@ -51,7 +51,8 @@
         "emailVerify": "অনুগ্রহ করে আপনার ইমেইল যাচাই করুন, একটি নতুন ইমেইল পাঠানো হয়েছে",
         "credentialsSignin": "সাইন ইন ব্যর্থ হয়েছে। আপনার দেওয়া তথ্য সঠিক কিনা যাচাই করুন",
         "sessionRequired": "এই পৃষ্ঠা দেখতে অনুগ্রহ করে সাইন ইন করুন",
-        "credentialssignin": "সাইন ইন ব্যর্থ হয়েছে। আপনার দেওয়া তথ্য সঠিক কিনা যাচাই করুন"
+        "credentialssignin": "সাইন ইন ব্যর্থ হয়েছে। আপনার দেওয়া তথ্য সঠিক কিনা যাচাই করুন",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

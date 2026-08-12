@@ -51,7 +51,8 @@
         "emailVerify": "നിങ്ങളുടെ ഇമെയിൽ പരിശോധിക്കുക, ഒരു പുതിയ ഇമെയിൽ അയച്ചിട്ടുണ്ട്",
         "credentialsSignin": "സൈൻ ഇൻ പരാജയപ്പെട്ടു. നിങ്ങൾ നൽകിയ വിവരങ്ങൾ ശരിയാണെന്ന് പരിശോധിക്കുക",
         "sessionRequired": "ഈ പേജ് ആക്സസ് ചെയ്യാൻ ദയവായി സൈൻ ഇൻ ചെയ്യുക",
-        "credentialssignin": "സൈൻ ഇൻ പരാജയപ്പെട്ടു. നിങ്ങൾ നൽകിയ വിവരങ്ങൾ ശരിയാണെന്ന് പരിശോധിക്കുക"
+        "credentialssignin": "സൈൻ ഇൻ പരാജയപ്പെട്ടു. നിങ്ങൾ നൽകിയ വിവരങ്ങൾ ശരിയാണെന്ന് പരിശോധിക്കുക",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

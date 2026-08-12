@@ -51,7 +51,8 @@
         "emailVerify": "कृपया तुमचा ईमेल तपासा, नवीन ईमेल पाठवला गेला आहे",
         "credentialsSignin": "साइन इन अयशस्वी. तुम्ही दिलेली माहिती योग्य आहे का ते तपासा",
         "sessionRequired": "या पृष्ठावर प्रवेश करण्यासाठी कृपया साइन इन करा",
-        "credentialssignin": "साइन इन अयशस्वी. तुम्ही दिलेली माहिती योग्य आहे का ते तपासा"
+        "credentialssignin": "साइन इन अयशस्वी. तुम्ही दिलेली माहिती योग्य आहे का ते तपासा",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

@@ -51,7 +51,8 @@
         "emailVerify": "请验证您的邮箱，新的验证邮件已发送",
         "credentialsSignin": "登录失败。请检查您提供的信息是否正确",
         "sessionRequired": "请登录以访问此页面",
-        "credentialssignin": "登录失败。请检查您提供的信息是否正确"
+        "credentialssignin": "登录失败。请检查您提供的信息是否正确",
+        "accountnotsetup": "Your account is not fully set up (e.g. email not verified). Redirecting you to complete it…"
       }
     },
     "provider": {

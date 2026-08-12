@@ -26,6 +26,7 @@ interface Props {
   ) => Promise<any>;
   onOAuthSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
   onOAuthSignUp?: (provider: string, callbackUrl: string) => Promise<any>;
+  onOAuthVkSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
 }
 
 interface FormValues {
@@ -39,6 +40,7 @@ export function LoginForm({
   onPasswordSignIn,
   onOAuthSignIn,
   onOAuthSignUp,
+  onOAuthVkSignIn,
   callbackUrl,
   forgotPasswordUrl,
   error
@@ -92,7 +94,10 @@ export function LoginForm({
   const oAuthReady =
     onOAuthSignIn &&
     providerItems.some(
-      (provider) => provider.loginEnabled || provider.registrationEnabled
+      (provider) =>
+        provider.loginEnabled ||
+        provider.registrationEnabled ||
+        provider.vkEnabled
     );
 
   return (
@@ -221,6 +226,14 @@ export function LoginForm({
                     mode="register"
                     icon={provider}
                     onClick={() => onOAuthSignUp?.(provider.id, callbackUrl)}
+                  />
+                ) : null}
+                {provider.vkEnabled ? (
+                  <ProviderButton
+                    provider={provider.id}
+                    mode="vk"
+                    icon={provider}
+                    onClick={() => onOAuthVkSignIn?.(provider.id, callbackUrl)}
                   />
                 ) : null}
               </Fragment>

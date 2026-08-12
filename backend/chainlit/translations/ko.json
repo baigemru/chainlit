@@ -57,7 +57,8 @@
     "provider": {
       "continue": "{{provider}}로 계속하기",
       "signin": "{{provider}}(으)로 로그인",
-      "register": "{{provider}}(으)로 가입"
+      "register": "{{provider}}(으)로 가입",
+      "vk": "Sign in with VK"
     }
   },
   "chat": {

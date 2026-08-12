@@ -57,7 +57,8 @@
     "provider": {
       "continue": "{{provider}} ನೊಂದಿಗೆ ಮುಂದುವರಿಸಿ",
       "signin": "{{provider}} ಮೂಲಕ ಸೈನ್ ಇನ್ ಮಾಡಿ",
-      "register": "{{provider}} ಮೂಲಕ ನೋಂದಾಯಿಸಿ"
+      "register": "{{provider}} ಮೂಲಕ ನೋಂದಾಯಿಸಿ",
+      "vk": "Sign in with VK"
     }
   },
   "chat": {

@@ -57,7 +57,8 @@
     "provider": {
       "continue": "Continua con {{provider}}",
       "signin": "Accedi con {{provider}}",
-      "register": "Registrati con {{provider}}"
+      "register": "Registrati con {{provider}}",
+      "vk": "Sign in with VK"
     }
   },
   "chat": {

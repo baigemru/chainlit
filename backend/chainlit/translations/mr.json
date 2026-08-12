@@ -57,7 +57,8 @@
     "provider": {
       "continue": "{{provider}} सह पुढे जा",
       "signin": "{{provider}} ने साइन इन करा",
-      "register": "{{provider}} ने नोंदणी करा"
+      "register": "{{provider}} ने नोंदणी करा",
+      "vk": "Sign in with VK"
     }
   },
   "chat": {

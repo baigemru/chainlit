@@ -380,6 +380,10 @@ export class ChainlitAPI extends APIBase {
   getOAuthRegisterEndpoint(provider: string) {
     return this.buildEndpoint(`/auth/oauth/${provider}/register`);
   }
+
+  getOAuthVkEndpoint(provider: string) {
+    return this.buildEndpoint(`/auth/oauth/${provider}/vk`);
+  }
   async shareThread(
     threadId: string,
     isShared: boolean

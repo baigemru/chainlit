@@ -78,6 +78,16 @@ class OAuthProvider:
     def is_direct_grant_enabled(self) -> bool:
         return False
 
+    def get_vk_idp_hint(self) -> Optional[str]:
+        """Identity-provider alias the VK button short-circuits to (Keycloak's
+        kc_idp_hint). None means the provider cannot render a VK button."""
+        return None
+
+    def is_vk_button_enabled(self) -> bool:
+        return self.get_vk_idp_hint() is not None and self._get_env_flag(
+            "VK_BUTTON", False
+        )
+
     def get_icon_url(self, theme: Optional[str] = None) -> Optional[str]:
         """Return the custom button icon from OAUTH_{PREFIX}_ICON_URL env vars.
 
@@ -790,6 +800,9 @@ class KeycloakOAuthProvider(OAuthProvider):
     def is_direct_grant_enabled(self) -> bool:
         return self._get_env_flag("DIRECT_GRANT", False)
 
+    def get_vk_idp_hint(self) -> Optional[str]:
+        return self._get_env_value("VK_IDP_ALIAS") or "vkid"
+
     async def get_raw_token_response(self, code: str, url: str) -> dict:
         payload = {
             "client_id": self.client_id,
@@ -951,6 +964,7 @@ def get_oauth_provider_details() -> List[Dict[str, object]]:
             "id": p.id,
             "loginEnabled": p.is_login_button_enabled(),
             "registrationEnabled": p.is_registration_button_enabled(),
+            "vkEnabled": p.is_vk_button_enabled(),
             "iconUrl": p.get_icon_url(),
             "iconUrlLight": p.get_icon_url("light"),
             "iconUrlDark": p.get_icon_url("dark"),

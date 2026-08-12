@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Union, cast
 
 import socketio
 from fastapi import (
@@ -633,7 +633,12 @@ def _get_oauth_provider_or_raise(provider_id: str):
     return provider
 
 
-def _oauth_authorize_response(provider, authorize_url: str, redirect_uri: str):
+def _oauth_authorize_response(
+    provider,
+    authorize_url: str,
+    redirect_uri: str,
+    extra_params: Optional[Dict[str, str]] = None,
+):
     random = random_secret(32)
 
     params = urllib.parse.urlencode(
@@ -642,6 +647,7 @@ def _oauth_authorize_response(provider, authorize_url: str, redirect_uri: str):
             "redirect_uri": redirect_uri,
             "state": random,
             **provider.authorize_params,
+            **(extra_params or {}),
         }
     )
     response = RedirectResponse(
@@ -684,6 +690,30 @@ async def oauth_register(provider_id: str, request: Request):
         provider,
         provider.registration_url,
         f"{base_url}/callback",
+    )
+
+
+@router.get("/auth/oauth/{provider_id}/vk")
+async def oauth_vk_login(provider_id: str, request: Request):
+    """Redirect the user straight to the VK identity provider, skipping the
+    oauth provider's own login page (Keycloak's kc_idp_hint)."""
+    provider = _get_oauth_provider_or_raise(provider_id)
+
+    if not provider.is_vk_button_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"VK login is not enabled for provider {provider_id}",
+        )
+
+    # The request URL ends in /vk; the provider must redirect back to the
+    # shared /auth/oauth/{provider_id}/callback route.
+    base_url = get_user_facing_url(request.url).rstrip("/").removesuffix("/vk")
+
+    return _oauth_authorize_response(
+        provider,
+        provider.authorize_url,
+        f"{base_url}/callback",
+        extra_params={"kc_idp_hint": provider.get_vk_idp_hint()},
     )
 
 

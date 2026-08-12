@@ -105,6 +105,9 @@ export default function Login() {
                 window.location.href =
                   apiClient.getOAuthRegisterEndpoint(provider);
               }}
+              onOAuthVkSignIn={async (provider: string) => {
+                window.location.href = apiClient.getOAuthVkEndpoint(provider);
+              }}
             />
           </div>
         </div>

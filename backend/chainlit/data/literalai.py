@@ -507,6 +507,7 @@ class LiteralDataLayer(BaseDataLayer):
         user_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
         tags: Optional[List[str]] = None,
+        parent_thread_id: Optional[str] = None,
     ):
         await self.client.api.upsert_thread(
             id=thread_id,

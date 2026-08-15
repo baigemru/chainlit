@@ -579,6 +579,7 @@ class DynamoDBDataLayer(BaseDataLayer):
         user_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
         tags: Optional[List[str]] = None,
+        parent_thread_id: Optional[str] = None,
     ):
         _logger.info("DynamoDB: update_thread thread=%s userId=%s", thread_id, user_id)
         _logger.debug(

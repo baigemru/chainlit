@@ -222,6 +222,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         user_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
         tags: Optional[List[str]] = None,
+        parent_thread_id: Optional[str] = None,
     ):
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_thread, thread_id={thread_id}")
@@ -235,6 +236,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             or name is not None
             or user_id is not None
             or tags is not None
+            or parent_thread_id is not None
         )
 
         if metadata is None:
@@ -279,22 +281,42 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             "userIdentifier": user_identifier,
             "tags": tags,
             "metadata": json.dumps(metadata),
+            "parentThreadId": parent_thread_id,
         }
         parameters = {
             key: value for key, value in data.items() if value is not None
         }  # Remove keys with None values
-        columns = ", ".join(f'"{key}"' for key in parameters.keys())
-        values = ", ".join(f":{key}" for key in parameters.keys())
-        updates = ", ".join(
-            f'"{key}" = EXCLUDED."{key}"' for key in parameters.keys() if key != "id"
+
+        def build_upsert(parameters: Dict[str, Any]) -> str:
+            columns = ", ".join(f'"{key}"' for key in parameters.keys())
+            values = ", ".join(f":{key}" for key in parameters.keys())
+            updates = ", ".join(
+                f'"{key}" = EXCLUDED."{key}"'
+                for key in parameters.keys()
+                if key != "id"
+            )
+            return f"""
+                INSERT INTO threads ({columns})
+                VALUES ({values})
+                ON CONFLICT ("id") DO UPDATE
+                SET {updates};
+            """
+
+        result = await self.execute_sql(
+            query=build_upsert(parameters), parameters=parameters
         )
-        query = f"""
-            INSERT INTO threads ({columns})
-            VALUES ({values})
-            ON CONFLICT ("id") DO UPDATE
-            SET {updates};
-        """
-        await self.execute_sql(query=query, parameters=parameters)
+        if result is None and "parentThreadId" in parameters:
+            # The parent thread may have been deleted between the profile
+            # switch and this write (FK violation), or the column may not
+            # exist yet — persisting the thread matters more than the link.
+            logger.warning(
+                "SQLAlchemy: update_thread failed with parentThreadId, "
+                "retrying without it."
+            )
+            del parameters["parentThreadId"]
+            await self.execute_sql(
+                query=build_upsert(parameters), parameters=parameters
+            )
 
     async def delete_thread(self, thread_id: str):
         if self.show_logger:
@@ -678,6 +700,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 t."userIdentifier" AS user_identifier,
                 t."tags" AS thread_tags,
                 t."metadata" AS thread_metadata,
+                t."parentThreadId" AS thread_parentthreadid,
                 MAX(s."createdAt") AS updatedAt
             FROM threads t
             LEFT JOIN steps s ON t."id" = s."threadId"
@@ -689,7 +712,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 t."userId",
                 t."userIdentifier",
                 t."tags",
-                t."metadata"
+                t."metadata",
+                t."parentThreadId"
             ORDER BY updatedAt DESC NULLS LAST
             LIMIT :limit
         """
@@ -776,6 +800,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     userIdentifier=thread["user_identifier"],
                     tags=thread["thread_tags"],
                     metadata=thread["thread_metadata"],
+                    parentThreadId=thread["thread_parentthreadid"],
                     steps=[],
                     elements=[],
                 )

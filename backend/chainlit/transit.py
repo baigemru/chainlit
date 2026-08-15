@@ -6,6 +6,10 @@ open (`claim_transit_message`), and `connection_successful` moves it into
 `user_sessions` before `on_chat_start` runs. The value never travels through
 the browser.
 
+Besides the message, a record carries the emitting session's thread id
+(`parent`) so the thread spawned by the switch can point back at the thread
+it came from — a record may hold a parent and no message at all.
+
 This module must stay free of chainlit imports: both `emitter` and `socket`
 import it, and anything heavier would create an import cycle.
 """
@@ -31,6 +35,9 @@ class _Record(NamedTuple):
     value: Any
     owner: Optional[str]
     created_at: float
+    # Thread id of the session that parked the record; the switch target
+    # stores it as the new thread's parentThreadId.
+    parent: Optional[str]
 
 
 _records: Dict[str, _Record] = {}
@@ -46,15 +53,25 @@ def _sweep() -> None:
         del _records[session_id]
 
 
-def store(session_id: str, value: Any, owner: Optional[str]) -> None:
-    """Park `value` for `session_id`; `None` clears a previously parked one."""
+def store(
+    session_id: str,
+    value: Any,
+    owner: Optional[str],
+    parent: Optional[str] = None,
+) -> None:
+    """Park a record for `session_id`.
+
+    `value` is the transit message (`None` means "no message"), `parent` the
+    emitting session's thread id. With nothing to hand over — both `None` —
+    a previously parked record is cleared instead.
+    """
     _sweep()
-    if value is None:
+    if value is None and parent is None:
         _records.pop(session_id, None)
         return
     if session_id not in _records and len(_records) >= MAX_TRANSIT_RECORDS:
         return
-    _records[session_id] = _Record(value, owner, time.monotonic())
+    _records[session_id] = _Record(value, owner, time.monotonic(), parent)
 
 
 def reassign(old_id: str, new_id: str) -> None:
@@ -68,6 +85,7 @@ def reassign(old_id: str, new_id: str) -> None:
 def pop(session_id: str, owner: Optional[str]) -> Any:
     """Take the record for `session_id`, or NO_TRANSIT when there is none.
 
+    Returns the record itself (`.value`, `.parent`), not just the message.
     Only the owner that parked the record may take it; an expired or foreign
     record answers NO_TRANSIT as well.
     """
@@ -77,7 +95,7 @@ def pop(session_id: str, owner: Optional[str]) -> Any:
         return NO_TRANSIT
     if record.owner != owner:
         return NO_TRANSIT
-    return record.value
+    return record
 
 
 def clear() -> None:

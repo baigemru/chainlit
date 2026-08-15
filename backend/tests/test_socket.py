@@ -3,11 +3,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+import chainlit.transit as transit
 from chainlit.session import WebsocketSession
 from chainlit.socket import (
     _authenticate_connection,
     _get_token,
     _get_token_from_cookie,
+    apply_transit_message,
     clean_session,
     connection_successful,
     load_user_env,
@@ -15,6 +17,7 @@ from chainlit.socket import (
     restore_existing_session,
     resume_thread,
 )
+from chainlit.user_session import user_sessions
 
 
 class TestGetTokenFromCookie:
@@ -628,3 +631,109 @@ class TestConnectionSuccessfulIdempotency:
             await connection_successful("sid-1")
 
         assert on_chat_start.call_count == 1
+
+
+class TestApplyTransitMessage:
+    """apply_transit_message: a claimed transit record enters the new session."""
+
+    SESSION_ID = "transit_session_id"
+
+    @pytest.fixture(autouse=True)
+    def clean_state(self):
+        transit.clear()
+        user_sessions.pop(self.SESSION_ID, None)
+        yield
+        transit.clear()
+        user_sessions.pop(self.SESSION_ID, None)
+
+    def make_context(self, mock_session_factory, **session_kwargs):
+        session_kwargs.setdefault("id", self.SESSION_ID)
+        session_kwargs.setdefault("user", None)
+        session_kwargs.setdefault("has_first_interaction", False)
+        session = mock_session_factory(**session_kwargs)
+        session.parent_thread_id = None
+
+        context = Mock()
+        context.session = session
+        context.emitter = AsyncMock()
+        return context
+
+    @pytest.mark.asyncio
+    async def test_message_record_opens_thread(self, mock_session_factory):
+        context = self.make_context(mock_session_factory)
+        transit.store(self.SESSION_ID, "searching knife", None, parent="thread-a")
+
+        await apply_transit_message(context)
+
+        assert user_sessions[self.SESSION_ID]["transit_message"] == "searching knife"
+        assert context.session.has_first_interaction is True
+        assert context.session.parent_thread_id == "thread-a"
+        context.emitter.init_thread.assert_awaited_once_with("searching knife")
+
+    @pytest.mark.asyncio
+    async def test_parent_only_record_stashes_parent_without_opening_thread(
+        self, mock_session_factory
+    ):
+        # A switch without a transit message: the parent link waits on the
+        # session, the thread is still created lazily on the first message.
+        context = self.make_context(mock_session_factory)
+        transit.store(self.SESSION_ID, None, None, parent="thread-a")
+
+        await apply_transit_message(context)
+
+        assert context.session.parent_thread_id == "thread-a"
+        assert context.session.has_first_interaction is False
+        context.emitter.init_thread.assert_not_awaited()
+        assert "transit_message" not in user_sessions.get(self.SESSION_ID, {})
+        # The record was consumed, not left behind for a later reconnect.
+        assert transit.pop(self.SESSION_ID, None) is transit.NO_TRANSIT
+
+    @pytest.mark.asyncio
+    async def test_no_record_is_a_noop(self, mock_session_factory):
+        context = self.make_context(mock_session_factory)
+
+        await apply_transit_message(context)
+
+        assert context.session.parent_thread_id is None
+        assert context.session.has_first_interaction is False
+        context.emitter.init_thread.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_session_with_interaction_leaves_record_alone(
+        self, mock_session_factory
+    ):
+        # A flap of the emitting session's socket re-enters this function on
+        # the old session, which must not swallow the record it just parked
+        # for its successor.
+        context = self.make_context(mock_session_factory, has_first_interaction=True)
+        transit.store(self.SESSION_ID, "for the successor", None, parent="thread-a")
+
+        await apply_transit_message(context)
+
+        context.emitter.init_thread.assert_not_awaited()
+        assert transit.pop(self.SESSION_ID, None).value == "for the successor"
+
+    @pytest.mark.asyncio
+    async def test_foreign_owner_record_is_not_applied(self, mock_session_factory):
+        context = self.make_context(mock_session_factory)
+        transit.store(self.SESSION_ID, "secret", "someone_else", parent="thread-a")
+
+        await apply_transit_message(context)
+
+        assert context.session.parent_thread_id is None
+        assert context.session.has_first_interaction is False
+        context.emitter.init_thread.assert_not_awaited()
+        assert "transit_message" not in user_sessions.get(self.SESSION_ID, {})
+
+    @pytest.mark.asyncio
+    async def test_non_string_transit_names_thread_after_profile(
+        self, mock_session_factory
+    ):
+        context = self.make_context(mock_session_factory, chat_profile="Search")
+        payload = {"query": "knife"}
+        transit.store(self.SESSION_ID, payload, None)
+
+        await apply_transit_message(context)
+
+        assert user_sessions[self.SESSION_ID]["transit_message"] == payload
+        context.emitter.init_thread.assert_awaited_once_with("Search")

@@ -580,6 +580,7 @@ class ChainlitDataLayer(BaseDataLayer):
         user_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
         tags: Optional[List[str]] = None,
+        parent_thread_id: Optional[str] = None,
     ):
         if self.show_logger:
             logger.info(f"asyncpg: update_thread, thread_id={thread_id}")

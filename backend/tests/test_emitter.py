@@ -1,8 +1,9 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import chainlit.transit as transit
+from chainlit.data.base import BaseDataLayer
 from chainlit.element import ElementDict
 from chainlit.emitter import ChainlitEmitter
 from chainlit.step import StepDict
@@ -226,6 +227,7 @@ async def test_set_chat_profile_defaults(
 ) -> None:
     mock_websocket_session.id = "session-defaults"
     mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = False
 
     await emitter.set_chat_profile("GPT-4")
 
@@ -233,7 +235,8 @@ async def test_set_chat_profile_defaults(
         "set_chat_profile",
         {"name": "GPT-4", "keepTranscript": False, "hasTransitMessage": False},
     )
-    # No transit message was parked for the next session.
+    # Nothing was parked for the next session: no message, and no parent
+    # either — the thread row does not exist before the first interaction.
     assert transit.pop("session-defaults", None) is transit.NO_TRANSIT
 
 
@@ -242,6 +245,7 @@ async def test_set_chat_profile_with_options(
 ) -> None:
     mock_websocket_session.id = "session-options"
     mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = False
 
     await emitter.set_chat_profile(
         "Search", keep_transcript=True, transit_message="knife sharpener"
@@ -255,7 +259,44 @@ async def test_set_chat_profile_with_options(
             "hasTransitMessage": True,
         },
     )
-    assert transit.pop("session-options", None) == "knife sharpener"
+    record = transit.pop("session-options", None)
+    assert record.value == "knife sharpener"
+    assert record.parent is None
+
+
+async def test_set_chat_profile_parks_parent_after_first_interaction(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    mock_websocket_session.id = "session-parent"
+    mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = True
+    mock_websocket_session.thread_id = "thread-a"
+
+    await emitter.set_chat_profile("Search", transit_message="knife sharpener")
+
+    record = transit.pop("session-parent", None)
+    assert record.value == "knife sharpener"
+    assert record.parent == "thread-a"
+
+
+async def test_set_chat_profile_parks_parent_only_record(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    # A switch without a transit message still hands over the parent link.
+    mock_websocket_session.id = "session-parent-only"
+    mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = True
+    mock_websocket_session.thread_id = "thread-a"
+
+    await emitter.set_chat_profile("Search")
+
+    mock_websocket_session.emit.assert_called_once_with(
+        "set_chat_profile",
+        {"name": "Search", "keepTranscript": False, "hasTransitMessage": False},
+    )
+    record = transit.pop("session-parent-only", None)
+    assert record.value is None
+    assert record.parent == "thread-a"
 
 
 async def test_set_chat_profile_none_clears_parked_transit(
@@ -263,6 +304,7 @@ async def test_set_chat_profile_none_clears_parked_transit(
 ) -> None:
     mock_websocket_session.id = "session-clears"
     mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = False
 
     await emitter.set_chat_profile("Search", transit_message="first")
     await emitter.set_chat_profile("Search")
@@ -275,3 +317,74 @@ async def test_set_chat_profile_rejects_positional_flags(
 ) -> None:
     with pytest.raises(TypeError):
         await emitter.set_chat_profile("Search", True)  # type: ignore[misc]
+
+
+@pytest.fixture
+def flush_session(mock_websocket_session: MagicMock) -> MagicMock:
+    mock_websocket_session.thread_id = "thread-b"
+    mock_websocket_session.user = None
+    mock_websocket_session.chat_profile = None
+    mock_websocket_session.parent_thread_id = None
+    mock_websocket_session.flush_method_queue = AsyncMock()
+    return mock_websocket_session
+
+
+@pytest.fixture
+def flush_data_layer(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    # Patched at the emitter's import site: get_data_layer() caches its
+    # instance in a module global, which would leak across tests.
+    data_layer = AsyncMock(spec=BaseDataLayer)
+    monkeypatch.setattr("chainlit.emitter.get_data_layer", lambda: data_layer)
+    return data_layer
+
+
+async def test_flush_thread_queues_without_parent(
+    emitter: ChainlitEmitter,
+    flush_session: MagicMock,
+    flush_data_layer: AsyncMock,
+) -> None:
+    await emitter.flush_thread_queues("hello")
+
+    flush_data_layer.update_thread.assert_awaited_once_with(
+        thread_id="thread-b", name="hello", user_id=None, tags=None
+    )
+
+
+async def test_flush_thread_queues_passes_parent(
+    emitter: ChainlitEmitter,
+    flush_session: MagicMock,
+    flush_data_layer: AsyncMock,
+) -> None:
+    flush_session.parent_thread_id = "thread-a"
+
+    await emitter.flush_thread_queues("hello")
+
+    flush_data_layer.update_thread.assert_awaited_once_with(
+        thread_id="thread-b",
+        name="hello",
+        user_id=None,
+        tags=None,
+        parent_thread_id="thread-a",
+    )
+
+
+async def test_flush_thread_queues_retries_without_parent_for_old_layers(
+    emitter: ChainlitEmitter,
+    flush_session: MagicMock,
+    flush_data_layer: AsyncMock,
+) -> None:
+    # Third-party data layers predating parent_thread_id raise TypeError on
+    # the unknown kwarg; the thread must still be created, without the link.
+    flush_session.parent_thread_id = "thread-a"
+    seen = []
+
+    async def legacy_update_thread(
+        thread_id, name=None, user_id=None, metadata=None, tags=None
+    ):
+        seen.append({"thread_id": thread_id, "name": name})
+
+    flush_data_layer.update_thread = legacy_update_thread
+
+    await emitter.flush_thread_queues("hello")
+
+    assert seen == [{"thread_id": "thread-b", "name": "hello"}]

@@ -105,22 +105,24 @@ export default function ChatProfileSwitchListener() {
     // parked transit message — leaving it unclaimed would strand it.
     if (alreadyActive && !keepTranscript && !hasTransitMessage) return;
 
-    // The backend parked the transit message under the emitting session's
-    // id; re-key it to the session we are about to open. Emitted
-    // synchronously inside this socket callback on purpose: socket.io only
-    // delivers events while connected, so a synchronous emit is guaranteed
-    // to hit the live socket (and its write buffer is flushed before the
-    // disconnect below closes the transport). Deferring this to an effect
-    // or timer would risk queueing it on a socket that never reconnects.
-    // It also runs after every early return above — claiming for a switch
-    // that is not going to happen would strand the message on a session id
-    // nobody will ever connect with.
-    const nextSessionId = hasTransitMessage ? uuidv4() : undefined;
-    if (nextSessionId) {
-      session?.socket.emit('claim_transit_message', {
-        sessionId: nextSessionId
-      });
-    }
+    // The backend parked a transit record under the emitting session's id —
+    // the transit message and/or the current thread's id, which the new
+    // thread stores as its parentThreadId. Re-key it to the session we are
+    // about to open; claim on EVERY switch, since the parent link rides
+    // along even without a message. Emitted synchronously inside this
+    // socket callback on purpose: socket.io only delivers events while
+    // connected, so a synchronous emit is guaranteed to hit the live socket
+    // (and its write buffer is flushed before the disconnect below closes
+    // the transport). Deferring this to an effect or timer would risk
+    // queueing it on a socket that never reconnects. It also runs after
+    // every early return above — claiming for a switch that is not going to
+    // happen would strand the record on a session id nobody will ever
+    // connect with (the no-op return leaves a parent-only record to expire
+    // by TTL, which is harmless).
+    const nextSessionId = uuidv4();
+    session?.socket.emit('claim_transit_message', {
+      sessionId: nextSessionId
+    });
 
     // Same path as a manual selection (ChatProfiles.handleConfirm), minus
     // the confirmation dialog: the server already made the decision.
@@ -159,11 +161,9 @@ export default function ChatProfileSwitchListener() {
       clear();
 
       // clear() resets the session id to a random one; overwrite it with the
-      // id the transit message was claimed for. Recoil applies these set
+      // id the transit record was claimed for. Recoil applies these set
       // calls in order, so the last write wins, and flushSync commits once.
-      if (nextSessionId) {
-        setSessionId(nextSessionId);
-      }
+      setSessionId(nextSessionId);
 
       if (keepTranscript && kept === undefined) {
         console.error(

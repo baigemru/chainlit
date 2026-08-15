@@ -47,6 +47,7 @@ async def data_layer(mock_storage_client: BaseStorageClient, tmp_path: Path):
                     "userIdentifier" TEXT,
                     "tags" TEXT[],
                     "metadata" JSONB NOT NULL DEFAULT '{}',
+                    "parentThreadId" UUID,
                     FOREIGN KEY ("userId") REFERENCES users("id") ON DELETE CASCADE
                 );
         """
@@ -325,3 +326,56 @@ async def test_update_thread_name_update_preserves_metadata(
     assert isinstance(result, list)
     assert result
     assert result[0]["name"] == "New Name"
+
+
+async def test_update_thread_records_parent_thread_id(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.update_thread("parent_thread", name="parent")
+    await data_layer.update_thread(
+        "child_thread", name="child", parent_thread_id="parent_thread"
+    )
+
+    thread = await data_layer.get_thread("child_thread")
+    assert thread is not None
+    assert thread["parentThreadId"] == "parent_thread"
+
+    # Later updates without the parent must not erase the link.
+    await data_layer.update_thread("child_thread", name="renamed")
+    thread = await data_layer.get_thread("child_thread")
+    assert thread is not None
+    assert thread["parentThreadId"] == "parent_thread"
+
+
+async def test_update_thread_parent_defaults_to_null(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.update_thread("plain_thread", name="plain")
+
+    thread = await data_layer.get_thread("plain_thread")
+    assert thread is not None
+    assert thread["parentThreadId"] is None
+
+
+async def test_update_thread_retries_without_parent_on_failure(
+    data_layer: SQLAlchemyDataLayer,
+):
+    # A schema without the column must not cost the thread itself — the
+    # write retries without the link. (In Postgres the same retry covers an
+    # FK violation when the parent was already deleted; this SQLite fixture
+    # has no FK, so only the missing-column arm is exercised here.)
+    await data_layer.execute_sql(
+        query='ALTER TABLE threads DROP COLUMN "parentThreadId"', parameters={}
+    )
+
+    await data_layer.update_thread(
+        "child_thread", name="child", parent_thread_id="gone_thread"
+    )
+
+    result = await data_layer.execute_sql(
+        query='SELECT "name" FROM threads WHERE "id" = :id',
+        parameters={"id": "child_thread"},
+    )
+    assert isinstance(result, list)
+    assert result
+    assert result[0]["name"] == "child"

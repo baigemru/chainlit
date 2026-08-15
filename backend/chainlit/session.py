@@ -128,6 +128,9 @@ class BaseSession:
         if thread_id:
             self.thread_id_to_resume = thread_id
         self.thread_id = thread_id or str(uuid.uuid4())
+        # Thread the user came from when this session was opened by a profile
+        # switch; recorded as the new thread's parentThreadId on creation.
+        self.parent_thread_id: Optional[str] = None
         self.user = user
         self.client_type = client_type
         self.token = token

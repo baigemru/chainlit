@@ -208,12 +208,15 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
 
 
 async def apply_transit_message(context):
-    """Move a claimed transit message into the user session, opening a thread.
+    """Move a claimed transit record into the user session.
 
     Runs before `on_chat_start` is scheduled, so the callback can read
-    `cl.user_session.get("transit_message")`. Claiming counts as the first
-    interaction: the thread is created and named immediately (steps produced
-    by `on_chat_start` then persist right away instead of queueing).
+    `cl.user_session.get("transit_message")`. Claiming a message counts as
+    the first interaction: the thread is created and named immediately
+    (steps produced by `on_chat_start` then persist right away instead of
+    queueing). A record always stashes the previous thread's id on the
+    session, so the new thread is linked to its parent even when the switch
+    carried no message.
 
     Only a session that has not interacted yet may take the record — a flap
     of the previous socket between `store` and the claim re-enters
@@ -225,14 +228,27 @@ async def apply_transit_message(context):
         return
 
     owner = session.user.identifier if session.user else None
-    value = transit.pop(session.id, owner)
-    if value is transit.NO_TRANSIT:
+    record = transit.pop(session.id, owner)
+    if record is transit.NO_TRANSIT:
         return
 
-    user_sessions.setdefault(session.id, {})["transit_message"] = value
+    # The previous thread's id rides along even when no message was parked;
+    # flush_thread_queues records it as the new thread's parentThreadId.
+    session.parent_thread_id = record.parent
+
+    if record.value is None:
+        # Parent-only record: nothing to deliver, the thread is still
+        # created lazily on the first real message.
+        return
+
+    user_sessions.setdefault(session.id, {})["transit_message"] = record.value
 
     session.has_first_interaction = True
-    name = value if isinstance(value, str) and value else session.chat_profile
+    name = (
+        record.value
+        if isinstance(record.value, str) and record.value
+        else session.chat_profile
+    )
     # Awaited on purpose: on_chat_start steps persist immediately now, and
     # must not reach the data layer before the thread row exists.
     await context.emitter.init_thread(name or "transit")
@@ -286,7 +302,8 @@ async def connection_successful(sid):
             # resume (which never reads it) and leak into a later reconnect —
             # drop it instead.
             owner = context.session.user.identifier if context.session.user else None
-            if transit.pop(context.session.id, owner) is not transit.NO_TRANSIT:
+            record = transit.pop(context.session.id, owner)
+            if record is not transit.NO_TRANSIT and record.value is not None:
                 logger.warning(
                     "Dropping a transit message on thread resume; it would "
                     "otherwise be delivered late into an unrelated chat."

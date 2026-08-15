@@ -23,6 +23,7 @@ from dataclasses import field
 from dataclasses_json import DataClassJsonMixin
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
+from typing_extensions import NotRequired
 
 InputWidgetType = Literal[
     "switch",
@@ -49,6 +50,9 @@ class ThreadDict(TypedDict):
     metadata: Optional[Dict]
     steps: List["StepDict"]
     elements: Optional[List["ElementDict"]]
+    # Thread this one was switched from, when spawned by set_chat_profile.
+    # NotRequired: data layers unaware of it keep constructing ThreadDict.
+    parentThreadId: NotRequired[Optional[str]]
 
 
 class Pagination(BaseModel):

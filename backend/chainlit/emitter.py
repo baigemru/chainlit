@@ -256,12 +256,27 @@ class ChainlitEmitter(BaseChainlitEmitter):
                     self.session.chat_profile and config.features.auto_tag_thread
                 )
                 tags = [self.session.chat_profile] if should_tag_thread else None
-                await data_layer.update_thread(
-                    thread_id=self.session.thread_id,
-                    name=interaction,
-                    user_id=user_id,
-                    tags=tags,
-                )
+                kwargs: Dict[str, Any] = {
+                    "thread_id": self.session.thread_id,
+                    "name": interaction,
+                    "user_id": user_id,
+                    "tags": tags,
+                }
+                if self.session.parent_thread_id is not None:
+                    kwargs["parent_thread_id"] = self.session.parent_thread_id
+                try:
+                    await data_layer.update_thread(**kwargs)
+                except TypeError:
+                    if "parent_thread_id" not in kwargs:
+                        raise
+                    # Data layers predating parent_thread_id must keep
+                    # working; they just don't record the link.
+                    logger.warning(
+                        "Data layer does not accept parent_thread_id; "
+                        "creating the thread without it."
+                    )
+                    del kwargs["parent_thread_id"]
+                    await data_layer.update_thread(**kwargs)
             except Exception as e:
                 logger.error(f"Error updating thread: {e}")
             asyncio.create_task(self.session.flush_method_queue())
@@ -486,8 +501,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 never travels through the browser. Read it in the new
                 profile's `on_chat_start` via
                 `cl.user_session.get("transit_message")`; any object works,
-                not just text. Passing `None` (the default) also clears a
-                value parked by an earlier call on this session.
+                not just text. Passing `None` (the default) drops a value
+                parked by an earlier call on this session — after the first
+                interaction a record carrying only the parent-thread link
+                still remains.
 
         Claiming a transit message creates and names the new thread right
         away (the value itself when it is a non-empty string, the profile
@@ -502,9 +519,23 @@ class ChainlitEmitter(BaseChainlitEmitter):
         belongs to the previous thread, is dropped on reload or when a thread
         is opened from the history, cannot be edited, and loses elements that
         were served by the previous session.
+
+        When the current thread already exists (the session had its first
+        interaction), its id rides along to the new session and is recorded
+        as the new thread's `parentThreadId` by data layers that support it.
+
+        Call this at most once per handler. Every call re-parks the hand-off
+        record for the same successor, and the frontend tears the chat down
+        per switch event — with two calls, the first event's claim moves the
+        record aside while the second event decides which session actually
+        connects, so the transit message and parent link of the last call
+        can be lost.
         """
         owner = self.session.user.identifier if self.session.user else None
-        transit.store(self.session.id, transit_message, owner)
+        # Only a thread that exists can be a parent: the row is created on
+        # first interaction.
+        parent = self.session.thread_id if self.session.has_first_interaction else None
+        transit.store(self.session.id, transit_message, owner, parent=parent)
         await self.emit(
             "set_chat_profile",
             {

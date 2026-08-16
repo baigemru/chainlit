@@ -34,6 +34,12 @@ const addMessage = (messages: IStep[], message: IStep): IStep[] => {
   if (hasMessageById(messages, message.id)) {
     return updateMessageById(messages, message.id, message);
   } else if ('parentId' in message && message.parentId) {
+    if (!hasMessageById(messages, message.parentId)) {
+      // The parent is not in the UI state (typically lost to a page reload
+      // while the server session lives on): render the message top-level
+      // rather than dropping it silently.
+      return [...messages, message];
+    }
     return addMessageToParent(messages, message.parentId, message);
   } else if ('indent' in message && message.indent && message.indent > 0) {
     return addIndentMessage(messages, message.indent, message);

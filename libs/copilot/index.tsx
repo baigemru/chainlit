@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-import { type IStep } from '@chainlit/react-client';
+import { type IStep, resetPageConnectionFlag } from '@chainlit/react-client';
 
 // @ts-expect-error inline css
 import sonnercss from './sonner.css?inline';
@@ -61,6 +61,9 @@ window.mountChainlitWidget = (config: IWidgetConfig) => {
 
 window.unmountChainlitWidget = () => {
   root?.unmount();
+  // A remounted widget starts with empty UI state; the next connect must
+  // count as a fresh load so the server replays a pending ask in full.
+  resetPageConnectionFlag();
 };
 
 window.sendChainlitMessage = () => {

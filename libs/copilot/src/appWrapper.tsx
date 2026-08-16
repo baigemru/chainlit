@@ -4,7 +4,7 @@ import { RecoilRoot } from 'recoil';
 import { IWidgetConfig } from 'types';
 
 import { i18nSetupLocalization } from '@chainlit/app/src/i18n';
-import { ChainlitContext } from '@chainlit/react-client';
+import { ChainlitContext, sessionIdStorage } from '@chainlit/react-client';
 
 import App from './app';
 
@@ -14,6 +14,14 @@ interface Props {
 }
 
 export default function AppWrapper({ widgetConfig }: Props) {
+  // The copilot widget shares the tab (and its sessionStorage) with a host
+  // page that may itself run the Chainlit UI — keep the widget's persisted
+  // session id under its own key, scoped to the target server so two
+  // widgets pointed at different backends don't collide either. Must run
+  // before the RecoilRoot below mounts (the atom effect reads the key on
+  // first render of the children).
+  sessionIdStorage.key = `chainlit-copilot-session-id:${widgetConfig.chainlitServer}`;
+
   const additionalQueryParams = widgetConfig?.additionalQueryParamsForAPI;
   const apiClient = makeApiClient(
     widgetConfig.chainlitServer,

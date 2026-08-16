@@ -395,6 +395,10 @@ class AskUserMessage(AskMessageBase):
 
         spec = AskSpec(type="text", step_id=step_dict["id"], timeout=self.timeout)
 
+        # In the transcript BEFORE the wait: a reconnect replay must show
+        # the question above its answer, not below it.
+        chat_context.add(cast("Message", self))
+
         res = cast(
             Union[None, StepDict],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
@@ -468,6 +472,10 @@ class AskFileMessage(AskMessageBase):
             max_files=self.max_files,
             timeout=self.timeout,
         )
+
+        # In the transcript BEFORE the wait: a reconnect replay must show
+        # the question above its answer, not below it.
+        chat_context.add(cast("Message", self))
 
         res = cast(
             Union[None, List[FileDict]],
@@ -545,7 +553,14 @@ class AskActionMessage(AskMessageBase):
 
         res = cast(
             Union[AskActionResponse, None],
-            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
+            await context.emitter.send_ask_user(
+                step_dict,
+                spec,
+                self.raise_on_timeout,
+                # The client loses actions on refresh; they are re-emitted
+                # alongside the ask on reconnect.
+                restore_actions=[action.to_dict() for action in self.actions],
+            ),
         )
 
         for action in self.actions:
@@ -607,7 +622,16 @@ class AskElementMessage(AskMessageBase):
 
         res = cast(
             Union[AskElementResponse, None],
-            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
+            await context.emitter.send_ask_user(
+                step_dict,
+                spec,
+                self.raise_on_timeout,
+                # The client loses the element on refresh; it is re-emitted
+                # alongside the ask on reconnect. Passed as the live object
+                # and serialized at restore time, so updates made while the
+                # ask is pending are not rolled back.
+                restore_element=self.element,
+            ),
         )
 
         await self.element.remove()

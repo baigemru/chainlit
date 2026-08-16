@@ -1,6 +1,8 @@
+import asyncio
 import builtins
 import json
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
@@ -12,6 +14,7 @@ from chainlit.session import (
     HTTPSession,
     JSONEncoderIgnoreNonSerializable,
     McpSession,
+    PendingAsk,
     WebsocketSession,
     clean_metadata,
 )
@@ -807,3 +810,85 @@ class TestMcpSession:
         await mcp.close()  # second call should be safe
 
         assert task.done()
+
+
+class TestWebsocketSessionPendingAsk:
+    """delete() must cancel a pending ask so the waiting coroutine dies with
+    the session instead of writing "Timed out" into the old thread later."""
+
+    def _make_session(self, session_id="pending_ask_id", socket_id="socket_pa"):
+        return WebsocketSession(
+            id=session_id,
+            socket_id=socket_id,
+            emit=Mock(),
+            emit_call=Mock(),
+            user_env={},
+            client_type="webapp",
+        )
+
+    def _make_pending_ask(self, timeout=60):
+        from chainlit.types import AskSpec
+
+        return PendingAsk(
+            step_dict={"id": "step-1", "parentId": "parent-1"},
+            spec=AskSpec(timeout=timeout, type="text", step_id="step-1"),
+            future=asyncio.get_event_loop().create_future(),
+            deadline=time.monotonic() + timeout,
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_cancels_pending_ask(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = self._make_session()
+                pending = self._make_pending_ask()
+                session.pending_ask = pending
+
+                await session.delete()
+
+                assert pending.future.cancelled()
+                assert session.pending_ask is None
+
+    @pytest.mark.asyncio
+    async def test_delete_with_resolved_pending_ask_is_noop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = self._make_session("resolved_id", "socket_res")
+                pending = self._make_pending_ask()
+                pending.future.set_result("answer")
+                session.pending_ask = pending
+
+                await session.delete()
+
+                assert pending.future.result() == "answer"
+                assert session.pending_ask is None
+
+    @pytest.mark.asyncio
+    async def test_double_delete_is_safe(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = self._make_session("double_id", "socket_dbl")
+                session.pending_ask = self._make_pending_ask()
+
+                await session.delete()
+                await session.delete()
+
+                assert session.pending_ask is None
+
+    @pytest.mark.asyncio
+    async def test_delete_wakes_waiting_coroutine(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = self._make_session("waker_id", "socket_wak")
+                pending = self._make_pending_ask()
+                session.pending_ask = pending
+
+                async def waiter():
+                    await asyncio.wait_for(pending.future, pending.spec.timeout)
+
+                task = asyncio.ensure_future(waiter())
+                await asyncio.sleep(0)
+                await session.delete()
+
+                with pytest.raises(asyncio.CancelledError):
+                    await task

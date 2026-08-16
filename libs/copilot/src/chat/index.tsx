@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 
 import {
+  sessionIdState,
   threadIdToResumeState,
   useChatInteract,
   useChatSession
@@ -14,9 +15,24 @@ export default function ChatWrapper() {
   const { connect, session, idToResume } = useChatSession();
   const { sendMessage } = useChatInteract();
   const copilotThreadId = useRecoilValue(copilotThreadIdState);
+  const sessionId = useRecoilValue(sessionIdState);
   const setThreadIdToResume = useSetRecoilState(threadIdToResumeState);
   const hasConnected = useRef<boolean>(false);
   const lastConnectedThreadId = useRef<string | null>(null);
+  const lastSessionId = useRef<string | null>(null);
+
+  // A replaced session id (e.g. the server refused the persisted one and a
+  // fresh id was minted) needs a new connection — re-arm the connect guard.
+  useEffect(() => {
+    if (
+      hasConnected.current &&
+      lastSessionId.current &&
+      sessionId !== lastSessionId.current
+    ) {
+      hasConnected.current = false;
+    }
+    lastSessionId.current = sessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     if (!copilotThreadId) {
@@ -57,7 +73,7 @@ export default function ChatWrapper() {
       transports: window.transports,
       userEnv: {}
     });
-  }, [copilotThreadId, idToResume, connect]);
+  }, [copilotThreadId, idToResume, connect, sessionId]);
 
   useEffect(() => {
     // @ts-expect-error is not a valid prop

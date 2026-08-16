@@ -40,7 +40,10 @@ const useChatData = () => {
     loading ||
     askUser?.spec.type === 'file' ||
     askUser?.spec.type === 'action' ||
-    askUser?.spec.type === 'element';
+    askUser?.spec.type === 'element' ||
+    // A reply is already in flight: lock the composer so typed text is not
+    // silently swallowed by the replyMessage guard.
+    !!askUser?.awaitingReply;
 
   return {
     actions,

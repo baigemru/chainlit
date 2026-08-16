@@ -1,4 +1,5 @@
 import asyncio
+import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
 
@@ -12,7 +13,7 @@ from chainlit.element import Element, ElementDict, File
 from chainlit.logger import logger
 from chainlit.message import Message
 from chainlit.mode import Mode
-from chainlit.session import BaseSession, WebsocketSession
+from chainlit.session import BaseSession, PendingAsk, WebsocketSession
 from chainlit.step import StepDict
 from chainlit.types import (
     AskActionResponse,
@@ -29,6 +30,20 @@ from chainlit.types import (
 )
 from chainlit.user import PersistedUser
 from chainlit.utils import utc_now
+
+
+def _make_legacy_ask_ack(future: "asyncio.Future"):
+    """Ack callback resolving the same future as the ask_reply event.
+
+    Old cached client bundles answer an ask through the socket.io ack; the
+    future-based wait accepts whichever path delivers first.
+    """
+
+    def legacy_ack(value=None):
+        if not future.done():
+            future.set_result(value)
+
+    return legacy_ack
 
 
 class BaseChainlitEmitter:
@@ -103,7 +118,13 @@ class BaseChainlitEmitter:
         return Message(content="")
 
     async def send_ask_user(
-        self, step_dict: StepDict, spec: AskSpec, raise_on_timeout=False
+        self,
+        step_dict: StepDict,
+        spec: AskSpec,
+        raise_on_timeout=False,
+        *,
+        restore_actions: Optional[List[Dict[str, Any]]] = None,
+        restore_element: Optional[Any] = None,
     ) -> Optional[
         Union["StepDict", "AskActionResponse", "AskElementResponse", List["FileDict"]]
     ]:
@@ -341,18 +362,77 @@ class ChainlitEmitter(BaseChainlitEmitter):
         return message
 
     async def send_ask_user(
-        self, step_dict: StepDict, spec: AskSpec, raise_on_timeout=False
+        self,
+        step_dict: StepDict,
+        spec: AskSpec,
+        raise_on_timeout=False,
+        *,
+        restore_actions: Optional[List[Dict[str, Any]]] = None,
+        restore_element: Optional[Any] = None,
     ):
         """Send a prompt to the UI and wait for a response."""
         parent_id = str(step_dict["parentId"])
+        session = self.session
+
+        existing = session.pending_ask
+        if existing is not None and not existing.future.done():
+            # A concurrent ask would silently replace the previous form in
+            # the UI and orphan its waiting coroutine — refuse instead. A
+            # slot whose future is already resolved/cancelled only awaits
+            # its owner's cleanup and does not block a new ask.
+            logger.error(
+                "send_ask_user: an ask is already pending for session %s; "
+                "returning None",
+                session.id,
+            )
+            return None
+
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        pending_ask = PendingAsk(
+            step_dict=cast(Dict[str, Any], step_dict),
+            spec=spec,
+            future=future,
+            deadline=time.monotonic() + spec.timeout,
+            restore_actions=restore_actions or [],
+            restore_element=restore_element,
+        )
+        session.pending_ask = pending_ask
         try:
             if spec.type == "file":
                 self.session.files_spec[parent_id] = cast(AskFileSpec, spec)
 
-            # Send the prompt to the UI
-            user_res = await self.emit_call(
-                "ask", {"msg": step_dict, "spec": spec.to_dict()}, spec.timeout
-            )  # type: Optional[Union["StepDict", "AskActionResponse", "AskElementResponse", List["FileReference"]]]
+            # Send the prompt to the UI. A plain emit, not a socket.io call:
+            # the reply comes back through the "ask_reply" event and resolves
+            # the future, which survives socket reconnections (the sid a
+            # sio.call is bound to does not). A socket.io ack is still
+            # attached when possible so clients running a stale cached
+            # bundle (which answer through the ack) keep working.
+            ask_payload = {"msg": step_dict, "spec": spec.to_dict()}
+            emit_ask = getattr(session, "emit_ask", None)
+            if emit_ask is not None:
+                await emit_ask(ask_payload, _make_legacy_ask_ack(future))
+            else:
+                await self.emit("ask", ask_payload)
+
+            user_res: Optional[
+                Union[
+                    StepDict,
+                    AskActionResponse,
+                    AskElementResponse,
+                    List[FileReference],
+                ]
+            ]
+            try:
+                user_res = await asyncio.wait_for(future, spec.timeout)
+            except asyncio.TimeoutError:
+                # On py3.12+ wait_for can time out in the same tick the
+                # future was resolved — prefer the answer over the timeout.
+                if future.done() and not future.cancelled():
+                    user_res = future.result()
+                else:
+                    # Callers (and raise_on_timeout) expect the historical
+                    # socketio.exceptions.TimeoutError, not the asyncio one.
+                    raise TimeoutError from None
 
             # End the task temporarily so that the User can answer the prompt
             await self.task_end()
@@ -412,6 +492,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
             if raise_on_timeout:
                 raise e
         finally:
+            # Identity check: after a cancel (session.delete/stop) another
+            # ask may already occupy the slot — never clobber it.
+            if session.pending_ask is pending_ask:
+                session.pending_ask = None
             if parent_id in self.session.files_spec:
                 del self.session.files_spec[parent_id]
             await self.task_start()

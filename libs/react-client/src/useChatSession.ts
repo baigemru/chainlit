@@ -1,5 +1,5 @@
 import { debounce } from 'lodash';
-import { useCallback, useContext, useEffect } from 'react';
+import { useCallback, useContext, useEffect, useRef } from 'react';
 import {
   useRecoilState,
   useRecoilValue,
@@ -28,6 +28,7 @@ import {
   modesState,
   resumeThreadErrorState,
   sessionIdState,
+  sessionIdStorage,
   sessionState,
   sideViewState,
   tasklistState,
@@ -38,8 +39,10 @@ import {
 } from 'src/state';
 import {
   IAction,
+  IAskElementResponse,
   ICommand,
   IElement,
+  IFileRef,
   IMessageElement,
   IMode,
   IStep,
@@ -58,9 +61,27 @@ import { OutputAudioChunk } from './types/audio';
 import { ChainlitContext } from './context';
 import type { IToken } from './useChatData';
 
+// True once any connection succeeded in this page's lifetime. Reported to
+// the server on connection_successful so it can distinguish a reconnect of
+// a loaded page (UI state intact) from a fresh page load that needs a full
+// restore of a pending ask's transcript/actions/element.
+let pageHasEstablishedConnection = false;
+
+// For embedders that unmount and remount the whole widget (copilot): the
+// remounted UI starts empty, so the next connect must be treated as a
+// fresh load again or the server would skip the full restore.
+const resetPageConnectionFlag = () => {
+  pageHasEstablishedConnection = false;
+};
+export { resetPageConnectionFlag };
+
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useRecoilValue(sessionIdState);
+  const resetSessionId = useResetRecoilState(sessionIdState);
+  // One-shot guard: a persisted session id the server refuses gets replaced
+  // once; a second refusal in a row surfaces as an error instead of looping.
+  const authFailureHandledRef = useRef(false);
 
   const [session, setSession] = useRecoilState(sessionState);
   const setIsAiSpeaking = useSetRecoilState(isAiSpeakingState);
@@ -128,9 +149,26 @@ const useChatSession = () => {
           sessionId,
           threadId: idToResume || '',
           userEnv: JSON.stringify(userEnv),
-          chatProfile: chatProfile ? encodeURIComponent(chatProfile) : ''
+          chatProfile: chatProfile ? encodeURIComponent(chatProfile) : '',
+          // True only on the very first connect after a full page load: the
+          // server restores the old session then only to rescue a live
+          // pending ask; otherwise a reload means a fresh chat. Mutated to
+          // false after the first successful connect so automatic transport
+          // reconnects restore the session unconditionally.
+          pageLoad: !pageHasEstablishedConnection
         }
       });
+      if (
+        typeof window !== 'undefined' &&
+        (window as any).Cypress &&
+        client.type !== 'copilot'
+      ) {
+        // Exposed for e2e tests to simulate transport drops. Only under
+        // Cypress, and never for the copilot widget: a handle on the
+        // user's socket must not leak to page scripts in production.
+        (window as any).__chainlitSocket = socket;
+      }
+
       setSession((old) => {
         old?.socket?.removeAllListeners();
         old?.socket?.close();
@@ -141,6 +179,9 @@ const useChatSession = () => {
 
       socket.on('connect', () => {
         socket.emit('connection_successful');
+        pageHasEstablishedConnection = true;
+        (socket.auth as Record<string, unknown>)['pageLoad'] = false;
+        authFailureHandledRef.current = false;
         setSession((s) => ({ ...s!, error: false }));
         socket.emit('fetch_favorites');
         setMcps((prev) =>
@@ -195,7 +236,20 @@ const useChatSession = () => {
         );
       });
 
-      socket.on('connect_error', (_) => {
+      socket.on('connect_error', (err) => {
+        if (
+          err?.message === 'session authorization failed' &&
+          !authFailureHandledRef.current
+        ) {
+          // The persisted session id belongs to a session this user may not
+          // claim (e.g. someone else logged in within this tab). Mint a
+          // fresh id instead of retrying against the same refusal forever.
+          // Once only: a refusal for another reason (e.g. a foreign thread
+          // id) would repeat with the new id and must surface as an error.
+          authFailureHandledRef.current = true;
+          resetSessionId();
+          return;
+        }
         setSession((s) => ({ ...s!, error: true }));
       });
 
@@ -209,6 +263,14 @@ const useChatSession = () => {
 
       socket.on('reload', () => {
         socket.emit('clear_session');
+        try {
+          // The server asked for a clean restart (dev hot-reload): drop the
+          // persisted id so the reloaded page cannot race clear_session and
+          // resurrect the session it was told to leave.
+          sessionStorage.removeItem(sessionIdStorage.key);
+        } catch (_error) {
+          // Storage unavailable — the reload proceeds regardless.
+        }
         window.location.reload();
       });
 
@@ -338,7 +400,26 @@ const useChatSession = () => {
       );
 
       socket.on('ask', ({ msg, spec }, callback) => {
-        setAskUser({ spec, callback, parentId: msg.parentId });
+        const reply = (
+          payload: IStep | IFileRef[] | IAction | IAskElementResponse
+        ) => {
+          // A plain event rather than the socket.io ack: plain emits are
+          // buffered while the transport is down and redelivered after
+          // reconnect, so a click during a network blip is not lost.
+          socket.emit('ask_reply', { stepId: spec.step_id, value: payload });
+          if (typeof callback === 'function') {
+            // Legacy ack path, kept for an older backend using sio.call.
+            callback(payload);
+          }
+          setAskUser((prev) =>
+            prev && prev.spec.step_id === spec.step_id
+              ? { ...prev, awaitingReply: true }
+              : prev
+          );
+        };
+        // A re-emitted ask (reconnect restore) simply rebinds the form to
+        // the live socket; addMessage upserts the message by id.
+        setAskUser({ spec, callback: reply, parentId: msg.parentId });
         setMessages((oldMessages) => addMessage(oldMessages, msg));
 
         setLoading(false);
@@ -447,7 +528,15 @@ const useChatSession = () => {
       });
 
       socket.on('action', (action: IAction) => {
-        setActions((old) => [...old, action]);
+        // Upsert by id: a re-emitted action (ask restored after reconnect)
+        // must not duplicate a button that is still in the state.
+        setActions((old) => {
+          const index = old.findIndex((a) => a.id === action.id);
+          if (index === -1) {
+            return [...old, action];
+          }
+          return [...old.slice(0, index), action, ...old.slice(index + 1)];
+        });
       });
 
       socket.on('remove_action', (action: IAction) => {
@@ -493,7 +582,7 @@ const useChatSession = () => {
         }
       });
     },
-    [setSession, sessionId, idToResume, chatProfile]
+    [setSession, sessionId, idToResume, chatProfile, resetSessionId]
   );
 
   const connect = useCallback(debounce(_connect, 200), [_connect]);

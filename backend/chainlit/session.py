@@ -3,14 +3,25 @@ import json
 import mimetypes
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Deque,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Union,
+)
 
 import aiofiles
 
 from chainlit.logger import logger
-from chainlit.types import AskFileSpec, FileReference
+from chainlit.types import AskFileSpec, AskSpec, FileReference
 
 if TYPE_CHECKING:
     from mcp import ClientSession
@@ -270,6 +281,48 @@ class HTTPSession(BaseSession):
 ThreadQueue = Deque[tuple[Callable, object, tuple, Dict]]
 
 
+@dataclass
+class PendingAsk:
+    """A pending ask prompt waiting for the user's reply.
+
+    The reply is delivered by resolving ``future`` (see the ``ask_reply``
+    socket handler); the waiting coroutine lives in
+    ``ChainlitEmitter.send_ask_user``. ``deadline`` is the absolute
+    ``time.monotonic()`` deadline set when the ask was first emitted, so
+    reconnections never extend the timeout.
+    """
+
+    step_dict: Dict[str, Any]
+    spec: AskSpec
+    future: "asyncio.Future"
+    deadline: float
+    # Serialized actions to re-emit on reconnect so the UI can rebuild the
+    # form (the client loses them on refresh). Actions are immutable, so a
+    # snapshot is safe.
+    restore_actions: List[Dict[str, Any]] = field(default_factory=list)
+    # The live element object (anything with to_dict()) — serialized at
+    # restore time so element updates made while the ask is pending are not
+    # rolled back by the re-emit.
+    restore_element: Optional[Any] = None
+
+    @property
+    def remaining(self) -> float:
+        return self.deadline - time.monotonic()
+
+    @property
+    def expired(self) -> bool:
+        return self.remaining <= 0
+
+    @property
+    def is_live(self) -> bool:
+        """Still waiting for an answer: not expired, not resolved."""
+        return not self.expired and not self.future.done()
+
+    def cancel(self):
+        if not self.future.done():
+            self.future.cancel()
+
+
 class WebsocketSession(BaseSession):
     """Internal web socket session object.
 
@@ -283,6 +336,8 @@ class WebsocketSession(BaseSession):
     """
 
     to_clear: bool = False
+
+    pending_ask: Optional[PendingAsk] = None
 
     mcp_sessions: dict[str, McpSession]
 
@@ -309,6 +364,8 @@ class WebsocketSession(BaseSession):
         token: Optional[str] = None,
         # Chat profile selected before the session was created
         chat_profile: Optional[str] = None,
+        # Function to emit an ask with a legacy socket.io ack attached
+        emit_ask: Optional[Callable[[Any, Callable], Any]] = None,
     ):
         super().__init__(
             id=id,
@@ -324,8 +381,13 @@ class WebsocketSession(BaseSession):
         self.socket_id = socket_id
         self.emit_call = emit_call
         self.emit = emit
+        self.emit_ask = emit_ask
 
         self.restored = False
+        self.pending_ask = None
+        # True when the current connection is the first one after a full
+        # page load (the client lost its UI state); set on every connect.
+        self.fresh_page_load = False
 
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}
@@ -387,6 +449,14 @@ class WebsocketSession(BaseSession):
     async def delete(self):
         """Delete the session."""
         from chainlit.chat_context import chat_contexts
+
+        # Wake up any coroutine waiting on a pending ask so it doesn't
+        # outlive the session and write "Timed out" into the old thread
+        # long after the user is gone. Must not require a chainlit context:
+        # delete() is also called from the disconnect GC timer.
+        if self.pending_ask is not None:
+            self.pending_ask.cancel()
+            self.pending_ask = None
 
         # Same fate as user_sessions (popped in the disconnect handler):
         # chat_contexts is keyed by session id and grows with every message,

@@ -4,11 +4,17 @@ import { RecoilRoot } from 'recoil';
 import { IWidgetConfig } from 'types';
 
 import { i18nSetupLocalization } from '@chainlit/app/src/i18n';
-import { ChainlitContext } from '@chainlit/react-client';
+import { ChainlitContext, sessionIdStorage } from '@chainlit/react-client';
 
 import App from './app';
 
 i18nSetupLocalization();
+
+// The copilot widget shares the tab (and its sessionStorage) with a host
+// page that may itself run the Chainlit UI — keep the widget's persisted
+// session id under its own key so the two clients don't hijack one server
+// session. Must run before the RecoilRoot mounts.
+sessionIdStorage.key = 'chainlit-copilot-session-id';
 interface Props {
   widgetConfig: IWidgetConfig;
 }

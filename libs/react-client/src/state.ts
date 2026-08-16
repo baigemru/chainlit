@@ -42,9 +42,51 @@ export const chatProfileState = atom<string | undefined>({
   default: undefined
 });
 
+// Storage key for the persisted session id. Mutable on purpose: embedders
+// that share a tab with the main app (the copilot widget) must override it
+// before mounting, otherwise both clients would fight over one server
+// session.
+export const sessionIdStorage = { key: 'chainlit-session-id' };
+
+// Persist the session id in sessionStorage (per-tab, survives F5) so a page
+// reload reconnects to the same server session and a pending ask can be
+// restored. sessionStorage is deliberate: localStorage would collapse every
+// tab into a single server session.
+const sessionStorageSessionIdEffect: AtomEffect<string> = ({
+  setSelf,
+  onSet
+}) => {
+  try {
+    const saved = sessionStorage.getItem(sessionIdStorage.key);
+    if (saved) {
+      setSelf(saved);
+    } else {
+      const fresh = uuidv4();
+      sessionStorage.setItem(sessionIdStorage.key, fresh);
+      setSelf(fresh);
+    }
+  } catch (_error) {
+    // Storage unavailable (sandboxed iframe, privacy mode): fall back to the
+    // in-memory id, i.e. the historical behavior.
+  }
+
+  onSet((newValue, _, isReset) => {
+    try {
+      if (isReset) {
+        sessionStorage.removeItem(sessionIdStorage.key);
+      } else {
+        sessionStorage.setItem(sessionIdStorage.key, newValue);
+      }
+    } catch (_error) {
+      // Ignore storage failures; the atom still holds the id.
+    }
+  });
+};
+
 const sessionIdAtom = atom<string>({
   key: 'SessionId',
-  default: uuidv4()
+  default: uuidv4(),
+  effects: [sessionStorageSessionIdEffect]
 });
 
 export const sessionIdState = selector({

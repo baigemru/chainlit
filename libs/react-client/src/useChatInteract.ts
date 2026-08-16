@@ -161,6 +161,9 @@ const useChatInteract = () => {
   const replyMessage = useCallback(
     (message: IStep) => {
       if (askUser) {
+        // A reply is already in flight for this ask; a re-emitted ask
+        // (reconnect) resets the flag and re-enables the composer.
+        if (askUser.awaitingReply) return;
         if (askUser.parentId) message.parentId = askUser.parentId;
         setMessages((oldMessages) => addMessage(oldMessages, message));
         askUser.callback(message);

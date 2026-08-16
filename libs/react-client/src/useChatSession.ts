@@ -38,8 +38,10 @@ import {
 } from 'src/state';
 import {
   IAction,
+  IAskElementResponse,
   ICommand,
   IElement,
+  IFileRef,
   IMessageElement,
   IMode,
   IStep,
@@ -61,6 +63,7 @@ import type { IToken } from './useChatData';
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useRecoilValue(sessionIdState);
+  const resetSessionId = useResetRecoilState(sessionIdState);
 
   const [session, setSession] = useRecoilState(sessionState);
   const setIsAiSpeaking = useSetRecoilState(isAiSpeakingState);
@@ -131,6 +134,11 @@ const useChatSession = () => {
           chatProfile: chatProfile ? encodeURIComponent(chatProfile) : ''
         }
       });
+      if (typeof window !== 'undefined') {
+        // Exposed for e2e tests to simulate transport drops.
+        (window as any).__chainlitSocket = socket;
+      }
+
       setSession((old) => {
         old?.socket?.removeAllListeners();
         old?.socket?.close();
@@ -195,7 +203,14 @@ const useChatSession = () => {
         );
       });
 
-      socket.on('connect_error', (_) => {
+      socket.on('connect_error', (err) => {
+        if (err?.message === 'authorization failed') {
+          // The persisted session id belongs to a session this user may not
+          // claim (e.g. someone else logged in within this tab). Mint a
+          // fresh id instead of retrying against the same refusal forever.
+          resetSessionId();
+          return;
+        }
         setSession((s) => ({ ...s!, error: true }));
       });
 
@@ -338,7 +353,26 @@ const useChatSession = () => {
       );
 
       socket.on('ask', ({ msg, spec }, callback) => {
-        setAskUser({ spec, callback, parentId: msg.parentId });
+        const reply = (
+          payload: IStep | IFileRef[] | IAction | IAskElementResponse
+        ) => {
+          // A plain event rather than the socket.io ack: plain emits are
+          // buffered while the transport is down and redelivered after
+          // reconnect, so a click during a network blip is not lost.
+          socket.emit('ask_reply', { stepId: spec.step_id, value: payload });
+          if (typeof callback === 'function') {
+            // Legacy ack path, kept for an older backend using sio.call.
+            callback(payload);
+          }
+          setAskUser((prev) =>
+            prev && prev.spec.step_id === spec.step_id
+              ? { ...prev, awaitingReply: true }
+              : prev
+          );
+        };
+        // A re-emitted ask (reconnect restore) simply rebinds the form to
+        // the live socket; addMessage upserts the message by id.
+        setAskUser({ spec, callback: reply, parentId: msg.parentId });
         setMessages((oldMessages) => addMessage(oldMessages, msg));
 
         setLoading(false);
@@ -447,7 +481,15 @@ const useChatSession = () => {
       });
 
       socket.on('action', (action: IAction) => {
-        setActions((old) => [...old, action]);
+        // Upsert by id: a re-emitted action (ask restored after reconnect)
+        // must not duplicate a button that is still in the state.
+        setActions((old) => {
+          const index = old.findIndex((a) => a.id === action.id);
+          if (index === -1) {
+            return [...old, action];
+          }
+          return [...old.slice(0, index), action, ...old.slice(index + 1)];
+        });
       });
 
       socket.on('remove_action', (action: IAction) => {

@@ -36,7 +36,7 @@ const AskActionButton = ({ action }: { action: IAction }) => {
         askUser?.callback(action);
       }}
       variant="outline"
-      disabled={loading}
+      disabled={loading || askUser?.awaitingReply}
     >
       {icon}
       {content}

@@ -32,4 +32,7 @@ export interface IAsk {
   } & FileSpec &
     ActionSpec;
   parentId?: string;
+  // Set once a reply has been sent, so forms can lock themselves against
+  // double submission. A re-emitted ask (reconnect) resets it.
+  awaitingReply?: boolean;
 }

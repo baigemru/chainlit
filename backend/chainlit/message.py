@@ -545,7 +545,14 @@ class AskActionMessage(AskMessageBase):
 
         res = cast(
             Union[AskActionResponse, None],
-            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
+            await context.emitter.send_ask_user(
+                step_dict,
+                spec,
+                self.raise_on_timeout,
+                # The client loses actions on refresh; they are re-emitted
+                # alongside the ask on reconnect.
+                restore_actions=[action.to_dict() for action in self.actions],
+            ),
         )
 
         for action in self.actions:
@@ -607,7 +614,14 @@ class AskElementMessage(AskMessageBase):
 
         res = cast(
             Union[AskElementResponse, None],
-            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
+            await context.emitter.send_ask_user(
+                step_dict,
+                spec,
+                self.raise_on_timeout,
+                # The client loses the element on refresh; it is re-emitted
+                # alongside the ask on reconnect.
+                restore_element=dict(self.element.to_dict()),
+            ),
         )
 
         await self.element.remove()

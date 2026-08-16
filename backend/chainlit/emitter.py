@@ -1,4 +1,5 @@
 import asyncio
+import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
 
@@ -12,7 +13,7 @@ from chainlit.element import Element, ElementDict, File
 from chainlit.logger import logger
 from chainlit.message import Message
 from chainlit.mode import Mode
-from chainlit.session import BaseSession, WebsocketSession
+from chainlit.session import BaseSession, PendingAsk, WebsocketSession
 from chainlit.step import StepDict
 from chainlit.types import (
     AskActionResponse,
@@ -103,7 +104,13 @@ class BaseChainlitEmitter:
         return Message(content="")
 
     async def send_ask_user(
-        self, step_dict: StepDict, spec: AskSpec, raise_on_timeout=False
+        self,
+        step_dict: StepDict,
+        spec: AskSpec,
+        raise_on_timeout=False,
+        *,
+        restore_actions: Optional[List[Dict[str, Any]]] = None,
+        restore_element: Optional[Dict[str, Any]] = None,
     ) -> Optional[
         Union["StepDict", "AskActionResponse", "AskElementResponse", List["FileDict"]]
     ]:
@@ -341,18 +348,62 @@ class ChainlitEmitter(BaseChainlitEmitter):
         return message
 
     async def send_ask_user(
-        self, step_dict: StepDict, spec: AskSpec, raise_on_timeout=False
+        self,
+        step_dict: StepDict,
+        spec: AskSpec,
+        raise_on_timeout=False,
+        *,
+        restore_actions: Optional[List[Dict[str, Any]]] = None,
+        restore_element: Optional[Dict[str, Any]] = None,
     ):
         """Send a prompt to the UI and wait for a response."""
         parent_id = str(step_dict["parentId"])
+        session = self.session
+
+        if session.pending_ask is not None:
+            # A concurrent ask would silently replace the previous form in
+            # the UI and orphan its waiting coroutine — refuse instead.
+            logger.warning(
+                "send_ask_user: an ask is already pending for session %s; "
+                "returning None",
+                session.id,
+            )
+            return None
+
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        session.pending_ask = PendingAsk(
+            step_dict=cast(Dict[str, Any], step_dict),
+            spec=spec,
+            future=future,
+            deadline=time.monotonic() + spec.timeout,
+            parent_id=parent_id,
+            restore_actions=restore_actions or [],
+            restore_element=restore_element,
+        )
         try:
             if spec.type == "file":
                 self.session.files_spec[parent_id] = cast(AskFileSpec, spec)
 
-            # Send the prompt to the UI
-            user_res = await self.emit_call(
-                "ask", {"msg": step_dict, "spec": spec.to_dict()}, spec.timeout
-            )  # type: Optional[Union["StepDict", "AskActionResponse", "AskElementResponse", List["FileReference"]]]
+            # Send the prompt to the UI. A plain emit, not a socket.io call:
+            # the reply comes back through the "ask_reply" event and resolves
+            # the future, which survives socket reconnections (the sid a
+            # sio.call is bound to does not).
+            await self.emit("ask", {"msg": step_dict, "spec": spec.to_dict()})
+
+            user_res: Optional[
+                Union[
+                    StepDict,
+                    AskActionResponse,
+                    AskElementResponse,
+                    List[FileReference],
+                ]
+            ]
+            try:
+                user_res = await asyncio.wait_for(future, spec.timeout)
+            except asyncio.TimeoutError:
+                # Callers (and raise_on_timeout) expect the historical
+                # socketio.exceptions.TimeoutError, not the asyncio one.
+                raise TimeoutError from None
 
             # End the task temporarily so that the User can answer the prompt
             await self.task_end()
@@ -412,6 +463,7 @@ class ChainlitEmitter(BaseChainlitEmitter):
             if raise_on_timeout:
                 raise e
         finally:
+            session.pending_ask = None
             if parent_id in self.session.files_spec:
                 del self.session.files_spec[parent_id]
             await self.task_start()

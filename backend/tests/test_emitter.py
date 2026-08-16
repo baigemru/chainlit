@@ -1,12 +1,15 @@
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
+from socketio.exceptions import TimeoutError as SocketIOTimeoutError
 
 import chainlit.transit as transit
 from chainlit.data.base import BaseDataLayer
 from chainlit.element import ElementDict
 from chainlit.emitter import ChainlitEmitter
 from chainlit.step import StepDict
+from chainlit.types import AskFileSpec, AskSpec
 
 
 @pytest.fixture(autouse=True)
@@ -388,3 +391,172 @@ async def test_flush_thread_queues_retries_without_parent_for_old_layers(
     await emitter.flush_thread_queues("hello")
 
     assert seen == [{"thread_id": "thread-b", "name": "hello"}]
+
+
+class TestSendAskUser:
+    """send_ask_user waits on a session-level future resolved by ask_reply."""
+
+    @staticmethod
+    def _step_dict() -> StepDict:
+        return {
+            "id": "step-1",
+            "parentId": "parent-1",
+            "type": "assistant_message",
+            "name": "ask",
+            "output": "Pick one",
+        }
+
+    @staticmethod
+    def _action_spec(timeout=10) -> AskSpec:
+        return AskSpec(timeout=timeout, type="action", step_id="step-1")
+
+    async def _resolve_when_pending(self, session, value):
+        while session.pending_ask is None:
+            await asyncio.sleep(0)
+        session.pending_ask.future.set_result(value)
+
+    async def test_reply_resolves_and_clears_slot(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        mock_websocket_session.has_first_interaction = True
+        action_res = {"name": "continue", "id": "a1", "label": "Continue"}
+
+        task = asyncio.ensure_future(
+            emitter.send_ask_user(self._step_dict(), self._action_spec())
+        )
+        await self._resolve_when_pending(mock_websocket_session, action_res)
+        result = await task
+
+        assert result == action_res
+        assert mock_websocket_session.pending_ask is None
+        emitted_events = [
+            call.args[0] for call in mock_websocket_session.emit.call_args_list
+        ]
+        assert "ask" in emitted_events
+        assert "clear_ask" in emitted_events
+        assert "task_start" in emitted_events  # finally block ran
+
+    async def test_ask_payload_uses_plain_emit(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        step_dict = self._step_dict()
+        spec = self._action_spec()
+
+        task = asyncio.ensure_future(emitter.send_ask_user(step_dict, spec))
+        await self._resolve_when_pending(mock_websocket_session, {"name": "x"})
+        await task
+
+        mock_websocket_session.emit.assert_any_call(
+            "ask", {"msg": step_dict, "spec": spec.to_dict()}
+        )
+        mock_websocket_session.emit_call.assert_not_called()
+
+    async def test_falsy_reply_returns_none(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        task = asyncio.ensure_future(
+            emitter.send_ask_user(self._step_dict(), self._action_spec())
+        )
+        await self._resolve_when_pending(mock_websocket_session, None)
+        result = await task
+
+        assert result is None
+        emitted_events = [
+            call.args[0] for call in mock_websocket_session.emit.call_args_list
+        ]
+        assert "clear_ask" in emitted_events
+
+    async def test_timeout_sends_ask_timeout_and_returns_none(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        result = await emitter.send_ask_user(
+            self._step_dict(), self._action_spec(timeout=0)
+        )
+
+        assert result is None
+        assert mock_websocket_session.pending_ask is None
+        emitted_events = [
+            call.args[0] for call in mock_websocket_session.emit.call_args_list
+        ]
+        assert "ask_timeout" in emitted_events
+        assert "task_start" in emitted_events
+
+    async def test_timeout_raises_socketio_timeout_error(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        with pytest.raises(SocketIOTimeoutError):
+            await emitter.send_ask_user(
+                self._step_dict(), self._action_spec(timeout=0), True
+            )
+
+        assert mock_websocket_session.pending_ask is None
+
+    async def test_busy_slot_returns_none_without_touching_pending(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        existing = Mock()
+        mock_websocket_session.pending_ask = existing
+
+        result = await emitter.send_ask_user(self._step_dict(), self._action_spec())
+
+        assert result is None
+        assert mock_websocket_session.pending_ask is existing
+        mock_websocket_session.emit.assert_not_called()
+
+    async def test_file_ask_sets_and_clears_files_spec(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        spec = AskFileSpec(
+            timeout=10,
+            type="file",
+            step_id="step-1",
+            accept=["text/plain"],
+            max_files=1,
+            max_size_mb=2,
+        )
+        seen_specs = {}
+
+        task = asyncio.ensure_future(emitter.send_ask_user(self._step_dict(), spec))
+        while mock_websocket_session.pending_ask is None:
+            await asyncio.sleep(0)
+        seen_specs = dict(mock_websocket_session.files_spec)
+        mock_websocket_session.pending_ask.future.set_result(None)
+        await task
+
+        assert seen_specs == {"parent-1": spec}
+        assert mock_websocket_session.files_spec == {}
+
+    async def test_cancelled_future_propagates_and_clears_slot(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        task = asyncio.ensure_future(
+            emitter.send_ask_user(self._step_dict(), self._action_spec())
+        )
+        while mock_websocket_session.pending_ask is None:
+            await asyncio.sleep(0)
+        mock_websocket_session.pending_ask.future.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert mock_websocket_session.pending_ask is None
+        emitted_events = [
+            call.args[0] for call in mock_websocket_session.emit.call_args_list
+        ]
+        assert "ask_timeout" not in emitted_events
+
+    async def test_deadline_uses_monotonic_clock(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        task = asyncio.ensure_future(
+            emitter.send_ask_user(self._step_dict(), self._action_spec(timeout=60))
+        )
+        while mock_websocket_session.pending_ask is None:
+            await asyncio.sleep(0)
+        pending = mock_websocket_session.pending_ask
+
+        assert 0 < pending.remaining <= 60
+        assert not pending.expired
+
+        pending.future.set_result(None)
+        await task

@@ -636,6 +636,7 @@ class TestAskElementMessage:
         with mock_chainlit_context() as ctx:
             element = AsyncMock()
             element.id = "element_123"
+            element.to_dict = Mock(return_value={"id": "element_123"})
             msg = AskElementMessage(content="Submit", element=element)
             ctx.emitter.send_ask_user = AsyncMock(
                 return_value={"submitted": True, "data": {"field": "value"}}
@@ -659,6 +660,7 @@ class TestAskElementMessage:
         with mock_chainlit_context() as ctx:
             element = AsyncMock()
             element.id = "element_123"
+            element.to_dict = Mock(return_value={"id": "element_123"})
             msg = AskElementMessage(content="Submit", element=element)
             ctx.emitter.send_ask_user = AsyncMock(return_value={"submitted": False})
 
@@ -678,6 +680,7 @@ class TestAskElementMessage:
         with mock_chainlit_context() as ctx:
             element = AsyncMock()
             element.id = "element_123"
+            element.to_dict = Mock(return_value={"id": "element_123"})
             msg = AskElementMessage(content="Submit", element=element)
             ctx.emitter.send_ask_user = AsyncMock(return_value=None)
 

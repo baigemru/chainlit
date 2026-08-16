@@ -284,7 +284,26 @@ async def connection_successful(sid):
     context = init_ws_context(sid)
 
     await context.emitter.task_end()
-    await context.emitter.clear("clear_ask")
+
+    pending_ask = context.session.pending_ask
+    if pending_ask is not None and not pending_ask.expired:
+        # A coroutine is still waiting on this ask: rebuild the form in the
+        # UI instead of clearing it. Actions/elements are re-emitted first
+        # (the client loses them on refresh), then the ask itself with the
+        # remaining time so the client never sees more than the original
+        # deadline allows.
+        for action_dict in pending_ask.restore_actions:
+            await context.emitter.emit("action", action_dict)
+        if pending_ask.restore_element is not None:
+            await context.emitter.emit("element", pending_ask.restore_element)
+
+        spec_dict = dict(pending_ask.spec.to_dict())
+        spec_dict["timeout"] = max(1, int(pending_ask.remaining))
+        await context.emitter.emit(
+            "ask", {"msg": pending_ask.step_dict, "spec": spec_dict}
+        )
+    else:
+        await context.emitter.clear("clear_ask")
     await context.emitter.clear("clear_call_fn")
 
     if context.session.restored and not context.session.has_first_interaction:
@@ -377,14 +396,53 @@ async def disconnect(sid):
 @sio.on("stop")  # pyright: ignore [reportOptionalCall]
 async def stop(sid):
     if session := WebsocketSession.get(sid):
-        init_ws_context(session)
+        context = init_ws_context(session)
         await Message(content="Task manually stopped.").send()
+
+        if session.pending_ask is not None:
+            session.pending_ask.cancel()
+            await context.emitter.clear("clear_ask")
 
         if session.current_task:
             session.current_task.cancel()
 
         if config.code.on_stop:
             await config.code.on_stop()
+
+
+@sio.on("ask_reply")  # pyright: ignore [reportOptionalCall]
+async def ask_reply(sid, payload):
+    """Resolve the pending ask with the user's reply.
+
+    Replies are plain events (not socket.io acks) so the client can buffer
+    them across reconnections. Stale or duplicate replies are ignored: the
+    send buffer may redeliver a reply, and a user may click again after a
+    re-emitted ask.
+    """
+    session = WebsocketSession.get(sid)
+    if session is None:
+        logger.warning("ask_reply received for an unknown session; ignoring")
+        return
+
+    pending_ask = session.pending_ask
+    if pending_ask is None:
+        logger.warning("ask_reply received but no ask is pending; ignoring")
+        return
+
+    step_id = (payload or {}).get("stepId")
+    if step_id != pending_ask.spec.step_id:
+        logger.warning(
+            "ask_reply received for step %s but step %s is pending; ignoring",
+            step_id,
+            pending_ask.spec.step_id,
+        )
+        return
+
+    if pending_ask.future.done():
+        logger.warning("ask_reply received for an already answered ask; ignoring")
+        return
+
+    pending_ask.future.set_result((payload or {}).get("value"))
 
 
 async def process_message(session: WebsocketSession, payload: MessagePayload):

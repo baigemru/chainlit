@@ -128,19 +128,26 @@ class TestRestoreExistingSession:
         mock_session.user = None
         emit_fn = Mock()
         emit_call_fn = Mock()
+        emit_ask_fn = Mock()
         environ = {"HTTP_COOKIE": "token=token"}
 
         with patch.object(WebsocketSession, "get_by_id") as mock_get:
             mock_get.return_value = mock_session
 
             result = restore_existing_session(
-                "new_sid", "session_123", emit_fn, emit_call_fn, environ
+                "new_sid",
+                "session_123",
+                emit_fn,
+                emit_call_fn,
+                environ,
+                emit_ask_fn=emit_ask_fn,
             )
 
             assert result is True
             mock_session.restore.assert_called_once_with(new_socket_id="new_sid")
             assert mock_session.emit == emit_fn
             assert mock_session.emit_call == emit_call_fn
+            assert mock_session.emit_ask == emit_ask_fn
             assert mock_session.environ == environ
 
     def test_restore_existing_session_with_matching_user(self):
@@ -159,6 +166,7 @@ class TestRestoreExistingSession:
                 Mock(),
                 {"HTTP_COOKIE": "token=token"},
                 user=authenticated_user,
+                emit_ask_fn=Mock(),
             )
 
             assert result is True
@@ -181,6 +189,7 @@ class TestRestoreExistingSession:
                     Mock(),
                     {"HTTP_COOKIE": "token=token"},
                     user=authenticated_user,
+                    emit_ask_fn=Mock(),
                 )
 
             mock_session.restore.assert_not_called()
@@ -191,7 +200,12 @@ class TestRestoreExistingSession:
             mock_get.return_value = None
 
             result = restore_existing_session(
-                "new_sid", "session_123", Mock(), Mock(), {"HTTP_COOKIE": "token=token"}
+                "new_sid",
+                "session_123",
+                Mock(),
+                Mock(),
+                {"HTTP_COOKIE": "token=token"},
+                emit_ask_fn=Mock(),
             )
 
             assert result is False
@@ -461,7 +475,9 @@ class TestSocketEdgeCases:
         with patch.object(WebsocketSession, "get_by_id") as mock_get:
             mock_get.return_value = None
 
-            result = restore_existing_session(None, None, Mock(), Mock(), None)
+            result = restore_existing_session(
+                None, None, Mock(), Mock(), None, emit_ask_fn=Mock()
+            )
 
             assert result is False
 
@@ -1029,18 +1045,18 @@ class TestAskRestoreEdgeCases:
         ):
             await connection_successful("sid-1")
 
-        calls = [
-            (name, call)
-            for name, call in (
-                [("emit", c) for c in context.emitter.emit.call_args_list]
-                + [("resume", c) for c in context.emitter.resume_thread.call_args_list]
-            )
-        ]
-        emitted = [c.args[0] for n, c in calls if n == "emit"]
+        emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
         assert "ask" in emitted
-        # resume_thread ran, and the mock records show emit("ask") came from
-        # the finally block — i.e. after the resume branch returned.
         context.emitter.resume_thread.assert_awaited_once()
+        # The ask must be re-emitted AFTER resume_thread replaced the client
+        # state, or the restored form would be wiped by the resume payload.
+        call_names = [name for name, _args, _kwargs in context.emitter.mock_calls]
+        ask_emit_index = next(
+            i
+            for i, (name, args, _kwargs) in enumerate(context.emitter.mock_calls)
+            if name == "emit" and args and args[0] == "ask"
+        )
+        assert call_names.index("resume_thread") < ask_emit_index
 
     @pytest.mark.asyncio
     async def test_ask_reply_with_none_payload_is_ignored(self, mock_session_factory):

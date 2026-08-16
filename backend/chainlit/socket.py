@@ -60,7 +60,8 @@ def restore_existing_session(
     emit_call_fn,
     environ,
     user: User | PersistedUser | None = None,
-    emit_ask_fn=None,
+    *,
+    emit_ask_fn,
 ):
     """Restore a session from the sessionId provided by the client."""
     if session := WebsocketSession.get_by_id(session_id):
@@ -320,7 +321,15 @@ async def restore_pending_ask(context, client_has_ui_state: bool):
 
     # The awaits above may have yielded — re-check that the ask is still
     # the pending one before re-emitting a form for it.
-    if session.pending_ask is not pending_ask or pending_ask.future.done():
+    current = session.pending_ask
+    if current is not pending_ask:
+        # The slot changed hands. Clear the UI only when nothing live took
+        # it over — a successor ask has emitted its own form, and a late
+        # clear_ask would wipe it while the server keeps waiting.
+        if current is None or current.future.done() or current.expired:
+            await context.emitter.clear("clear_ask")
+        return
+    if pending_ask.future.done():
         await context.emitter.clear("clear_ask")
         return
 
@@ -341,6 +350,10 @@ async def connection_successful(sid, payload=None):
     context = init_ws_context(sid)
 
     await context.emitter.task_end()
+    # call_fn is bound to the old sid and cannot be restored — clear it
+    # before any branch may schedule on_chat_start, whose own call_fn a
+    # late clear would kill.
+    await context.emitter.clear("clear_call_fn")
     # New clients report whether this is a reconnect of an already-loaded
     # page (UI state intact) or a fresh load; old clients send no payload,
     # which is treated as a fresh load (full restore).
@@ -395,7 +408,6 @@ async def connection_successful(sid, payload=None):
             context.session.current_task = task
     finally:
         await restore_pending_ask(context, client_has_ui_state)
-        await context.emitter.clear("clear_call_fn")
 
 
 @sio.on("clear_session")  # pyright: ignore [reportOptionalCall]
@@ -447,6 +459,10 @@ async def stop(sid):
 
         if session.pending_ask is not None:
             session.pending_ask.cancel()
+            # Free the slot right away so a follow-up ask (e.g. from
+            # on_stop) isn't refused before the cancelled waiter's finally
+            # block runs; the identity check there tolerates this.
+            session.pending_ask = None
             await context.emitter.clear("clear_ask")
 
         if session.current_task:

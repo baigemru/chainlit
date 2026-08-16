@@ -374,10 +374,13 @@ class ChainlitEmitter(BaseChainlitEmitter):
         parent_id = str(step_dict["parentId"])
         session = self.session
 
-        if session.pending_ask is not None:
+        existing = session.pending_ask
+        if existing is not None and not existing.future.done():
             # A concurrent ask would silently replace the previous form in
-            # the UI and orphan its waiting coroutine — refuse instead.
-            logger.warning(
+            # the UI and orphan its waiting coroutine — refuse instead. A
+            # slot whose future is already resolved/cancelled only awaits
+            # its owner's cleanup and does not block a new ask.
+            logger.error(
                 "send_ask_user: an ask is already pending for session %s; "
                 "returning None",
                 session.id,

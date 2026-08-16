@@ -495,6 +495,7 @@ class TestSendAskUser:
         self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
     ) -> None:
         existing = Mock()
+        existing.future.done.return_value = False
         mock_websocket_session.pending_ask = existing
 
         result = await emitter.send_ask_user(self._step_dict(), self._action_spec())

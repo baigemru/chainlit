@@ -90,7 +90,7 @@ const _AskFileButton = ({
   );
 
   const onResolved = (files: File[]) => {
-    if (uploading) return;
+    if (uploading || askUser.awaitingReply) return;
 
     const promises: Promise<IFileRef>[] = [];
 
@@ -114,7 +114,12 @@ const _AskFileButton = ({
     });
 
     Promise.all(promises)
-      .then((fileRefs) => askUser.callback(fileRefs))
+      .then((fileRefs) => {
+        // Mark the batch finished so the dropzone unlocks: after a
+        // reconnect the same form may need a second attempt.
+        setUploads((prev) => prev.map((u) => ({ ...u, uploaded: true })));
+        askUser.callback(fileRefs);
+      })
       .catch((error) => {
         onError(
           `${t('chat.fileUpload.errors.failed')}: ${
@@ -159,7 +164,7 @@ const _AskFileButton = ({
         </div>
         <Button
           id={uploading ? 'ask-upload-button-loading' : 'ask-upload-button'}
-          disabled={uploading}
+          disabled={uploading || askUser.awaitingReply}
           className="ml-auto"
           variant={uploading ? 'ghost' : 'default'}
         >

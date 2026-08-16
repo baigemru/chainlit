@@ -560,3 +560,87 @@ class TestSendAskUser:
 
         pending.future.set_result(None)
         await task
+
+
+class TestSendAskUserRestorePayloads:
+    """restore_* kwargs must land in the PendingAsk slot."""
+
+    async def test_restore_kwargs_stored_in_pending_ask(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        element = Mock()
+        action_dict = {"id": "a1"}
+        step_dict: StepDict = {
+            "id": "step-1",
+            "parentId": "parent-1",
+            "type": "assistant_message",
+            "name": "ask",
+            "output": "Pick",
+        }
+        spec = AskSpec(timeout=10, type="action", step_id="step-1")
+
+        task = asyncio.ensure_future(
+            emitter.send_ask_user(
+                step_dict,
+                spec,
+                restore_actions=[action_dict],
+                restore_element=element,
+            )
+        )
+        while mock_websocket_session.pending_ask is None:
+            await asyncio.sleep(0)
+        pending = mock_websocket_session.pending_ask
+
+        assert pending.restore_actions == [action_dict]
+        assert pending.restore_element is element
+
+        pending.future.set_result(None)
+        await task
+
+    async def test_base_emitter_stub_accepts_restore_kwargs(
+        self, mock_websocket_session: MagicMock
+    ) -> None:
+        from chainlit.emitter import BaseChainlitEmitter
+
+        stub = BaseChainlitEmitter(mock_websocket_session)
+        result = await stub.send_ask_user(
+            {"id": "s", "parentId": "p"},  # type: ignore[typeddict-item]
+            AskSpec(timeout=1, type="text", step_id="s"),
+            restore_actions=[{"id": "a"}],
+            restore_element=Mock(),
+        )
+        assert result is None
+
+    async def test_legacy_ack_resolves_future_when_emit_ask_available(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        """A session with emit_ask sends the ask through it, and the attached
+        legacy ack resolves the same future (stale cached bundles)."""
+        captured = {}
+
+        async def emit_ask(payload, callback):
+            captured["payload"] = payload
+            captured["ack"] = callback
+
+        mock_websocket_session.emit_ask = emit_ask
+        step_dict: StepDict = {
+            "id": "step-1",
+            "parentId": "parent-1",
+            "type": "assistant_message",
+            "name": "ask",
+            "output": "Pick",
+        }
+        spec = AskSpec(timeout=10, type="action", step_id="step-1")
+
+        task = asyncio.ensure_future(emitter.send_ask_user(step_dict, spec))
+        while "ack" not in captured:
+            await asyncio.sleep(0)
+
+        action_res = {"name": "go", "id": "a1", "label": "Go"}
+        captured["ack"](action_res)
+        # A duplicate ack must be a no-op, not an InvalidStateError.
+        captured["ack"]({"name": "other"})
+
+        result = await task
+        assert result == action_res
+        assert captured["payload"]["msg"] == step_dict

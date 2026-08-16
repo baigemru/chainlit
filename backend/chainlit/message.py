@@ -619,8 +619,10 @@ class AskElementMessage(AskMessageBase):
                 spec,
                 self.raise_on_timeout,
                 # The client loses the element on refresh; it is re-emitted
-                # alongside the ask on reconnect.
-                restore_element=dict(self.element.to_dict()),
+                # alongside the ask on reconnect. Passed as the live object
+                # and serialized at restore time, so updates made while the
+                # ask is pending are not rolled back.
+                restore_element=self.element,
             ),
         )
 

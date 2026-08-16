@@ -17,6 +17,7 @@ from chainlit.chat_context import chat_context
 from chainlit.config import ChainlitConfig, config
 from chainlit.context import init_ws_context
 from chainlit.data import get_data_layer
+from chainlit.emitter import _make_legacy_ask_ack
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
 from chainlit.server import sio
@@ -59,6 +60,7 @@ def restore_existing_session(
     emit_call_fn,
     environ,
     user: User | PersistedUser | None = None,
+    emit_ask_fn=None,
 ):
     """Restore a session from the sessionId provided by the client."""
     if session := WebsocketSession.get_by_id(session_id):
@@ -69,6 +71,7 @@ def restore_existing_session(
         session.restore(new_socket_id=sid)
         session.emit = emit_fn
         session.emit_call = emit_call_fn
+        session.emit_ask = emit_ask_fn
         session.environ = environ
         return True
     return False
@@ -175,9 +178,21 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
     def emit_call_fn(event: Literal["ask", "call_fn"], data, timeout):
         return sio.call(event, data, timeout=timeout, to=sid)
 
+    # Session scoped function to emit an ask with a socket.io ack attached.
+    # The ack is a legacy path: clients running a stale cached bundle answer
+    # asks through it instead of the ask_reply event.
+    def emit_ask_fn(data, callback):
+        return sio.emit("ask", data, to=sid, callback=callback)
+
     session_id = auth["sessionId"]
     if restore_existing_session(
-        sid, session_id, emit_fn, emit_call_fn, environ, user=user
+        sid,
+        session_id,
+        emit_fn,
+        emit_call_fn,
+        environ,
+        user=user,
+        emit_ask_fn=emit_ask_fn,
     ):
         return True
 
@@ -202,6 +217,7 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         chat_profile=chat_profile,
         thread_id=thread_id,
         environ=environ,
+        emit_ask=emit_ask_fn,
     )
 
     return True
@@ -279,77 +295,107 @@ async def claim_transit_message(sid, payload):
     transit.reassign(session.id, next_id)
 
 
-@sio.on("connection_successful")  # pyright: ignore [reportOptionalCall]
-async def connection_successful(sid):
-    context = init_ws_context(sid)
+async def restore_pending_ask(context, client_has_ui_state: bool):
+    """Rebuild a live pending ask in the UI, or clear the ask state.
 
-    await context.emitter.task_end()
+    Must run after the resume/transit branches of ``connection_successful``:
+    ``resume_thread`` replaces the client's message/element state wholesale
+    and would wipe a form re-emitted before it.
+    """
+    session = context.session
+    pending_ask = session.pending_ask
+    if pending_ask is None or pending_ask.expired or pending_ask.future.done():
+        await context.emitter.clear("clear_ask")
+        return
 
-    pending_ask = context.session.pending_ask
-    if pending_ask is not None and not pending_ask.expired:
-        # A coroutine is still waiting on this ask: rebuild the form in the
-        # UI instead of clearing it. Actions/elements are re-emitted first
-        # (the client loses them on refresh), then the ask itself with the
-        # remaining time so the client never sees more than the original
-        # deadline allows.
+    if not client_has_ui_state:
+        # The page was reloaded: the client lost the actions/element the
+        # form is built from. On a plain transport reconnect the client
+        # still has them (and the element may hold newer props than any
+        # snapshot) — skip the re-emit.
         for action_dict in pending_ask.restore_actions:
             await context.emitter.emit("action", action_dict)
         if pending_ask.restore_element is not None:
-            await context.emitter.emit("element", pending_ask.restore_element)
+            await context.emitter.emit("element", pending_ask.restore_element.to_dict())
 
-        spec_dict = dict(pending_ask.spec.to_dict())
-        spec_dict["timeout"] = max(1, int(pending_ask.remaining))
-        await context.emitter.emit(
-            "ask", {"msg": pending_ask.step_dict, "spec": spec_dict}
-        )
-    else:
+    # The awaits above may have yielded — re-check that the ask is still
+    # the pending one before re-emitting a form for it.
+    if session.pending_ask is not pending_ask or pending_ask.future.done():
         await context.emitter.clear("clear_ask")
-    await context.emitter.clear("clear_call_fn")
+        return
 
-    if context.session.restored and not context.session.has_first_interaction:
+    spec_dict = dict(pending_ask.spec.to_dict())
+    # Remaining time from the original deadline (informational: the server
+    # deadline is authoritative, but third-party clients may show a timer).
+    spec_dict["timeout"] = max(1, int(pending_ask.remaining))
+    ask_payload = {"msg": pending_ask.step_dict, "spec": spec_dict}
+    emit_ask = getattr(session, "emit_ask", None)
+    if emit_ask is not None:
+        await emit_ask(ask_payload, _make_legacy_ask_ack(pending_ask.future))
+    else:
+        await context.emitter.emit("ask", ask_payload)
+
+
+@sio.on("connection_successful")  # pyright: ignore [reportOptionalCall]
+async def connection_successful(sid, payload=None):
+    context = init_ws_context(sid)
+
+    await context.emitter.task_end()
+    # New clients report whether this is a reconnect of an already-loaded
+    # page (UI state intact) or a fresh load; old clients send no payload,
+    # which is treated as a fresh load (full restore).
+    client_has_ui_state = bool((payload or {}).get("isReconnect"))
+
+    try:
+        if context.session.restored and not context.session.has_first_interaction:
+            await apply_transit_message(context)
+            if config.code.on_chat_start and not context.session.chat_started:
+                context.session.chat_started = True
+                task = asyncio.create_task(config.code.on_chat_start())
+                context.session.current_task = task
+            return
+
+        if context.session.thread_id_to_resume and config.code.on_chat_resume:
+            thread = await resume_thread(context.session)
+            if thread:
+                # A transit record parked for this session would outlive the
+                # resume (which never reads it) and leak into a later
+                # reconnect — drop it instead.
+                owner = (
+                    context.session.user.identifier if context.session.user else None
+                )
+                record = transit.pop(context.session.id, owner)
+                if record is not transit.NO_TRANSIT and record.value is not None:
+                    logger.warning(
+                        "Dropping a transit message on thread resume; it would "
+                        "otherwise be delivered late into an unrelated chat."
+                    )
+
+                context.session.has_first_interaction = True
+                await context.emitter.emit(
+                    "first_interaction",
+                    {"interaction": "resume", "thread_id": thread.get("id")},
+                )
+                await config.code.on_chat_resume(thread)
+
+                for step in thread.get("steps", []):
+                    if "message" in step["type"]:
+                        chat_context.add(Message.from_dict(step))
+
+                await context.emitter.resume_thread(thread)
+                return
+            else:
+                await context.emitter.send_resume_thread_error("Thread not found.")
+
         await apply_transit_message(context)
+
         if config.code.on_chat_start and not context.session.chat_started:
             context.session.chat_started = True
             task = asyncio.create_task(config.code.on_chat_start())
             context.session.current_task = task
-        return
-
-    if context.session.thread_id_to_resume and config.code.on_chat_resume:
-        thread = await resume_thread(context.session)
-        if thread:
-            # A transit record parked for this session would outlive the
-            # resume (which never reads it) and leak into a later reconnect —
-            # drop it instead.
-            owner = context.session.user.identifier if context.session.user else None
-            record = transit.pop(context.session.id, owner)
-            if record is not transit.NO_TRANSIT and record.value is not None:
-                logger.warning(
-                    "Dropping a transit message on thread resume; it would "
-                    "otherwise be delivered late into an unrelated chat."
-                )
-
-            context.session.has_first_interaction = True
-            await context.emitter.emit(
-                "first_interaction",
-                {"interaction": "resume", "thread_id": thread.get("id")},
-            )
-            await config.code.on_chat_resume(thread)
-
-            for step in thread.get("steps", []):
-                if "message" in step["type"]:
-                    chat_context.add(Message.from_dict(step))
-
-            await context.emitter.resume_thread(thread)
-            return
-        else:
-            await context.emitter.send_resume_thread_error("Thread not found.")
-
-    await apply_transit_message(context)
-
-    if config.code.on_chat_start and not context.session.chat_started:
-        context.session.chat_started = True
-        task = asyncio.create_task(config.code.on_chat_start())
-        context.session.current_task = task
+    finally:
+        await restore_pending_ask(context, client_has_ui_state)
+        await context.emitter.clear("clear_call_fn")
 
 
 @sio.on("clear_session")  # pyright: ignore [reportOptionalCall]

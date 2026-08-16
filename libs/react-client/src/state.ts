@@ -48,6 +48,22 @@ export const chatProfileState = atom<string | undefined>({
 // session.
 export const sessionIdStorage = { key: 'chainlit-session-id' };
 
+// A saved session id is only reused when this page load is a reload (or a
+// back/forward restore) of the same tab. A brand-new navigation — including
+// tabs opened from this one via target=_blank or window.open, which inherit
+// a copy of sessionStorage — must NOT adopt the id, or the new tab would
+// silently hijack the original tab's server session.
+const isReloadNavigation = (): boolean => {
+  try {
+    const nav = performance.getEntriesByType('navigation')[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    return nav?.type === 'reload' || nav?.type === 'back_forward';
+  } catch (_error) {
+    return false;
+  }
+};
+
 // Persist the session id in sessionStorage (per-tab, survives F5) so a page
 // reload reconnects to the same server session and a pending ask can be
 // restored. sessionStorage is deliberate: localStorage would collapse every
@@ -57,7 +73,9 @@ const sessionStorageSessionIdEffect: AtomEffect<string> = ({
   onSet
 }) => {
   try {
-    const saved = sessionStorage.getItem(sessionIdStorage.key);
+    const saved = isReloadNavigation()
+      ? sessionStorage.getItem(sessionIdStorage.key)
+      : null;
     if (saved) {
       setSelf(saved);
     } else {

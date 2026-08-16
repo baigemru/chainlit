@@ -1,5 +1,5 @@
 import { debounce } from 'lodash';
-import { useCallback, useContext, useEffect } from 'react';
+import { useCallback, useContext, useEffect, useRef } from 'react';
 import {
   useRecoilState,
   useRecoilValue,
@@ -60,10 +60,19 @@ import { OutputAudioChunk } from './types/audio';
 import { ChainlitContext } from './context';
 import type { IToken } from './useChatData';
 
+// True once any connection succeeded in this page's lifetime. Reported to
+// the server on connection_successful so it can distinguish a reconnect of
+// a loaded page (UI state intact) from a fresh page load that needs a full
+// restore of a pending ask's actions/element.
+let pageHasEstablishedConnection = false;
+
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useRecoilValue(sessionIdState);
   const resetSessionId = useResetRecoilState(sessionIdState);
+  // One-shot guard: a persisted session id the server refuses gets replaced
+  // once; a second refusal in a row surfaces as an error instead of looping.
+  const authFailureHandledRef = useRef(false);
 
   const [session, setSession] = useRecoilState(sessionState);
   const setIsAiSpeaking = useSetRecoilState(isAiSpeakingState);
@@ -134,8 +143,10 @@ const useChatSession = () => {
           chatProfile: chatProfile ? encodeURIComponent(chatProfile) : ''
         }
       });
-      if (typeof window !== 'undefined') {
-        // Exposed for e2e tests to simulate transport drops.
+      if (typeof window !== 'undefined' && client.type !== 'copilot') {
+        // Exposed for e2e tests to simulate transport drops. Never for the
+        // copilot widget: it lives on a host page whose scripts must not
+        // get a handle on the user's socket.
         (window as any).__chainlitSocket = socket;
       }
 
@@ -148,7 +159,11 @@ const useChatSession = () => {
       });
 
       socket.on('connect', () => {
-        socket.emit('connection_successful');
+        socket.emit('connection_successful', {
+          isReconnect: pageHasEstablishedConnection
+        });
+        pageHasEstablishedConnection = true;
+        authFailureHandledRef.current = false;
         setSession((s) => ({ ...s!, error: false }));
         socket.emit('fetch_favorites');
         setMcps((prev) =>
@@ -204,10 +219,16 @@ const useChatSession = () => {
       });
 
       socket.on('connect_error', (err) => {
-        if (err?.message === 'authorization failed') {
+        if (
+          err?.message === 'authorization failed' &&
+          !authFailureHandledRef.current
+        ) {
           // The persisted session id belongs to a session this user may not
           // claim (e.g. someone else logged in within this tab). Mint a
           // fresh id instead of retrying against the same refusal forever.
+          // Once only: a refusal for another reason (e.g. a foreign thread
+          // id) would repeat with the new id and must surface as an error.
+          authFailureHandledRef.current = true;
           resetSessionId();
           return;
         }
@@ -535,7 +556,7 @@ const useChatSession = () => {
         }
       });
     },
-    [setSession, sessionId, idToResume, chatProfile]
+    [setSession, sessionId, idToResume, chatProfile, resetSessionId]
   );
 
   const connect = useCallback(debounce(_connect, 200), [_connect]);

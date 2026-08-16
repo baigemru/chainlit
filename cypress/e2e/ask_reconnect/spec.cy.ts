@@ -8,12 +8,12 @@ function dropSocket() {
   });
 }
 
-function answerNameAsk() {
+function answerNameAsk(name = 'Jeeves') {
   // Wait for the ask step before typing: the composer remounts when the
   // first message arrives and would lose anything typed earlier.
   cy.get('.step').should('contain', 'What is your name?');
-  submitMessage('Jeeves');
-  cy.get('.step').should('contain', 'Your name is: Jeeves');
+  submitMessage(name);
+  cy.get('.step').should('contain', `Your name is: ${name}`);
 }
 
 describe('Ask reconnect', () => {
@@ -32,16 +32,31 @@ describe('Ask reconnect', () => {
     cy.get('.step').should('contain', 'Your name is: Jeeves');
   });
 
-  it('restores action buttons after a socket drop', () => {
+  it('delivers a click made while the transport is down', () => {
     answerNameAsk();
     cy.get('#continue-action').should('be.visible');
 
     dropSocket();
+    // Click strictly while disconnected: the reply must be buffered and
+    // delivered after the automatic reconnect, not lost.
+    cy.window().its('__chainlitSocket.connected').should('eq', false);
+    cy.get('#continue-action').click();
 
-    cy.get('#continue-action').should('be.visible').and('not.be.disabled');
-    // The re-emitted action must not duplicate the button.
-    cy.get('#continue-action').should('have.length', 1);
+    cy.window().its('__chainlitSocket.connected').should('eq', true);
+    cy.get('.step').should('contain', 'Action picked: continue');
+  });
 
+  it('restores action buttons after a reconnect', () => {
+    answerNameAsk();
+    cy.get('#continue-action').should('be.visible');
+
+    dropSocket();
+    cy.window().its('__chainlitSocket.connected').should('eq', false);
+    // Wait out the reconnect, then interact: the re-emitted ask must
+    // rebind the form without duplicating the button.
+    cy.window().its('__chainlitSocket.connected').should('eq', true);
+
+    cy.get('#continue-action').should('have.length', 1).and('not.be.disabled');
     cy.get('#continue-action').click();
     cy.get('.step').should('contain', 'Action picked: continue');
   });
@@ -68,15 +83,16 @@ describe('Ask reconnect', () => {
   });
 
   it('times out from the original deadline despite a reload', () => {
-    answerNameAsk();
+    // "timeout" asks the app for a short (8s) action deadline.
+    answerNameAsk('timeout');
     cy.get('#continue-action').should('be.visible');
 
     cy.reload();
 
     // The ask must come back after the reload…
     cy.get('#continue-action').should('be.visible');
-    // …and still expire on the server's original 20s deadline.
-    cy.get('.step', { timeout: 30000 }).should(
+    // …and still expire on the server's original deadline.
+    cy.get('.step', { timeout: 15000 }).should(
       'contain',
       'Timed out: no action was taken'
     );

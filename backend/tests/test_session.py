@@ -834,7 +834,6 @@ class TestWebsocketSessionPendingAsk:
             spec=AskSpec(timeout=timeout, type="text", step_id="step-1"),
             future=asyncio.get_event_loop().create_future(),
             deadline=time.monotonic() + timeout,
-            parent_id="parent-1",
         )
 
     @pytest.mark.asyncio

@@ -754,7 +754,6 @@ class TestAskSurvivesReconnect:
             spec=AskSpec(timeout=timeout, type="action", step_id="step-1"),
             future=asyncio.get_event_loop().create_future(),
             deadline=time.monotonic() + timeout,
-            parent_id="parent-1",
         )
         defaults.update(overrides)
         return PendingAsk(**defaults)
@@ -806,7 +805,9 @@ class TestAskSurvivesReconnect:
         self, mock_session_factory
     ):
         element_dict = {"id": "el-1", "forId": "step-1"}
-        pending = self._pending_ask(restore_element=element_dict)
+        element = Mock()
+        element.to_dict = Mock(return_value=element_dict)
+        pending = self._pending_ask(restore_element=element)
         session = mock_session_factory(pending_ask=pending)
         session.restored = True
         session.chat_started = True
@@ -933,3 +934,131 @@ class TestAskSurvivesReconnect:
         assert pending.future.cancelled()
         cleared = [call.args[0] for call in context.emitter.clear.call_args_list]
         assert "clear_ask" in cleared
+
+
+class TestAskRestoreEdgeCases:
+    """Edge cases of restore_pending_ask and ask_reply hardening."""
+
+    _pending_ask = staticmethod(TestAskSurvivesReconnect._pending_ask)
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    def _config(self):
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+        return mock_config
+
+    @pytest.mark.asyncio
+    async def test_reconnect_of_loaded_page_skips_actions_and_element(
+        self, mock_session_factory
+    ):
+        """isReconnect=True: the client still has its UI state — re-emitting
+        the element would roll a live form back to a snapshot."""
+        element = Mock()
+        element.to_dict = Mock(return_value={"id": "el-1"})
+        pending = self._pending_ask(
+            restore_actions=[{"id": "a1"}], restore_element=element
+        )
+        session = mock_session_factory(pending_ask=pending)
+        session.restored = True
+        session.chat_started = True
+        session.thread_id_to_resume = None
+        context = self._context(session)
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config()),
+        ):
+            await connection_successful("sid-1", {"isReconnect": True})
+
+        emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
+        assert "action" not in emitted
+        assert "element" not in emitted
+        assert "ask" in emitted
+
+    @pytest.mark.asyncio
+    async def test_answered_pending_ask_is_not_reemitted(self, mock_session_factory):
+        """A resolved-but-not-yet-cleared ask must not resurrect its form."""
+        pending = self._pending_ask()
+        pending.future.set_result({"name": "done"})
+        session = mock_session_factory(pending_ask=pending)
+        session.restored = True
+        session.chat_started = True
+        session.thread_id_to_resume = None
+        context = self._context(session)
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config()),
+        ):
+            await connection_successful("sid-1")
+
+        emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
+        assert "ask" not in emitted
+        cleared = [call.args[0] for call in context.emitter.clear.call_args_list]
+        assert "clear_ask" in cleared
+
+    @pytest.mark.asyncio
+    async def test_pending_ask_survives_thread_resume_branch(
+        self, mock_session_factory
+    ):
+        """resume_thread replaces the client's state wholesale: the ask must
+        be re-emitted AFTER it, not clobbered by it."""
+        pending = self._pending_ask()
+        session = mock_session_factory(pending_ask=pending)
+        session.restored = True
+        session.chat_started = True
+        session.thread_id_to_resume = "thread-1"
+        session.user = None
+        context = self._context(session)
+
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = AsyncMock()
+        thread = {"id": "thread-1", "steps": []}
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+            patch("chainlit.socket.resume_thread", AsyncMock(return_value=thread)),
+        ):
+            await connection_successful("sid-1")
+
+        calls = [
+            (name, call)
+            for name, call in (
+                [("emit", c) for c in context.emitter.emit.call_args_list]
+                + [("resume", c) for c in context.emitter.resume_thread.call_args_list]
+            )
+        ]
+        emitted = [c.args[0] for n, c in calls if n == "emit"]
+        assert "ask" in emitted
+        # resume_thread ran, and the mock records show emit("ask") came from
+        # the finally block — i.e. after the resume branch returned.
+        context.emitter.resume_thread.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ask_reply_with_none_payload_is_ignored(self, mock_session_factory):
+        pending = self._pending_ask()
+        session = mock_session_factory(pending_ask=pending)
+
+        with patch.object(WebsocketSession, "get", return_value=session):
+            await ask_reply("sid-1", None)
+
+        assert not pending.future.done()
+
+    @pytest.mark.asyncio
+    async def test_ask_reply_on_cancelled_future_is_ignored(self, mock_session_factory):
+        pending = self._pending_ask()
+        pending.future.cancel()
+        session = mock_session_factory(pending_ask=pending)
+
+        with patch.object(WebsocketSession, "get", return_value=session):
+            await ask_reply("sid-1", {"stepId": "step-1", "value": "late"})
+
+        assert pending.future.cancelled()

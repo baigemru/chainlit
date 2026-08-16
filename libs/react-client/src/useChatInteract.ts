@@ -3,6 +3,7 @@ import { useRecoilValue, useResetRecoilState, useSetRecoilState } from 'recoil';
 import {
   actionState,
   askUserState,
+  callFnState,
   chatSettingsInputsState,
   chatSettingsValueState,
   currentThreadIdState,
@@ -47,12 +48,18 @@ const useChatInteract = () => {
   const setSideView = useSetRecoilState(sideViewState);
   const setCurrentThreadId = useSetRecoilState(currentThreadIdState);
   const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
+  const setAskUser = useSetRecoilState(askUserState);
+  const setCallFn = useSetRecoilState(callFnState);
 
   const clear = useCallback(() => {
     session?.socket.emit('clear_session');
     session?.socket.disconnect();
     setIdToResume(undefined);
     resetSessionId();
+    // The old session is gone; a lingering ask/call would hold a dead
+    // callback (and possibly an awaitingReply lock) forever.
+    setAskUser(undefined);
+    setCallFn(undefined);
     setFirstUserInteraction(undefined);
     setMessages([]);
     setElements([]);

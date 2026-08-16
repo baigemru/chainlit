@@ -296,11 +296,14 @@ class PendingAsk:
     spec: AskSpec
     future: "asyncio.Future"
     deadline: float
-    parent_id: str
-    # Serialized actions/element to re-emit on reconnect so the UI can
-    # rebuild the form (the client loses them on refresh).
+    # Serialized actions to re-emit on reconnect so the UI can rebuild the
+    # form (the client loses them on refresh). Actions are immutable, so a
+    # snapshot is safe.
     restore_actions: List[Dict[str, Any]] = field(default_factory=list)
-    restore_element: Optional[Dict[str, Any]] = None
+    # The live element object (anything with to_dict()) — serialized at
+    # restore time so element updates made while the ask is pending are not
+    # rolled back by the re-emit.
+    restore_element: Optional[Any] = None
 
     @property
     def remaining(self) -> float:
@@ -356,6 +359,8 @@ class WebsocketSession(BaseSession):
         token: Optional[str] = None,
         # Chat profile selected before the session was created
         chat_profile: Optional[str] = None,
+        # Function to emit an ask with a legacy socket.io ack attached
+        emit_ask: Optional[Callable[[Any, Callable], Any]] = None,
     ):
         super().__init__(
             id=id,
@@ -371,6 +376,7 @@ class WebsocketSession(BaseSession):
         self.socket_id = socket_id
         self.emit_call = emit_call
         self.emit = emit
+        self.emit_ask = emit_ask
 
         self.restored = False
         self.pending_ask = None
@@ -439,8 +445,7 @@ class WebsocketSession(BaseSession):
         # Wake up any coroutine waiting on a pending ask so it doesn't
         # outlive the session and write "Timed out" into the old thread
         # long after the user is gone. Must not require a chainlit context:
-        # delete() is also called from the disconnect GC timer and the
-        # Slack/Discord/Teams apps.
+        # delete() is also called from the disconnect GC timer.
         if self.pending_ask is not None:
             self.pending_ask.cancel()
             self.pending_ask = None

@@ -758,3 +758,49 @@ class TestMessageEdgeCases:
             result = msg.to_dict()
 
             assert result["metadata"] == {}
+
+
+class TestAskRestorePayloads:
+    """Ask messages must hand the emitter what it needs to rebuild the form
+    after a reconnect."""
+
+    @pytest.mark.asyncio
+    async def test_ask_action_passes_restore_actions(self):
+        with mock_chainlit_context() as ctx:
+            action = AsyncMock(spec=Action)
+            action.id = "action_123"
+            action.to_dict = Mock(return_value={"id": "action_123"})
+            msg = AskActionMessage(content="Choose", actions=[action])
+            ctx.emitter.send_ask_user = AsyncMock(
+                return_value={"id": "action_123", "label": "Confirm"}
+            )
+
+            with patch("chainlit.message.get_data_layer", return_value=None):
+                with patch("chainlit.message.config") as mock_config:
+                    mock_config.code.author_rename = None
+                    with patch("chainlit.message.chat_context"):
+                        await msg.send()
+
+            assert ctx.emitter.send_ask_user.await_count == 1
+            kwargs = ctx.emitter.send_ask_user.await_args.kwargs
+            assert kwargs["restore_actions"] == [{"id": "action_123"}]
+
+    @pytest.mark.asyncio
+    async def test_ask_element_passes_live_element(self):
+        with mock_chainlit_context() as ctx:
+            element = AsyncMock()
+            element.id = "element_123"
+            element.to_dict = Mock(return_value={"id": "element_123"})
+            msg = AskElementMessage(content="Submit", element=element)
+            ctx.emitter.send_ask_user = AsyncMock(return_value={"submitted": True})
+
+            with patch("chainlit.message.get_data_layer", return_value=None):
+                with patch("chainlit.message.config") as mock_config:
+                    mock_config.code.author_rename = None
+                    with patch("chainlit.message.chat_context"):
+                        await msg.send()
+
+            kwargs = ctx.emitter.send_ask_user.await_args.kwargs
+            # The live object, not a snapshot: updates made while the ask is
+            # pending must survive into the restore payload.
+            assert kwargs["restore_element"] is element

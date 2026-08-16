@@ -395,16 +395,16 @@ class AskUserMessage(AskMessageBase):
 
         spec = AskSpec(type="text", step_id=step_dict["id"], timeout=self.timeout)
 
+        # In the transcript BEFORE the wait: a reconnect replay must show
+        # the question above its answer, not below it.
+        chat_context.add(cast("Message", self))
+
         res = cast(
             Union[None, StepDict],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
         )
 
         self.wait_for_answer = False
-
-        # Keep the prompt in the transcript so a later reconnect replay
-        # shows the question, not just the answer.
-        chat_context.add(cast("Message", self))
 
         return res
 
@@ -473,16 +473,16 @@ class AskFileMessage(AskMessageBase):
             timeout=self.timeout,
         )
 
+        # In the transcript BEFORE the wait: a reconnect replay must show
+        # the question above its answer, not below it.
+        chat_context.add(cast("Message", self))
+
         res = cast(
             Union[None, List[FileDict]],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
         )
 
         self.wait_for_answer = False
-
-        # Keep the prompt in the transcript so a later reconnect replay
-        # shows the question, not just the answer.
-        chat_context.add(cast("Message", self))
 
         if res:
             return [

@@ -21,12 +21,7 @@ from chainlit.emitter import _make_legacy_ask_ack
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
 from chainlit.server import sio
-from chainlit.session import (
-    ClientType,
-    WebsocketSession,
-    ws_sessions_id,
-    ws_sessions_sid,
-)
+from chainlit.session import ClientType, WebsocketSession
 from chainlit.types import (
     InputAudioChunk,
     InputAudioChunkPayload,
@@ -68,6 +63,7 @@ def restore_existing_session(
     user: User | PersistedUser | None = None,
     *,
     emit_ask_fn,
+    page_load=False,
 ):
     """Restore a session from the sessionId provided by the client."""
     if session := WebsocketSession.get_by_id(session_id):
@@ -80,6 +76,7 @@ def restore_existing_session(
         session.emit_call = emit_call_fn
         session.emit_ask = emit_ask_fn
         session.environ = environ
+        session.fresh_page_load = page_load
         return True
     return False
 
@@ -201,8 +198,9 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
     # — after the new connection is fully validated — and a new one is
     # created under the same id. Transport reconnects and old clients don't
     # set the flag and restore as before.
+    page_load = bool(auth.get("pageLoad"))
     drop_stale_session = False
-    if bool(auth.get("pageLoad")):
+    if page_load:
         if existing := WebsocketSession.get_by_id(session_id):
             if not _session_owner_matches_user(existing, user):
                 logger.error("Authorization for the session failed.")
@@ -223,6 +221,7 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         environ,
         user=user,
         emit_ask_fn=emit_ask_fn,
+        page_load=page_load,
     ):
         return True
 
@@ -232,12 +231,10 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
     if drop_stale_session:
         if stale := WebsocketSession.get_by_id(session_id):
             user_sessions.pop(stale.id, None)
-            # Free the id for the new session right away; the heavyweight
-            # cleanup (files dir, MCP sessions) must not block the
-            # handshake, so it runs in the background.
-            ws_sessions_id.pop(stale.id, None)
-            ws_sessions_sid.pop(stale.socket_id, None)
-            asyncio.ensure_future(stale.delete())
+            # Deleted BEFORE the new session is created under the same id:
+            # a deferred cleanup would wipe the successor's registry entry,
+            # chat context and files directory (they are all keyed by id).
+            await stale.delete()
 
     client_type = auth["clientType"]
     url_encoded_chat_profile = auth.get("chatProfile", None)
@@ -406,7 +403,7 @@ async def restore_pending_ask(context, client_has_ui_state: bool):
 
 
 @sio.on("connection_successful")  # pyright: ignore [reportOptionalCall]
-async def connection_successful(sid, payload=None):
+async def connection_successful(sid):
     context = init_ws_context(sid)
 
     await context.emitter.task_end()
@@ -414,10 +411,11 @@ async def connection_successful(sid, payload=None):
     # before any branch may schedule on_chat_start, whose own call_fn a
     # late clear would kill.
     await context.emitter.clear("clear_call_fn")
-    # New clients report whether this is a reconnect of an already-loaded
-    # page (UI state intact) or a fresh load; old clients send no payload,
-    # which is treated as a fresh load (full restore).
-    client_has_ui_state = bool((payload or {}).get("isReconnect"))
+    # The connect handler records whether this connection is the first one
+    # after a full page load (UI state lost, full restore needed) or a
+    # plain reconnect of a loaded page. Old clients never set the flag and
+    # get the full restore.
+    client_has_ui_state = not getattr(context.session, "fresh_page_load", True)
 
     try:
         if context.session.restored and not context.session.has_first_interaction:

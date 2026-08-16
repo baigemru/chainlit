@@ -9,8 +9,6 @@ import chainlit.transit as transit
 from chainlit.session import (
     PendingAsk,
     WebsocketSession,
-    ws_sessions_id,
-    ws_sessions_sid,
 )
 from chainlit.socket import (
     _authenticate_connection,
@@ -987,14 +985,14 @@ class TestAskRestoreEdgeCases:
     async def test_reconnect_of_loaded_page_skips_actions_and_element(
         self, mock_session_factory
     ):
-        """isReconnect=True: the client still has its UI state — re-emitting
+        """Plain transport reconnect: the client still has its UI state — re-emitting
         the element would roll a live form back to a snapshot."""
         element = Mock()
         element.to_dict = Mock(return_value={"id": "el-1"})
         pending = self._pending_ask(
             restore_actions=[{"id": "a1"}], restore_element=element
         )
-        session = mock_session_factory(pending_ask=pending)
+        session = mock_session_factory(pending_ask=pending, fresh_page_load=False)
         session.restored = True
         session.chat_started = True
         session.thread_id_to_resume = None
@@ -1004,7 +1002,7 @@ class TestAskRestoreEdgeCases:
             patch("chainlit.socket.init_ws_context", return_value=context),
             patch("chainlit.socket.config", self._config()),
         ):
-            await connection_successful("sid-1", {"isReconnect": True})
+            await connection_successful("sid-1")
 
         emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
         assert "action" not in emitted
@@ -1126,8 +1124,12 @@ class TestPageLoadGate:
     async def test_page_load_with_idle_session_drops_it(self):
         stale = self._stale_session()
         user_sessions["session_123"] = {"stale": True}
-        ws_sessions_id["session_123"] = stale
-        ws_sessions_sid["old_sid"] = stale
+        order = []
+
+        async def record_delete():
+            order.append("delete")
+
+        stale.delete = AsyncMock(side_effect=record_delete)
         try:
             with (
                 patch("chainlit.socket.require_login", return_value=False),
@@ -1135,21 +1137,18 @@ class TestPageLoadGate:
                 patch("chainlit.socket.restore_existing_session") as mock_restore,
             ):
                 mock_ws.get_by_id.return_value = stale
+                mock_ws.side_effect = lambda **kwargs: order.append("create")
                 await connect("sid-1", {}, self._auth(page_load=True))
-                # Let the background cleanup task run.
-                await asyncio.sleep(0)
 
             stale.delete.assert_awaited_once()
             assert "session_123" not in user_sessions
-            assert "session_123" not in ws_sessions_id
-            assert "old_sid" not in ws_sessions_sid
             mock_restore.assert_not_called()
-            # A fresh session is created under the same id.
-            mock_ws.assert_called_once()
+            # The old session must be FULLY deleted before the successor is
+            # created under the same id — a deferred cleanup would wipe the
+            # new session's registry entry, context and files.
+            assert order == ["delete", "create"]
         finally:
             user_sessions.pop("session_123", None)
-            ws_sessions_id.pop("session_123", None)
-            ws_sessions_sid.pop("old_sid", None)
 
     @pytest.mark.asyncio
     async def test_page_load_with_live_ask_keeps_session(self):

@@ -91,13 +91,11 @@ const sessionStorageSessionIdEffect: AtomEffect<string> = ({
     // in-memory id, i.e. the historical behavior.
   }
 
-  onSet((newValue, _, isReset) => {
+  onSet((newValue) => {
+    // Resets never reach the atom: the sessionIdState selector converts a
+    // DefaultValue into a fresh uuid before writing.
     try {
-      if (isReset) {
-        sessionStorage.removeItem(sessionIdStorage.key);
-      } else {
-        sessionStorage.setItem(sessionIdStorage.key, newValue);
-      }
+      sessionStorage.setItem(sessionIdStorage.key, newValue);
     } catch (_error) {
       // Ignore storage failures; the atom still holds the id.
     }

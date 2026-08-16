@@ -385,6 +385,9 @@ class WebsocketSession(BaseSession):
 
         self.restored = False
         self.pending_ask = None
+        # True when the current connection is the first one after a full
+        # page load (the client lost its UI state); set on every connect.
+        self.fresh_page_load = False
 
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}

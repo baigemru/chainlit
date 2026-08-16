@@ -47,6 +47,7 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.files_spec = kwargs.get("files_spec", {})
         mock.pending_ask = kwargs.get("pending_ask", None)
         mock.restored = kwargs.get("restored", False)
+        mock.fresh_page_load = kwargs.get("fresh_page_load", True)
 
         return mock
 

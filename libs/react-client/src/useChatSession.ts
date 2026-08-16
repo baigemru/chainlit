@@ -178,9 +178,7 @@ const useChatSession = () => {
       });
 
       socket.on('connect', () => {
-        socket.emit('connection_successful', {
-          isReconnect: pageHasEstablishedConnection
-        });
+        socket.emit('connection_successful');
         pageHasEstablishedConnection = true;
         (socket.auth as Record<string, unknown>)['pageLoad'] = false;
         authFailureHandledRef.current = false;

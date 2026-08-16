@@ -28,6 +28,7 @@ import {
   modesState,
   resumeThreadErrorState,
   sessionIdState,
+  sessionIdStorage,
   sessionState,
   sideViewState,
   tasklistState,
@@ -63,8 +64,16 @@ import type { IToken } from './useChatData';
 // True once any connection succeeded in this page's lifetime. Reported to
 // the server on connection_successful so it can distinguish a reconnect of
 // a loaded page (UI state intact) from a fresh page load that needs a full
-// restore of a pending ask's actions/element.
+// restore of a pending ask's transcript/actions/element.
 let pageHasEstablishedConnection = false;
+
+// For embedders that unmount and remount the whole widget (copilot): the
+// remounted UI starts empty, so the next connect must be treated as a
+// fresh load again or the server would skip the full restore.
+const resetPageConnectionFlag = () => {
+  pageHasEstablishedConnection = false;
+};
+export { resetPageConnectionFlag };
 
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
@@ -140,13 +149,23 @@ const useChatSession = () => {
           sessionId,
           threadId: idToResume || '',
           userEnv: JSON.stringify(userEnv),
-          chatProfile: chatProfile ? encodeURIComponent(chatProfile) : ''
+          chatProfile: chatProfile ? encodeURIComponent(chatProfile) : '',
+          // True only on the very first connect after a full page load: the
+          // server restores the old session then only to rescue a live
+          // pending ask; otherwise a reload means a fresh chat. Mutated to
+          // false after the first successful connect so automatic transport
+          // reconnects restore the session unconditionally.
+          pageLoad: !pageHasEstablishedConnection
         }
       });
-      if (typeof window !== 'undefined' && client.type !== 'copilot') {
-        // Exposed for e2e tests to simulate transport drops. Never for the
-        // copilot widget: it lives on a host page whose scripts must not
-        // get a handle on the user's socket.
+      if (
+        typeof window !== 'undefined' &&
+        (window as any).Cypress &&
+        client.type !== 'copilot'
+      ) {
+        // Exposed for e2e tests to simulate transport drops. Only under
+        // Cypress, and never for the copilot widget: a handle on the
+        // user's socket must not leak to page scripts in production.
         (window as any).__chainlitSocket = socket;
       }
 
@@ -163,6 +182,7 @@ const useChatSession = () => {
           isReconnect: pageHasEstablishedConnection
         });
         pageHasEstablishedConnection = true;
+        (socket.auth as Record<string, unknown>)['pageLoad'] = false;
         authFailureHandledRef.current = false;
         setSession((s) => ({ ...s!, error: false }));
         socket.emit('fetch_favorites');
@@ -220,7 +240,7 @@ const useChatSession = () => {
 
       socket.on('connect_error', (err) => {
         if (
-          err?.message === 'authorization failed' &&
+          err?.message === 'session authorization failed' &&
           !authFailureHandledRef.current
         ) {
           // The persisted session id belongs to a session this user may not
@@ -245,6 +265,14 @@ const useChatSession = () => {
 
       socket.on('reload', () => {
         socket.emit('clear_session');
+        try {
+          // The server asked for a clean restart (dev hot-reload): drop the
+          // persisted id so the reloaded page cannot race clear_session and
+          // resurrect the session it was told to leave.
+          sessionStorage.removeItem(sessionIdStorage.key);
+        } catch (_error) {
+          // Storage unavailable — the reload proceeds regardless.
+        }
         window.location.reload();
       });
 

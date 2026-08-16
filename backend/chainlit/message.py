@@ -402,6 +402,10 @@ class AskUserMessage(AskMessageBase):
 
         self.wait_for_answer = False
 
+        # Keep the prompt in the transcript so a later reconnect replay
+        # shows the question, not just the answer.
+        chat_context.add(cast("Message", self))
+
         return res
 
 
@@ -475,6 +479,10 @@ class AskFileMessage(AskMessageBase):
         )
 
         self.wait_for_answer = False
+
+        # Keep the prompt in the transcript so a later reconnect replay
+        # shows the question, not just the answer.
+        chat_context.add(cast("Message", self))
 
         if res:
             return [

@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 import chainlit.transit as transit
-from chainlit.session import PendingAsk, WebsocketSession
+from chainlit.session import (
+    PendingAsk,
+    WebsocketSession,
+    ws_sessions_id,
+    ws_sessions_sid,
+)
 from chainlit.socket import (
     _authenticate_connection,
     _get_token,
@@ -14,10 +19,12 @@ from chainlit.socket import (
     apply_transit_message,
     ask_reply,
     clean_session,
+    connect,
     connection_successful,
     load_user_env,
     persist_user_session,
     restore_existing_session,
+    restore_pending_ask,
     resume_thread,
     stop,
 )
@@ -791,8 +798,13 @@ class TestAskSurvivesReconnect:
         self, mock_session_factory
     ):
         action_dict = {"id": "a1", "name": "continue", "forId": "step-1"}
+        # spec says 60s but only ~5s remain: the re-emitted spec must carry
+        # the remaining time, not the original timeout.
         pending = self._pending_ask(
-            timeout=60, restore_actions=[action_dict], restore_element=None
+            timeout=60,
+            restore_actions=[action_dict],
+            restore_element=None,
+            deadline=time.monotonic() + 5,
         )
         session = mock_session_factory(pending_ask=pending)
         session.restored = True
@@ -810,8 +822,10 @@ class TestAskSurvivesReconnect:
             call.args[0]: call.args[1] for call in context.emitter.emit.call_args_list
         }
         assert emitted["action"] == action_dict
-        assert emitted["ask"]["msg"] == pending.step_dict
-        assert 0 < emitted["ask"]["spec"]["timeout"] <= 60
+        ask_payload, legacy_ack = session.emit_ask.await_args.args
+        assert ask_payload["msg"] == pending.step_dict
+        assert 1 <= ask_payload["spec"]["timeout"] <= 5
+        assert callable(legacy_ack)
         cleared = [call.args[0] for call in context.emitter.clear.call_args_list]
         assert "clear_ask" not in cleared
         assert "clear_call_fn" in cleared
@@ -838,7 +852,7 @@ class TestAskSurvivesReconnect:
 
         emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
         assert "element" in emitted
-        assert "ask" in emitted
+        session.emit_ask.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_connection_successful_clears_ask_when_no_pending(
@@ -995,7 +1009,7 @@ class TestAskRestoreEdgeCases:
         emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
         assert "action" not in emitted
         assert "element" not in emitted
-        assert "ask" in emitted
+        session.emit_ask.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_answered_pending_ask_is_not_reemitted(self, mock_session_factory):
@@ -1027,6 +1041,9 @@ class TestAskRestoreEdgeCases:
         be re-emitted AFTER it, not clobbered by it."""
         pending = self._pending_ask()
         session = mock_session_factory(pending_ask=pending)
+        # Force the plain-emit fallback so the ordering below can be read
+        # off a single mock's call log.
+        del session.emit_ask
         session.restored = True
         session.chat_started = True
         session.thread_id_to_resume = "thread-1"
@@ -1078,3 +1095,207 @@ class TestAskRestoreEdgeCases:
             await ask_reply("sid-1", {"stepId": "step-1", "value": "late"})
 
         assert pending.future.cancelled()
+
+
+class TestPageLoadGate:
+    """A reloaded page reconnects to its old session only to rescue live
+    work (a pending ask or a running task); otherwise F5 means a fresh
+    chat under the same id."""
+
+    def _auth(self, page_load):
+        return {
+            "sessionId": "session_123",
+            "clientType": "webapp",
+            "userEnv": None,
+            "chatProfile": None,
+            "threadId": None,
+            "pageLoad": page_load,
+        }
+
+    def _stale_session(self, pending_ask=None, current_task=None):
+        stale = Mock(spec=WebsocketSession)
+        stale.id = "session_123"
+        stale.socket_id = "old_sid"
+        stale.user = None
+        stale.pending_ask = pending_ask
+        stale.current_task = current_task
+        stale.delete = AsyncMock()
+        return stale
+
+    @pytest.mark.asyncio
+    async def test_page_load_with_idle_session_drops_it(self):
+        stale = self._stale_session()
+        user_sessions["session_123"] = {"stale": True}
+        ws_sessions_id["session_123"] = stale
+        ws_sessions_sid["old_sid"] = stale
+        try:
+            with (
+                patch("chainlit.socket.require_login", return_value=False),
+                patch("chainlit.socket.WebsocketSession") as mock_ws,
+                patch("chainlit.socket.restore_existing_session") as mock_restore,
+            ):
+                mock_ws.get_by_id.return_value = stale
+                await connect("sid-1", {}, self._auth(page_load=True))
+                # Let the background cleanup task run.
+                await asyncio.sleep(0)
+
+            stale.delete.assert_awaited_once()
+            assert "session_123" not in user_sessions
+            assert "session_123" not in ws_sessions_id
+            assert "old_sid" not in ws_sessions_sid
+            mock_restore.assert_not_called()
+            # A fresh session is created under the same id.
+            mock_ws.assert_called_once()
+        finally:
+            user_sessions.pop("session_123", None)
+            ws_sessions_id.pop("session_123", None)
+            ws_sessions_sid.pop("old_sid", None)
+
+    @pytest.mark.asyncio
+    async def test_page_load_with_live_ask_keeps_session(self):
+        pending = Mock()
+        pending.is_live = True
+        stale = self._stale_session(pending_ask=pending)
+
+        with (
+            patch("chainlit.socket.require_login", return_value=False),
+            patch.object(WebsocketSession, "get_by_id", return_value=stale),
+            patch(
+                "chainlit.socket.restore_existing_session", return_value=True
+            ) as mock_restore,
+        ):
+            await connect("sid-1", {}, self._auth(page_load=True))
+
+        stale.delete.assert_not_awaited()
+        mock_restore.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_page_load_with_running_task_keeps_session(self):
+        """F5 in the middle of a paid pipeline must not kill it."""
+        task = Mock()
+        task.done.return_value = False
+        stale = self._stale_session(current_task=task)
+
+        with (
+            patch("chainlit.socket.require_login", return_value=False),
+            patch.object(WebsocketSession, "get_by_id", return_value=stale),
+            patch(
+                "chainlit.socket.restore_existing_session", return_value=True
+            ) as mock_restore,
+        ):
+            await connect("sid-1", {}, self._auth(page_load=True))
+
+        stale.delete.assert_not_awaited()
+        mock_restore.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_transport_reconnect_keeps_session_without_ask(self):
+        stale = self._stale_session()
+
+        with (
+            patch("chainlit.socket.require_login", return_value=False),
+            patch.object(WebsocketSession, "get_by_id", return_value=stale),
+            patch(
+                "chainlit.socket.restore_existing_session", return_value=True
+            ) as mock_restore,
+        ):
+            await connect("sid-1", {}, self._auth(page_load=False))
+
+        stale.delete.assert_not_awaited()
+        mock_restore.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_expired_pending_ask_and_finished_task_count_as_idle(self):
+        pending = Mock()
+        pending.is_live = False
+        task = Mock()
+        task.done.return_value = True
+        stale = self._stale_session(pending_ask=pending, current_task=task)
+
+        with (
+            patch("chainlit.socket.require_login", return_value=False),
+            patch("chainlit.socket.WebsocketSession") as mock_ws,
+            patch("chainlit.socket.restore_existing_session") as mock_restore,
+        ):
+            mock_ws.get_by_id.return_value = stale
+            await connect("sid-1", {}, self._auth(page_load=True))
+            await asyncio.sleep(0)
+
+        stale.delete.assert_awaited_once()
+        mock_restore.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_foreign_user_cannot_drop_someone_elses_session(self):
+        """The owner check must run BEFORE any destruction."""
+        stale = self._stale_session()
+        stale.user = Mock(identifier="victim")
+        attacker = Mock(identifier="attacker")
+
+        with (
+            patch("chainlit.socket.require_login", return_value=True),
+            patch(
+                "chainlit.socket._authenticate_connection",
+                AsyncMock(return_value=(attacker, "token")),
+            ),
+            patch.object(WebsocketSession, "get_by_id", return_value=stale),
+        ):
+            with pytest.raises(
+                ConnectionRefusedError, match="session authorization failed"
+            ):
+                await connect("sid-1", {}, self._auth(page_load=True))
+
+        stale.delete.assert_not_awaited()
+
+
+class TestTranscriptReplay:
+    """A fresh page load restores the transcript, not just the ask form."""
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    @pytest.mark.asyncio
+    async def test_transcript_replayed_before_ask_on_fresh_load(
+        self, mock_session_factory
+    ):
+        pending = TestAskSurvivesReconnect._pending_ask()
+        session = mock_session_factory(pending_ask=pending, restored=True)
+        # Force the plain-emit fallback so the ordering below can be read
+        # off a single mock's call log.
+        del session.emit_ask
+        context = self._context(session)
+        message = Mock()
+        message.to_dict = Mock(return_value={"id": "m1", "output": "paid result"})
+
+        with patch("chainlit.socket.chat_context") as mock_chat_context:
+            mock_chat_context.get.return_value = [message]
+            await restore_pending_ask(context, client_has_ui_state=False)
+
+        context.emitter.send_step.assert_awaited_once_with(
+            {"id": "m1", "output": "paid result"}
+        )
+        # The transcript must land BEFORE the ask so the form appears under
+        # the replayed results, not above them.
+        call_names = [name for name, _args, _kwargs in context.emitter.mock_calls]
+        ask_emit_index = next(
+            i
+            for i, (name, args, _kwargs) in enumerate(context.emitter.mock_calls)
+            if name == "emit" and args and args[0] == "ask"
+        )
+        assert call_names.index("send_step") < ask_emit_index
+
+    @pytest.mark.asyncio
+    async def test_transcript_not_replayed_on_transport_reconnect(
+        self, mock_session_factory
+    ):
+        pending = TestAskSurvivesReconnect._pending_ask()
+        session = mock_session_factory(pending_ask=pending)
+        context = self._context(session)
+
+        with patch("chainlit.socket.chat_context") as mock_chat_context:
+            mock_chat_context.get.return_value = [Mock()]
+            await restore_pending_ask(context, client_has_ui_state=True)
+
+        context.emitter.send_step.assert_not_awaited()

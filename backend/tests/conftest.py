@@ -39,10 +39,14 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.thread_id = kwargs.get("thread_id", "test_thread_id")
         mock.emit = AsyncMock()
         mock.emit_call = AsyncMock()
+        # Present on every real WebsocketSession; tests exercising the
+        # legacy-free fallback delete the attribute explicitly.
+        mock.emit_ask = AsyncMock()
         mock.has_first_interaction = kwargs.get("has_first_interaction", True)
         mock.files = kwargs.get("files", {})
         mock.files_spec = kwargs.get("files_spec", {})
         mock.pending_ask = kwargs.get("pending_ask", None)
+        mock.restored = kwargs.get("restored", False)
 
         return mock
 
@@ -95,6 +99,9 @@ def mock_websocket_session():
     session.id = "test_session_id"
     session.emit = AsyncMock()
     session.emit_call = AsyncMock()
+    # Present on every real WebsocketSession; tests exercising the
+    # legacy-free fallback delete the attribute explicitly.
+    session.emit_ask = AsyncMock()
     session.files = {}
     session.files_spec = {}
     session.pending_ask = None

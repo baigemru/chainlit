@@ -48,17 +48,20 @@ export const chatProfileState = atom<string | undefined>({
 // session.
 export const sessionIdStorage = { key: 'chainlit-session-id' };
 
-// A saved session id is only reused when this page load is a reload (or a
-// back/forward restore) of the same tab. A brand-new navigation — including
-// tabs opened from this one via target=_blank or window.open, which inherit
-// a copy of sessionStorage — must NOT adopt the id, or the new tab would
-// silently hijack the original tab's server session.
+// A saved session id is only reused when this page load is a plain reload
+// of the same tab. A brand-new navigation — including tabs opened from this
+// one via target=_blank or window.open, which inherit a copy of
+// sessionStorage — must NOT adopt the id, or the new tab would silently
+// hijack the original tab's server session. 'back_forward' is deliberately
+// excluded too: Chromium reports it for duplicated/reopened tabs. In old
+// browsers without Navigation Timing L2 this degrades to the historical
+// behavior (a fresh id on every load).
 const isReloadNavigation = (): boolean => {
   try {
     const nav = performance.getEntriesByType('navigation')[0] as
       | PerformanceNavigationTiming
       | undefined;
-    return nav?.type === 'reload' || nav?.type === 'back_forward';
+    return nav?.type === 'reload';
   } catch (_error) {
     return false;
   }

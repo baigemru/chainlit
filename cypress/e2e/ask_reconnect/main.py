@@ -12,8 +12,8 @@ async def main():
 
     # Answering "timeout" requests a short deadline so the timeout scenario
     # doesn't slow down (or flake) the click scenarios, which get a deadline
-    # far above any CI hiccup.
-    action_timeout = 8 if res["output"] == "timeout" else 120
+    # far above any CI hiccup. 20s still leaves room for a slow-CI reload.
+    action_timeout = 20 if res["output"] == "timeout" else 120
 
     action_res = await cl.AskActionMessage(
         content="Pick an action!",

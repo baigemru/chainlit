@@ -5,7 +5,7 @@ from typing import Any, Dict, Literal, Optional, Tuple, TypedDict, Union
 from urllib.parse import unquote
 
 from starlette.requests import cookie_parser
-from typing_extensions import TypeAlias
+from typing_extensions import NotRequired, TypeAlias
 
 import chainlit.transit as transit
 from chainlit.auth import (
@@ -21,7 +21,12 @@ from chainlit.emitter import _make_legacy_ask_ack
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
 from chainlit.server import sio
-from chainlit.session import ClientType, WebsocketSession
+from chainlit.session import (
+    ClientType,
+    WebsocketSession,
+    ws_sessions_id,
+    ws_sessions_sid,
+)
 from chainlit.types import (
     InputAudioChunk,
     InputAudioChunkPayload,
@@ -39,6 +44,7 @@ class WebSocketSessionAuth(TypedDict):
     clientType: ClientType
     chatProfile: str | None
     threadId: str | None
+    pageLoad: NotRequired[bool]
 
 
 def _session_owner_matches_user(
@@ -67,7 +73,7 @@ def restore_existing_session(
     if session := WebsocketSession.get_by_id(session_id):
         if not _session_owner_matches_user(session, user):
             logger.error("Authorization for the session failed.")
-            raise ConnectionRefusedError("authorization failed")
+            raise ConnectionRefusedError("session authorization failed")
 
         session.restore(new_socket_id=sid)
         session.emit = emit_fn
@@ -169,7 +175,7 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
                 thread = await data_layer.get_thread(thread_id)
                 if thread and not (thread["userIdentifier"] == user.identifier):
                     logger.error("Authorization for the thread failed.")
-                    raise ConnectionRefusedError("authorization failed")
+                    raise ConnectionRefusedError("thread authorization failed")
 
     # Session scoped function to emit to the client
     def emit_fn(event, data):
@@ -186,7 +192,30 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         return sio.emit("ask", data, to=sid, callback=callback)
 
     session_id = auth["sessionId"]
-    if restore_existing_session(
+
+    # A reloaded page (pageLoad: the client sets it only on the first
+    # connect after a full page load) reconnects to its old session solely
+    # to rescue live work — a pending ask or a still-running task (e.g. a
+    # paid pipeline between two asks). An idle session means F5 keeps its
+    # historical meaning, a fresh chat: the stale session is dropped below
+    # — after the new connection is fully validated — and a new one is
+    # created under the same id. Transport reconnects and old clients don't
+    # set the flag and restore as before.
+    drop_stale_session = False
+    if bool(auth.get("pageLoad")):
+        if existing := WebsocketSession.get_by_id(session_id):
+            if not _session_owner_matches_user(existing, user):
+                logger.error("Authorization for the session failed.")
+                raise ConnectionRefusedError("session authorization failed")
+            has_live_ask = (
+                existing.pending_ask is not None and existing.pending_ask.is_live
+            )
+            has_live_task = (
+                existing.current_task is not None and not existing.current_task.done()
+            )
+            drop_stale_session = not has_live_ask and not has_live_task
+
+    if not drop_stale_session and restore_existing_session(
         sid,
         session_id,
         emit_fn,
@@ -199,6 +228,16 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
 
     user_env_string = auth.get("userEnv", None)
     user_env = load_user_env(user_env_string)
+
+    if drop_stale_session:
+        if stale := WebsocketSession.get_by_id(session_id):
+            user_sessions.pop(stale.id, None)
+            # Free the id for the new session right away; the heavyweight
+            # cleanup (files dir, MCP sessions) must not block the
+            # handshake, so it runs in the background.
+            ws_sessions_id.pop(stale.id, None)
+            ws_sessions_sid.pop(stale.socket_id, None)
+            asyncio.ensure_future(stale.delete())
 
     client_type = auth["clientType"]
     url_encoded_chat_profile = auth.get("chatProfile", None)
@@ -304,16 +343,37 @@ async def restore_pending_ask(context, client_has_ui_state: bool):
     and would wipe a form re-emitted before it.
     """
     session = context.session
+
+    if not client_has_ui_state and session.restored:
+        # The page was reloaded and the client lost everything: replay the
+        # transcript (a paid flow's results live above the form) together
+        # with the elements attached to its messages. On a plain transport
+        # reconnect the client still has all of it — skip. This also runs
+        # when the session was kept for a still-running task without a
+        # pending ask.
+        try:
+            transcript = chat_context.get()
+        except Exception:
+            transcript = []
+        for message in transcript:
+            try:
+                await context.emitter.send_step(message.to_dict())
+                for element in getattr(message, "elements", None) or []:
+                    await context.emitter.send_element(element.to_dict())
+            except Exception:
+                logger.debug(
+                    "Failed to replay a transcript message on reconnect",
+                    exc_info=True,
+                )
+
     pending_ask = session.pending_ask
-    if pending_ask is None or pending_ask.expired or pending_ask.future.done():
+    if pending_ask is None or not pending_ask.is_live:
         await context.emitter.clear("clear_ask")
         return
 
     if not client_has_ui_state:
-        # The page was reloaded: the client lost the actions/element the
-        # form is built from. On a plain transport reconnect the client
-        # still has them (and the element may hold newer props than any
-        # snapshot) — skip the re-emit.
+        # The form's own actions/element; a live element may hold newer
+        # props than any snapshot, so it is serialized only now.
         for action_dict in pending_ask.restore_actions:
             await context.emitter.emit("action", action_dict)
         if pending_ask.restore_element is not None:

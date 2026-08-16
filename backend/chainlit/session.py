@@ -313,6 +313,11 @@ class PendingAsk:
     def expired(self) -> bool:
         return self.remaining <= 0
 
+    @property
+    def is_live(self) -> bool:
+        """Still waiting for an answer: not expired, not resolved."""
+        return not self.expired and not self.future.done()
+
     def cancel(self):
         if not self.future.done():
             self.future.cancel()

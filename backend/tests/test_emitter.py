@@ -429,16 +429,36 @@ class TestSendAskUser:
 
         assert result == action_res
         assert mock_websocket_session.pending_ask is None
+        mock_websocket_session.emit_ask.assert_awaited_once()
         emitted_events = [
             call.args[0] for call in mock_websocket_session.emit.call_args_list
         ]
-        assert "ask" in emitted_events
         assert "clear_ask" in emitted_events
         assert "task_start" in emitted_events  # finally block ran
 
-    async def test_ask_payload_uses_plain_emit(
+    async def test_ask_sent_via_emit_ask_not_emit_call(
         self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
     ) -> None:
+        """The ask goes out through emit_ask (plain emit + legacy ack), never
+        through the sid-bound sio.call."""
+        step_dict = self._step_dict()
+        spec = self._action_spec()
+
+        task = asyncio.ensure_future(emitter.send_ask_user(step_dict, spec))
+        await self._resolve_when_pending(mock_websocket_session, {"name": "x"})
+        await task
+
+        payload, ack = mock_websocket_session.emit_ask.await_args.args
+        assert payload == {"msg": step_dict, "spec": spec.to_dict()}
+        assert callable(ack)
+        mock_websocket_session.emit_call.assert_not_called()
+
+    async def test_ask_falls_back_to_plain_emit_without_emit_ask(
+        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+    ) -> None:
+        """Sessions without emit_ask (older constructors) still get the ask
+        through a plain emit."""
+        del mock_websocket_session.emit_ask
         step_dict = self._step_dict()
         spec = self._action_spec()
 

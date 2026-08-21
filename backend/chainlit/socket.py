@@ -254,6 +254,22 @@ async def apply_transit_message(context):
     await context.emitter.init_thread(name or "transit")
 
 
+async def send_parent_thread(context):
+    """Tell the client which thread the current thread descends from.
+
+    Only a fresh transit thread needs this: its parent lives solely on the
+    session until the first interaction persists it. Sent on every
+    (re)connect — the client's copy does not survive a socket rebuild. A
+    resumed thread needs nothing here; its parent reaches the client inside
+    the thread metadata of the `resume_thread` payload.
+    """
+    if context.session.parent_thread_id is None:
+        return
+    await context.emitter.emit(
+        "parent_thread", {"parentThreadId": context.session.parent_thread_id}
+    )
+
+
 @sio.on("claim_transit_message")  # pyright: ignore [reportOptionalCall]
 async def claim_transit_message(sid, payload):
     """Re-park this session's transit message for the session about to open."""
@@ -289,6 +305,7 @@ async def connection_successful(sid):
 
     if context.session.restored and not context.session.has_first_interaction:
         await apply_transit_message(context)
+        await send_parent_thread(context)
         if config.code.on_chat_start and not context.session.chat_started:
             context.session.chat_started = True
             task = asyncio.create_task(config.code.on_chat_start())
@@ -326,6 +343,7 @@ async def connection_successful(sid):
             await context.emitter.send_resume_thread_error("Thread not found.")
 
     await apply_transit_message(context)
+    await send_parent_thread(context)
 
     if config.code.on_chat_start and not context.session.chat_started:
         context.session.chat_started = True

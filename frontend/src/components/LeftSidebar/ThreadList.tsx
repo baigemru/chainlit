@@ -57,6 +57,8 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
+import { useResetKeptTranscript } from '@/hooks/useParentThread';
+
 import { Translator } from '../i18n';
 import ThreadOptions from './ThreadOptions';
 
@@ -77,6 +79,7 @@ export function ThreadList({
   const navigate = useNavigate();
   const { idToResume } = useChatSession();
   const { clear } = useChatInteract();
+  const resetKeptTranscript = useResetKeptTranscript();
   const { threadId: currentThreadId } = useChatMessages();
   const [threadIdToDelete, setThreadIdToDelete] = useState<string>();
   const [threadIdToRename, setThreadIdToRename] = useState<string>();
@@ -210,6 +213,9 @@ export function ThreadList({
       threadIdToDelete === idToResume ||
       threadIdToDelete === currentThreadId
     ) {
+      // Deleting the open thread blanks the screen; transcripts kept by
+      // returns to a parent thread would otherwise linger above it.
+      resetKeptTranscript();
       clear();
       await new Promise((resolve) => setTimeout(resolve, 300));
     }

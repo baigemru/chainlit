@@ -319,6 +319,35 @@ async def test_set_chat_profile_rejects_positional_flags(
         await emitter.set_chat_profile("Search", True)  # type: ignore[misc]
 
 
+async def test_open_thread_defaults_to_keeping_transcript(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.open_thread("thread-a")
+
+    mock_websocket_session.emit.assert_called_once_with(
+        "open_thread",
+        {"threadId": "thread-a", "keepTranscript": True},
+    )
+
+
+async def test_open_thread_without_transcript(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.open_thread("thread-a", keep_transcript=False)
+
+    mock_websocket_session.emit.assert_called_once_with(
+        "open_thread",
+        {"threadId": "thread-a", "keepTranscript": False},
+    )
+
+
+async def test_open_thread_rejects_positional_flags(
+    emitter: ChainlitEmitter,
+) -> None:
+    with pytest.raises(TypeError):
+        await emitter.open_thread("thread-a", False)  # type: ignore[misc]
+
+
 @pytest.fixture
 def flush_session(mock_websocket_session: MagicMock) -> MagicMock:
     mock_websocket_session.thread_id = "thread-b"

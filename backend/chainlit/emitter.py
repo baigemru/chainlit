@@ -158,6 +158,15 @@ class BaseChainlitEmitter:
         """Stub method to switch the chat profile in the UI."""
         pass
 
+    async def open_thread(
+        self,
+        thread_id: str,
+        *,
+        keep_transcript: bool = True,
+    ) -> None:
+        """Stub method to open an existing thread in the UI."""
+        pass
+
     async def send_window_message(self, data: Any):
         """Stub method to send custom data to the host window."""
         pass
@@ -543,6 +552,35 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 "keepTranscript": keep_transcript,
                 "hasTransitMessage": transit_message is not None,
             },
+        )
+
+    async def open_thread(
+        self,
+        thread_id: str,
+        *,
+        keep_transcript: bool = True,
+    ) -> None:
+        """Ask the UI to open an existing thread of the current user.
+
+        Unlike `set_chat_profile` this creates nothing: the UI navigates to
+        the thread exactly as if the user picked it from the history list —
+        the same resume path, with the same access checks, so a thread the
+        user cannot read does not open. With `keep_transcript` the messages
+        currently on screen stay above a divider; steps of the opened thread
+        that are already on screen are not rendered twice.
+
+        Args:
+            thread_id: Id of an existing thread of the current user — e.g.
+                `cl.context.session.parent_thread_id` to return to the
+                thread a profile switch came from.
+            keep_transcript: Keep the messages already on screen and mark
+                the transition with a divider (default), instead of clearing
+                them. The kept transcript has the same limits as with
+                `set_chat_profile`: client-side only, dropped on reload.
+        """
+        await self.emit(
+            "open_thread",
+            {"threadId": thread_id, "keepTranscript": keep_transcript},
         )
 
     def set_favorites(self, steps: List[StepDict]):

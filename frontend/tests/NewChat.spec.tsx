@@ -1,4 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import {
+  fireEvent,
+  render as renderBase,
+  screen
+} from '@testing-library/react';
+import { ReactElement } from 'react';
+import { RecoilRoot } from 'recoil';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import NewChatButton from '@/components/header/NewChat';
@@ -14,6 +20,10 @@ vi.mock('@chainlit/react-client', () => ({
 vi.mock('@/components/i18n', () => ({
   Translator: ({ path }: { path: string }) => <span>{path}</span>
 }));
+
+// The button resets the kept-transcript atoms on confirm, so it needs a
+// Recoil root around it.
+const render = (ui: ReactElement) => renderBase(<RecoilRoot>{ui}</RecoilRoot>);
 
 describe('NewChatButton', () => {
   beforeEach(() => {

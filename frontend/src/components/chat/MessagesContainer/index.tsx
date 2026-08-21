@@ -29,10 +29,15 @@ import {
 import { Messages } from '@/components/chat/Messages';
 import { useTranslation } from 'components/i18n/Translator';
 
-import { chatBoundariesState } from '@/state/chat';
+import {
+  chatBoundariesState,
+  collapsedExcursionsState,
+  keptExcursionsState
+} from '@/state/chat';
 
 import ChatBoundaryDivider from './ChatBoundaryDivider';
-import { splitAtBoundaries } from './transcript';
+import CollapsedTranscript from './CollapsedTranscript';
+import { buildTranscriptView } from './transcript';
 
 interface Props {
   navigate?: (to: string) => void;
@@ -48,6 +53,9 @@ const MessagesContainer = ({ navigate }: Props) => {
   const setSideView = useSetRecoilState(sideViewState);
   const sessionId = useRecoilValue(sessionIdState);
   const boundaries = useRecoilValue(chatBoundariesState);
+  const excursions = useRecoilValue(keptExcursionsState);
+  const collapsedExcursions = useRecoilValue(collapsedExcursionsState);
+  const setCollapsedExcursions = useSetRecoilState(collapsedExcursionsState);
 
   const { t } = useTranslation();
 
@@ -207,8 +215,18 @@ const MessagesContainer = ({ navigate }: Props) => {
   ]);
 
   const sections = useMemo(
-    () => splitAtBoundaries(messages, boundaries),
-    [messages, boundaries]
+    () => buildTranscriptView(excursions, messages, boundaries),
+    [excursions, messages, boundaries]
+  );
+
+  const toggleExcursion = useCallback(
+    (excursionId: string) => {
+      setCollapsedExcursions((prev) => ({
+        ...prev,
+        [excursionId]: !prev[excursionId]
+      }));
+    },
+    [setCollapsedExcursions]
   );
 
   // Boundaries describe the live transcript only. Opening a thread from the
@@ -226,18 +244,20 @@ const MessagesContainer = ({ navigate }: Props) => {
   // user message to the top, and that message belongs to the new chat, so
   // without this the line the user is meant to notice starts off-screen.
   // Only fires while the new chat is still empty, leaving autoscroll to take
-  // over as soon as it produces anything.
-  const boundaryCountRef = useRef(boundaries.length);
+  // over as soon as it produces anything. Excursions count too: a return to
+  // the parent thread draws its divider without touching the boundaries.
+  const dividerCount = boundaries.length + excursions.length;
+  const boundaryCountRef = useRef(dividerCount);
   useEffect(() => {
-    const added = boundaries.length > boundaryCountRef.current;
-    boundaryCountRef.current = boundaries.length;
+    const added = dividerCount > boundaryCountRef.current;
+    boundaryCountRef.current = dividerCount;
     if (!added) return;
 
     requestAnimationFrame(() => {
       const dividers = document.querySelectorAll('.chat-boundary');
       dividers[dividers.length - 1]?.scrollIntoView({ block: 'start' });
     });
-  }, [boundaries.length]);
+  }, [dividerCount]);
 
   // Transcripts of chats that already ended are read-only, and must not react
   // to the current chat's activity: Messages recomputes a run's "is running"
@@ -260,7 +280,18 @@ const MessagesContainer = ({ navigate }: Props) => {
     <MessageContext.Provider value={memoizedContext}>
       {sections.map((section, index) => {
         const isCurrent = index === sections.length - 1;
-        const body = (
+        // A fully deduplicated segment has nothing to fold away: no toggle,
+        // no "0 messages" strip.
+        const collapsible =
+          !!section.excursionId && section.messages.length > 0;
+        const isCollapsed =
+          collapsible && !!collapsedExcursions[section.excursionId!];
+        const body = isCollapsed ? (
+          <CollapsedTranscript
+            count={section.messages.length}
+            onExpand={() => toggleExcursion(section.excursionId!)}
+          />
+        ) : (
           <Messages
             indent={0}
             isRunning={loading && isCurrent}
@@ -279,7 +310,17 @@ const MessagesContainer = ({ navigate }: Props) => {
                 {body}
               </MessageContext.Provider>
             )}
-            {section.startedProfile !== undefined ? (
+            {section.excursionId ? (
+              <ChatBoundaryDivider
+                isReturn
+                collapsed={isCollapsed}
+                onToggleCollapse={
+                  collapsible
+                    ? () => toggleExcursion(section.excursionId!)
+                    : undefined
+                }
+              />
+            ) : section.startedProfile !== undefined ? (
               <ChatBoundaryDivider profile={section.startedProfile} />
             ) : null}
           </Fragment>

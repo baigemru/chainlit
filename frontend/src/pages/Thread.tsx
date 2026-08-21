@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { useSetRecoilState } from 'recoil';
+import { useRecoilValue, useSetRecoilState } from 'recoil';
 
 import Page from 'pages/Page';
 
@@ -15,6 +15,8 @@ import { Loader } from '@/components/Loader';
 import { ReadOnlyThread } from '@/components/ReadOnlyThread';
 import Chat from '@/components/chat';
 
+import { openThreadTransitionState } from '@/state/chat';
+
 export default function ThreadPage() {
   const { id } = useParams();
   const location = useLocation();
@@ -23,8 +25,14 @@ export default function ThreadPage() {
   const setThreadHistory = useSetRecoilState(threadHistoryState);
 
   const { threadId } = useChatMessages();
+  const transition = useRecoilValue(openThreadTransitionState);
 
   const isCurrentThread = threadId === id;
+  // A return to a parent thread keeps the transcript on screen while the
+  // thread resumes; swapping the chat for a loader would blank it mid-way.
+  const keepChatMounted =
+    isCurrentThread ||
+    (!!transition?.keepTranscript && transition.threadId === id);
 
   useEffect(() => {
     setThreadHistory((prev) => {
@@ -43,7 +51,7 @@ export default function ThreadPage() {
           <AutoResumeThread id={id!} />
         ) : null}
         {config?.threadResumable && !isSharedRoute ? (
-          isCurrentThread ? (
+          keepChatMounted ? (
             <Chat />
           ) : (
             <div className="flex flex-grow items-center justify-center">

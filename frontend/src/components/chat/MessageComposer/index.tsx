@@ -47,6 +47,7 @@ import FavoriteButton from './FavoriteButton';
 import Input, { InputMethods } from './Input';
 import McpButton from './Mcp';
 import ModePicker from './ModePicker';
+import OpenParentThreadButton from './OpenParentThreadButton';
 import SubmitButton from './SubmitButton';
 import UploadButton from './UploadButton';
 import VoiceButton from './VoiceButton';
@@ -310,6 +311,7 @@ export default function MessageComposer({
               </Tooltip>
             </TooltipProvider>
           )}
+          <OpenParentThreadButton />
           <McpButton disabled={disabled} />
           {modes.map((mode) => (
             <ModePicker

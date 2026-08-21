@@ -74,7 +74,8 @@
       "actions": {
         "send": "Send message",
         "stop": "Stop Task",
-        "attachFiles": "Attach files"
+        "attachFiles": "Attach files",
+        "openParentThread": "Back to the original chat"
       }
     },
     "favorites": {
@@ -112,6 +113,12 @@
     "messages": {
       "newChat": "New chat",
       "newChatIn": "New chat · {{profile}}",
+      "backToParent": "Returned to the original chat",
+      "collapseTranscript": "Collapse",
+      "expandTranscript": "Expand",
+      "collapsedChildMessages_one": "{{count}} message from the child chat",
+      "collapsedChildMessages_other": "{{count}} messages from the child chat",
+      "threadUnavailable": "This chat is not available",
       "status": {
         "using": "Using",
         "used": "Used",

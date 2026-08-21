@@ -16,11 +16,15 @@ import {
   useConfig
 } from '@chainlit/react-client';
 
+import { freezeStreaming } from '@/components/chat/MessagesContainer/transcript';
+
 import {
   IAttachment,
   IChatBoundary,
   attachmentsState,
   chatBoundariesState,
+  collapsedExcursionsState,
+  keptExcursionsState,
   persistentCommandState
 } from '@/state/chat';
 
@@ -35,31 +39,6 @@ interface SetChatProfilePayload {
   firstMessage?: string | null;
 }
 
-/**
- * Clears the `streaming` flag left over on messages kept from a chat whose
- * socket is gone — it would otherwise render a cursor forever and hide the
- * message buttons. New objects are built along the path of every change:
- * mutating in place is allowed by the atom but defeats the memo comparators,
- * so the cursor would never actually disappear.
- */
-const freezeStreaming = (steps: IStep[]): IStep[] => {
-  let changed = false;
-
-  const frozen = steps.map((step) => {
-    const nested = step.steps ? freezeStreaming(step.steps) : undefined;
-    const nestedChanged = !!nested && nested !== step.steps;
-    if (!step.streaming && !nestedChanged) return step;
-    changed = true;
-    return {
-      ...step,
-      streaming: false,
-      ...(nestedChanged ? { steps: nested } : {})
-    };
-  });
-
-  return changed ? frozen : steps;
-};
-
 export default function ChatProfileSwitchListener() {
   const navigate = useNavigate();
   const { config } = useConfig();
@@ -71,6 +50,8 @@ export default function ChatProfileSwitchListener() {
   const setMessages = useSetRecoilState(messagesState);
   const setSessionId = useSetRecoilState(sessionIdState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
+  const setKeptExcursions = useSetRecoilState(keptExcursionsState);
+  const setCollapsedExcursions = useSetRecoilState(collapsedExcursionsState);
   const setPersistentCommand = useSetRecoilState(persistentCommandState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
 
@@ -182,6 +163,14 @@ export default function ChatProfileSwitchListener() {
         ]);
       } else {
         setBoundaries([]);
+      }
+
+      // A hard switch blanks the screen; excursions kept by earlier returns
+      // to a parent thread would otherwise linger above the fresh chat. A
+      // soft switch keeps everything on screen, excursions included.
+      if (!keepTranscript) {
+        setKeptExcursions([]);
+        setCollapsedExcursions({});
       }
 
       navigate('/');

@@ -23,16 +23,30 @@ interface Props {
   hide?: boolean;
   isError?: boolean;
   iconName?: string;
+  /**
+   * Profile the message was generated under (its `metadata.chat_profile`
+   * stamp). Takes precedence over the session's current profile, so a
+   * message kept on screen across a profile switch keeps its own avatar.
+   * Messages without a stamp fall back to the current profile, as before.
+   */
+  messageChatProfile?: string;
 }
 
-const MessageAvatar = ({ author, hide, isError, iconName }: Props) => {
+const MessageAvatar = ({
+  author,
+  hide,
+  isError,
+  iconName,
+  messageChatProfile
+}: Props) => {
   const apiClient = useContext(ChainlitContext);
   const { chatProfile } = useChatSession();
   const { config } = useConfig();
 
   const selectedChatProfile = useMemo(() => {
-    return config?.chatProfiles.find((profile) => profile.name === chatProfile);
-  }, [config, chatProfile]);
+    const profileName = messageChatProfile ?? chatProfile;
+    return config?.chatProfiles.find((profile) => profile.name === profileName);
+  }, [config, chatProfile, messageChatProfile]);
 
   const avatarUrl = useMemo(() => {
     if (config?.ui?.default_avatar_file_url)

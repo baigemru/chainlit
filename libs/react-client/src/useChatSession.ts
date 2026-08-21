@@ -1,5 +1,5 @@
 import { debounce } from 'lodash';
-import { useCallback, useContext, useEffect } from 'react';
+import { useCallback, useContext, useEffect, useRef } from 'react';
 import {
   useRecoilState,
   useRecoilValue,
@@ -49,6 +49,7 @@ import {
 import {
   addMessage,
   deleteMessageById,
+  stampChatProfile,
   updateMessageById,
   updateMessageContentById
 } from 'src/utils/message';
@@ -84,6 +85,12 @@ const useChatSession = () => {
   const setChatSettingsInputs = useSetRecoilState(chatSettingsInputsState);
   const setTokenCount = useSetRecoilState(tokenCountState);
   const [chatProfile, setChatProfile] = useRecoilState(chatProfileState);
+  // The socket handlers below are registered once per connect and would
+  // otherwise close over the profile that was active at that moment; the
+  // ref always carries the current one, so every incoming message is
+  // stamped with the profile it is actually generated under.
+  const chatProfileRef = useRef(chatProfile);
+  chatProfileRef.current = chatProfile;
   const idToResume = useRecoilValue(threadIdToResumeState);
   const setThreadResumeError = useSetRecoilState(resumeThreadErrorState);
   const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
@@ -295,7 +302,12 @@ const useChatSession = () => {
       });
 
       socket.on('new_message', (message: IStep) => {
-        setMessages((oldMessages) => addMessage(oldMessages, message));
+        setMessages((oldMessages) =>
+          addMessage(
+            oldMessages,
+            stampChatProfile(message, chatProfileRef.current)
+          )
+        );
       });
 
       socket.on(
@@ -308,7 +320,11 @@ const useChatSession = () => {
 
       socket.on('update_message', (message: IStep) => {
         setMessages((oldMessages) =>
-          updateMessageById(oldMessages, message.id, message)
+          updateMessageById(
+            oldMessages,
+            message.id,
+            stampChatProfile(message, chatProfileRef.current)
+          )
         );
       });
 
@@ -319,7 +335,12 @@ const useChatSession = () => {
       });
 
       socket.on('stream_start', (message: IStep) => {
-        setMessages((oldMessages) => addMessage(oldMessages, message));
+        setMessages((oldMessages) =>
+          addMessage(
+            oldMessages,
+            stampChatProfile(message, chatProfileRef.current)
+          )
+        );
       });
 
       socket.on(
@@ -339,7 +360,9 @@ const useChatSession = () => {
 
       socket.on('ask', ({ msg, spec }, callback) => {
         setAskUser({ spec, callback, parentId: msg.parentId });
-        setMessages((oldMessages) => addMessage(oldMessages, msg));
+        setMessages((oldMessages) =>
+          addMessage(oldMessages, stampChatProfile(msg, chatProfileRef.current))
+        );
 
         setLoading(false);
       });

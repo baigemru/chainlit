@@ -233,6 +233,23 @@ const updateMessageContentById = (
   return hasChanges ? nextMessages : messages;
 };
 
+/**
+ * Stamps a message with the chat profile it was generated under, so the UI
+ * can keep rendering it with that profile's avatar after the session moves
+ * to another profile (or the message survives on screen as a kept
+ * transcript). Client-side only: the stamp is not persisted, and after a
+ * reload the fallback to the thread's own profile is correct by
+ * construction. A message that already carries a stamp keeps it.
+ */
+const stampChatProfile = (message: IStep, chatProfile?: string): IStep => {
+  if (!chatProfile) return message;
+  if (message.metadata?.chat_profile) return message;
+  return {
+    ...message,
+    metadata: { ...(message.metadata || {}), chat_profile: chatProfile }
+  };
+};
+
 export {
   addMessageToParent,
   addMessage,
@@ -240,6 +257,7 @@ export {
   hasMessageById,
   isLastMessage,
   nestMessages,
+  stampChatProfile,
   updateMessageById,
   updateMessageContentById
 };

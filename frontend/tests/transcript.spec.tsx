@@ -198,4 +198,16 @@ describe('freezeStreaming', () => {
     const steps = [step('a'), step('b', { steps: [step('b1')] })];
     expect(freezeStreaming(steps)).toBe(steps);
   });
+
+  it('keeps the chat profile stamp on captured messages', () => {
+    // The excursion capture runs kept messages through freezeStreaming; the
+    // metadata.chat_profile stamp must survive so kept messages keep
+    // rendering with the avatar of the profile that produced them.
+    const frozen = freezeStreaming([
+      step('a', { streaming: true, metadata: { chat_profile: 'Search' } }),
+      step('b', { metadata: { chat_profile: 'Assistant' } })
+    ]);
+    expect(frozen[0].metadata?.chat_profile).toBe('Search');
+    expect(frozen[1].metadata?.chat_profile).toBe('Assistant');
+  });
 });

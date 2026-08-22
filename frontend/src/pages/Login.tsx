@@ -153,6 +153,10 @@ export default function Login() {
               onOAuthVkSignIn={async (provider: string) => {
                 window.location.href = apiClient.getOAuthVkEndpoint(provider);
               }}
+              onOAuthYandexSignIn={async (provider: string) => {
+                window.location.href =
+                  apiClient.getOAuthYandexEndpoint(provider);
+              }}
             />
           </div>
         </div>

@@ -387,6 +387,10 @@ export class ChainlitAPI extends APIBase {
   getOAuthVkEndpoint(provider: string) {
     return this.buildEndpoint(`/auth/oauth/${provider}/vk`);
   }
+
+  getOAuthYandexEndpoint(provider: string) {
+    return this.buildEndpoint(`/auth/oauth/${provider}/yandex`);
+  }
   async shareThread(
     threadId: string,
     isShared: boolean

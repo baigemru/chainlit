@@ -65,7 +65,8 @@
       "continue": "{{provider}} सह पुढे जा",
       "signin": "{{provider}} ने साइन इन करा",
       "register": "{{provider}} ने नोंदणी करा",
-      "vk": "Sign in with VK"
+      "vk": "Sign in with VK",
+      "yandex": "Sign in with Yandex"
     }
   },
   "chat": {

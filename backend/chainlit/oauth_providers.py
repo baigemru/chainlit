@@ -88,6 +88,17 @@ class OAuthProvider:
             "VK_BUTTON", False
         )
 
+    def get_yandex_idp_hint(self) -> Optional[str]:
+        """Identity-provider alias the Yandex button short-circuits to
+        (Keycloak's kc_idp_hint). None means the provider cannot render a
+        Yandex button."""
+        return None
+
+    def is_yandex_button_enabled(self) -> bool:
+        return self.get_yandex_idp_hint() is not None and self._get_env_flag(
+            "YANDEX_BUTTON", False
+        )
+
     def get_icon_url(self, theme: Optional[str] = None) -> Optional[str]:
         """Return the custom button icon from OAUTH_{PREFIX}_ICON_URL env vars.
 
@@ -803,6 +814,9 @@ class KeycloakOAuthProvider(OAuthProvider):
     def get_vk_idp_hint(self) -> Optional[str]:
         return self._get_env_value("VK_IDP_ALIAS") or "vkid"
 
+    def get_yandex_idp_hint(self) -> Optional[str]:
+        return self._get_env_value("YANDEX_IDP_ALIAS") or "yandex"
+
     async def get_raw_token_response(self, code: str, url: str) -> dict:
         payload = {
             "client_id": self.client_id,
@@ -975,6 +989,7 @@ def get_oauth_provider_details() -> List[Dict[str, object]]:
             "loginEnabled": p.is_login_button_enabled(),
             "registrationEnabled": p.is_registration_button_enabled(),
             "vkEnabled": p.is_vk_button_enabled(),
+            "yandexEnabled": p.is_yandex_button_enabled(),
             "iconUrl": p.get_icon_url(),
             "iconUrlLight": p.get_icon_url("light"),
             "iconUrlDark": p.get_icon_url("dark"),

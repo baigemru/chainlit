@@ -65,7 +65,8 @@
       "continue": "{{provider}} மூலம் தொடரவும்",
       "signin": "{{provider}} மூலம் உள்நுழையவும்",
       "register": "{{provider}} மூலம் பதிவு செய்யவும்",
-      "vk": "Sign in with VK"
+      "vk": "Sign in with VK",
+      "yandex": "Sign in with Yandex"
     }
   },
   "chat": {

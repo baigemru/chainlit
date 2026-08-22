@@ -720,6 +720,30 @@ async def oauth_vk_login(provider_id: str, request: Request):
     )
 
 
+@router.get("/auth/oauth/{provider_id}/yandex")
+async def oauth_yandex_login(provider_id: str, request: Request):
+    """Redirect the user straight to the Yandex identity provider, skipping
+    the oauth provider's own login page (Keycloak's kc_idp_hint)."""
+    provider = _get_oauth_provider_or_raise(provider_id)
+
+    if not provider.is_yandex_button_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Yandex login is not enabled for provider {provider_id}",
+        )
+
+    # The request URL ends in /yandex; the provider must redirect back to the
+    # shared /auth/oauth/{provider_id}/callback route.
+    base_url = get_user_facing_url(request.url).rstrip("/").removesuffix("/yandex")
+
+    return _oauth_authorize_response(
+        provider,
+        provider.authorize_url,
+        f"{base_url}/callback",
+        extra_params={"kc_idp_hint": provider.get_yandex_idp_hint()},
+    )
+
+
 @router.get("/auth/oauth/{provider_id}/callback")
 async def oauth_callback(
     provider_id: str,

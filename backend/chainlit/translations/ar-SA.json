@@ -65,7 +65,8 @@
       "continue": "متابعة مع {{provider}}",
       "signin": "تسجيل الدخول باستخدام {{provider}}",
       "register": "إنشاء حساب باستخدام {{provider}}",
-      "vk": "Sign in with VK"
+      "vk": "Sign in with VK",
+      "yandex": "Sign in with Yandex"
     }
   },
   "chat": {

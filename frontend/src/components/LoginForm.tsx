@@ -27,6 +27,7 @@ interface Props {
   onOAuthSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
   onOAuthSignUp?: (provider: string, callbackUrl: string) => Promise<any>;
   onOAuthVkSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
+  onOAuthYandexSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
 }
 
 interface FormValues {
@@ -41,6 +42,7 @@ export function LoginForm({
   onOAuthSignIn,
   onOAuthSignUp,
   onOAuthVkSignIn,
+  onOAuthYandexSignIn,
   callbackUrl,
   forgotPasswordUrl,
   error
@@ -97,7 +99,8 @@ export function LoginForm({
       (provider) =>
         provider.loginEnabled ||
         provider.registrationEnabled ||
-        provider.vkEnabled
+        provider.vkEnabled ||
+        provider.yandexEnabled
     );
 
   return (
@@ -234,6 +237,16 @@ export function LoginForm({
                     mode="vk"
                     icon={provider}
                     onClick={() => onOAuthVkSignIn?.(provider.id, callbackUrl)}
+                  />
+                ) : null}
+                {provider.yandexEnabled ? (
+                  <ProviderButton
+                    provider={provider.id}
+                    mode="yandex"
+                    icon={provider}
+                    onClick={() =>
+                      onOAuthYandexSignIn?.(provider.id, callbackUrl)
+                    }
                   />
                 ) : null}
               </Fragment>

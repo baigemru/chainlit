@@ -30,6 +30,7 @@ export interface IOAuthProviderDetail {
   loginEnabled: boolean;
   registrationEnabled: boolean;
   vkEnabled?: boolean;
+  yandexEnabled?: boolean;
   iconUrl?: string | null;
   iconUrlLight?: string | null;
   iconUrlDark?: string | null;

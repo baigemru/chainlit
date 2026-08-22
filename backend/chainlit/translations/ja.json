@@ -65,7 +65,8 @@
       "continue": "{{provider}}で続ける",
       "signin": "{{provider}}でサインイン",
       "register": "{{provider}}で登録",
-      "vk": "Sign in with VK"
+      "vk": "Sign in with VK",
+      "yandex": "Sign in with Yandex"
     }
   },
   "chat": {

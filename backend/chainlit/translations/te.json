@@ -65,7 +65,8 @@
       "continue": "{{provider}}తో కొనసాగించండి",
       "signin": "{{provider}} తో సైన్ ఇన్ చేయండి",
       "register": "{{provider}} తో నమోదు చేసుకోండి",
-      "vk": "Sign in with VK"
+      "vk": "Sign in with VK",
+      "yandex": "Sign in with Yandex"
     }
   },
   "chat": {

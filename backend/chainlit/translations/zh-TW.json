@@ -65,7 +65,8 @@
       "continue": "繼續使用{{provider}}",
       "signin": "使用 {{provider}} 登入",
       "register": "使用 {{provider}} 註冊",
-      "vk": "Sign in with VK"
+      "vk": "Sign in with VK",
+      "yandex": "Sign in with Yandex"
     }
   },
   "chat": {

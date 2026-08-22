@@ -7,6 +7,8 @@ import type { IMessageElement, IStep } from '@chainlit/react-client';
 import { CURSOR_PLACEHOLDER } from '@/components/BlinkingCursor';
 import { Markdown } from '@/components/Markdown';
 
+import { useWaitDisplayText } from '@/hooks/useWaitDisplayText';
+
 import { InlinedElements } from './InlinedElements';
 
 type ContentSection = 'input' | 'output';
@@ -18,6 +20,8 @@ export interface Props {
   latex?: boolean;
   renderMarkdown?: boolean;
   sections?: ContentSection[];
+  /** The message is in wait mode: shimmer the output text and rotate `message.wait.texts`. */
+  waitActive?: boolean;
 }
 
 const getMessageRenderProps = (message: IStep) => ({
@@ -27,19 +31,36 @@ const getMessageRenderProps = (message: IStep) => ({
   language: message.language,
   streaming: message.streaming,
   showInput: message.showInput,
-  type: message.type
+  type: message.type,
+  wait: message.wait
 });
 
 const MessageContent = memo(
   forwardRef<HTMLDivElement, Props>(
     (
-      { message, elements, allowHtml, latex, renderMarkdown, sections },
+      {
+        message,
+        elements,
+        allowHtml,
+        latex,
+        renderMarkdown,
+        sections,
+        waitActive
+      },
       ref
     ) => {
+      // Rotation text for wait mode. Display-only: the persistent output is
+      // untouched, so deactivation falls back to it.
+      const waitText = useWaitDisplayText(
+        waitActive ? message.wait : undefined
+      );
+      const displayedOutput =
+        waitActive && waitText !== undefined ? waitText : message.output;
+
       const outputContent =
-        message.streaming && message.output
-          ? message.output + CURSOR_PLACEHOLDER
-          : message.output;
+        message.streaming && displayedOutput
+          ? displayedOutput + CURSOR_PLACEHOLDER
+          : displayedOutput;
 
       const {
         preparedContent: output,
@@ -64,19 +85,31 @@ const MessageContent = memo(
 
       const isMessage = message.type.includes('message');
 
+      const outputMarkdownBody = (
+        <Markdown
+          allowHtml={allowHtml}
+          latex={latex}
+          renderMarkdown={renderMarkdown}
+          refElements={outputRefElements}
+        >
+          {output}
+        </Markdown>
+      );
+
       const outputMarkdown = displayOutput ? (
         <>
           {!isMessage && displayInput && message.output ? (
             <div className="font-medium">Output</div>
           ) : null}
-          <Markdown
-            allowHtml={allowHtml}
-            latex={latex}
-            renderMarkdown={renderMarkdown}
-            refElements={outputRefElements}
-          >
-            {output}
-          </Markdown>
+          {waitActive ? (
+            // Shimmer only the text (elements/actions render normally); no
+            // animation under prefers-reduced-motion, rotation still runs.
+            <div className="motion-safe:animate-pulse">
+              {outputMarkdownBody}
+            </div>
+          ) : (
+            outputMarkdownBody
+          )}
         </>
       ) : null;
 
@@ -135,6 +168,7 @@ const MessageContent = memo(
       prevProps.latex === nextProps.latex &&
       prevProps.renderMarkdown === nextProps.renderMarkdown &&
       prevProps.elements === nextProps.elements &&
+      prevProps.waitActive === nextProps.waitActive &&
       isEqual(
         prevProps.sections ?? ['input', 'output'],
         nextProps.sections ?? ['input', 'output']

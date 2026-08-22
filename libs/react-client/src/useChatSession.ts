@@ -303,10 +303,13 @@ const useChatSession = () => {
 
       socket.on('new_message', (message: IStep) => {
         setMessages((oldMessages) =>
-          addMessage(
-            oldMessages,
-            stampChatProfile(message, chatProfileRef.current)
-          )
+          // For an already known id addMessage merges fields into the stored
+          // step; `wait` is transient, so the explicit (possibly undefined)
+          // value overwrites any stored one instead of surviving the merge.
+          addMessage(oldMessages, {
+            ...stampChatProfile(message, chatProfileRef.current),
+            wait: message.wait
+          })
         );
       });
 
@@ -320,11 +323,13 @@ const useChatSession = () => {
 
       socket.on('update_message', (message: IStep) => {
         setMessages((oldMessages) =>
-          updateMessageById(
-            oldMessages,
-            message.id,
-            stampChatProfile(message, chatProfileRef.current)
-          )
+          updateMessageById(oldMessages, message.id, {
+            // updateMessageById merges fields into the stored step; `wait` is
+            // transient and an update without it must end wait mode, so the
+            // explicit (possibly undefined) value overwrites any stored one.
+            ...stampChatProfile(message, chatProfileRef.current),
+            wait: message.wait
+          })
         );
       });
 
@@ -336,10 +341,13 @@ const useChatSession = () => {
 
       socket.on('stream_start', (message: IStep) => {
         setMessages((oldMessages) =>
-          addMessage(
-            oldMessages,
-            stampChatProfile(message, chatProfileRef.current)
-          )
+          // Same as new_message: a stream_start for an id that was in wait
+          // mode must clear the stored `wait`, or the rotation text would
+          // hide the streamed tokens.
+          addMessage(oldMessages, {
+            ...stampChatProfile(message, chatProfileRef.current),
+            wait: message.wait
+          })
         );
       });
 

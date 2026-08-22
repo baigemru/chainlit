@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional, TypedDict, Union
 
 from literalai import BaseGeneration
 from literalai.observability.step import StepType, TrueStepType
+from typing_extensions import NotRequired
 
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps
@@ -42,6 +43,15 @@ def stub_step(step: "Step") -> "StepDict":
     }
 
 
+class WaitDict(TypedDict):
+    """Transient client-side waiting presentation payload. Emitted over the
+    socket only — never persisted to the data layer."""
+
+    texts: List[str]
+    intervalMs: int
+    loop: bool
+
+
 class StepDict(TypedDict, total=False):
     name: str
     type: StepType
@@ -67,6 +77,9 @@ class StepDict(TypedDict, total=False):
     language: Optional[str]
     icon: Optional[str]
     feedback: Optional[FeedbackDict]
+    # Transient, emitter-only field. Nothing in Step/persistence ever sets it;
+    # it is attached to a copy of the step dict in Message.send()/update().
+    wait: NotRequired[Optional[WaitDict]]
 
 
 def flatten_args_kwargs(func, args, kwargs):

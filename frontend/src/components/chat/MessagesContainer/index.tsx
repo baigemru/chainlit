@@ -1,4 +1,5 @@
 import { MessageContext } from '@/contexts/MessageContext';
+import { getActiveWaitStepId } from '@/lib/waitMessage';
 import {
   Fragment,
   useCallback,
@@ -178,6 +179,15 @@ const MessagesContainer = ({ navigate }: Props) => {
 
   const enableFeedback = !!config?.dataPersistence;
 
+  // Drives the wait-message presentation: only the conversation's very last
+  // step may shimmer, so any newer step deactivates the previous one. This is
+  // undefined unless the last step actually carries `wait`, so for apps that
+  // never send wait messages the memoized context below stays stable.
+  const activeWaitStepId = useMemo(
+    () => getActiveWaitStepId(messages),
+    [messages]
+  );
+
   // Memoize the context object since it's created on each render.
   // This prevents unnecessary re-renders of children components when no props have changed.
   const memoizedContext = useMemo(() => {
@@ -194,6 +204,7 @@ const MessagesContainer = ({ navigate }: Props) => {
       cot: config?.ui?.cot || 'hidden',
       cotDisplay: config?.ui?.cot_display || 'list',
       showStepDetails: config?.ui?.show_step_details ?? true,
+      activeWaitStepId,
       onElementRefClick,
       onError,
       onFeedbackUpdated,
@@ -203,6 +214,7 @@ const MessagesContainer = ({ navigate }: Props) => {
     askUser,
     enableFeedback,
     loading,
+    activeWaitStepId,
     config?.ui?.name,
     config?.ui?.cot,
     config?.ui?.cot_display,
@@ -268,6 +280,9 @@ const MessagesContainer = ({ navigate }: Props) => {
       ...memoizedContext,
       editable: false,
       loading: false,
+      // A kept transcript can contain a copy of the step that is currently
+      // in wait mode in the live conversation; ended sections never shimmer.
+      activeWaitStepId: undefined,
       // Feedback and favorites post against the live session, which never
       // saw these steps — the server would reject them after the UI already
       // showed them as accepted.

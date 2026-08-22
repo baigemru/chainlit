@@ -21,6 +21,13 @@ interface IMessageContext {
   uiName: string;
   allowHtml?: boolean;
   latex?: boolean;
+  /**
+   * Id of the step currently in wait mode: the conversation's last step in
+   * document order when it carries the transient `wait` field, undefined
+   * otherwise (any newer step deactivates it). Stays permanently undefined —
+   * and the context value stable — for apps that never send wait messages.
+   */
+  activeWaitStepId?: string;
   renderUserMarkdown?: boolean;
   onElementRefClick?: (element: IMessageElement) => void;
   onFeedbackUpdated?: (

@@ -12,6 +12,20 @@ type StepType =
   | 'rerank'
   | 'undefined';
 
+/**
+ * Transient client-side "waiting" presentation for a message: shimmer plus a
+ * rotation of status texts. Sent on `new_message`/`update_message` payloads
+ * only — never persisted, so history renders the step statically.
+ */
+export interface IStepWait {
+  /** Rotation texts; empty/absent means shimmer only over the output. */
+  texts?: string[];
+  /** Interval between text switches (default 5000, min 2000). */
+  intervalMs?: number;
+  /** Cycle through the texts instead of holding on the last one. */
+  loop?: boolean;
+}
+
 export interface IStep {
   id: string;
   name: string;
@@ -33,6 +47,7 @@ export interface IStep {
   defaultOpen?: boolean;
   autoCollapse?: boolean;
   streaming?: boolean;
+  wait?: IStepWait;
   steps?: IStep[];
   metadata?: Record<string, any>;
   //legacy

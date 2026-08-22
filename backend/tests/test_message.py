@@ -755,3 +755,277 @@ class TestMessageEdgeCases:
             result = msg.to_dict()
 
             assert result["metadata"] == {}
+
+
+@contextmanager
+def _patched_runtime():
+    """Patch chat_context / data layer / config for send()/update() calls."""
+    with patch("chainlit.message.chat_context"):
+        with patch("chainlit.message.get_data_layer", return_value=None):
+            with patch("chainlit.message.config") as mock_config:
+                mock_config.code.author_rename = None
+                yield
+
+
+class TestMessageWait:
+    """Test suite for the transient `wait` presentation mode."""
+
+    def test_wait_defaults(self):
+        """Test that wait attributes default to off."""
+        with mock_chainlit_context():
+            msg = Message(content="test")
+
+            assert msg.wait is False
+            assert msg.wait_interval == 5.0
+            assert msg.wait_loop is False
+
+    def test_wait_never_in_to_dict(self):
+        """Test that to_dict never contains the wait key."""
+        with mock_chainlit_context():
+            msg = Message(content="test", wait=["a", "b"], wait_interval=8)
+
+            assert "wait" not in msg.to_dict()
+
+    @pytest.mark.asyncio
+    async def test_send_without_wait_has_no_wait_key(self):
+        """Test that wait=False emits a payload identical to to_dict()."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test")
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert "wait" not in emitted
+                assert emitted == msg.to_dict()
+
+    @pytest.mark.asyncio
+    async def test_send_with_wait_list(self):
+        """Test that wait=list emits the normalized wait payload."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(
+                content="step 1",
+                wait=["step 1", "step 2"],
+                wait_interval=8,
+                wait_loop=True,
+            )
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert emitted["wait"] == {
+                    "texts": ["step 1", "step 2"],
+                    "intervalMs": 8000,
+                    "loop": True,
+                }
+                # Everything else matches the regular payload
+                without_wait = {k: v for k, v in emitted.items() if k != "wait"}
+                assert without_wait == msg.to_dict()
+
+    @pytest.mark.asyncio
+    async def test_send_with_wait_data_layer_never_sees_wait(self):
+        """Test that create_step receives a dict without the wait key."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=["a", "b"])
+            mock_data_layer = AsyncMock()
+
+            with patch("chainlit.message.chat_context"):
+                with patch(
+                    "chainlit.message.get_data_layer", return_value=mock_data_layer
+                ):
+                    with patch("chainlit.message.config") as mock_config:
+                        mock_config.code.author_rename = None
+
+                        await msg.send()
+                        await asyncio.sleep(0)
+
+                        persisted = mock_data_layer.create_step.call_args[0][0]
+                        assert "wait" not in persisted
+
+                        emitted = ctx.emitter.send_step.call_args[0][0]
+                        assert "wait" in emitted
+
+    @pytest.mark.asyncio
+    async def test_send_with_wait_true(self):
+        """Test that wait=True emits shimmer-only payload."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=True)
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert emitted["wait"] == {
+                    "texts": [],
+                    "intervalMs": 5000,
+                    "loop": False,
+                }
+
+    @pytest.mark.asyncio
+    async def test_send_with_empty_wait_list(self):
+        """Test that wait=[] behaves like wait=True."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=[])
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert emitted["wait"] == {
+                    "texts": [],
+                    "intervalMs": 5000,
+                    "loop": False,
+                }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_interval", [None, float("inf"), float("-inf"), float("nan")]
+    )
+    async def test_wait_interval_invalid_falls_back_to_default(self, bad_interval):
+        """Test that a non-finite/None wait_interval falls back to 5000ms."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=["a"])
+            msg.wait_interval = bad_interval
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert emitted["wait"]["intervalMs"] == 5000
+
+    @pytest.mark.asyncio
+    async def test_wait_assigned_empty_list_emits_shimmer_only(self):
+        """Test that assigning wait=[] before update() emits shimmer-only."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="loading", wait=["a"])
+
+            with _patched_runtime():
+                await msg.send()
+
+                msg.wait = []
+                await msg.update()
+
+                updated = ctx.emitter.update_step.call_args[0][0]
+                assert updated["wait"] == {
+                    "texts": [],
+                    "intervalMs": 5000,
+                    "loop": False,
+                }
+                assert msg.wait is False
+
+    @pytest.mark.asyncio
+    async def test_wait_false_emits_no_wait_on_send_and_update(self):
+        """Test that wait=False emits no wait key on either send or update."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=False)
+
+            with _patched_runtime():
+                await msg.send()
+                await msg.update()
+
+                assert "wait" not in ctx.emitter.send_step.call_args[0][0]
+                assert "wait" not in ctx.emitter.update_step.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_wait_interval_clamped_to_minimum(self):
+        """Test that wait_interval below 2 seconds is clamped to 2000ms."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=["a"], wait_interval=0.5)
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert emitted["wait"]["intervalMs"] == 2000
+
+    def test_empty_content_takes_first_wait_text(self):
+        """Test that empty content falls back to the first wait text."""
+        with mock_chainlit_context():
+            msg = Message(content="", wait=["first", "second"])
+
+            assert msg.content == "first"
+
+    @pytest.mark.asyncio
+    async def test_empty_content_first_wait_text_in_payload(self):
+        """Test that the fallback content lands in the emitted output."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="", wait=["first", "second"])
+
+            with _patched_runtime():
+                await msg.send()
+
+                emitted = ctx.emitter.send_step.call_args[0][0]
+                assert emitted["output"] == "first"
+
+    def test_empty_content_kept_with_wait_true(self):
+        """Test that wait=True does not touch empty content."""
+        with mock_chainlit_context():
+            msg = Message(content="", wait=True)
+
+            assert msg.content == ""
+
+    def test_non_empty_content_not_overridden_by_wait_texts(self):
+        """Test that explicit content wins over wait texts."""
+        with mock_chainlit_context():
+            msg = Message(content="explicit", wait=["first"])
+
+            assert msg.content == "explicit"
+
+    @pytest.mark.asyncio
+    async def test_wait_consumed_on_send(self):
+        """Test that update() after send() emits no wait (loader pattern)."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="loading", wait=["a", "b"])
+
+            with _patched_runtime():
+                await msg.send()
+                assert msg.wait is False
+
+                msg.content = "done"
+                await msg.update()
+
+                updated = ctx.emitter.update_step.call_args[0][0]
+                assert "wait" not in updated
+                assert updated["output"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_wait_reassigned_before_update(self):
+        """Test that reassigning wait restarts wait mode on update()."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="phase 1", wait=["phase 1"])
+
+            with _patched_runtime():
+                await msg.send()
+
+                msg.wait = ["phase 2a", "phase 2b"]
+                msg.wait_interval = 3
+                await msg.update()
+
+                updated = ctx.emitter.update_step.call_args[0][0]
+                assert updated["wait"] == {
+                    "texts": ["phase 2a", "phase 2b"],
+                    "intervalMs": 3000,
+                    "loop": False,
+                }
+                assert msg.wait is False
+
+    @pytest.mark.asyncio
+    async def test_update_data_layer_never_sees_wait(self):
+        """Test that update_step receives a dict without the wait key."""
+        with mock_chainlit_context() as ctx:
+            msg = Message(content="test", wait=["a"])
+            mock_data_layer = AsyncMock()
+
+            with patch("chainlit.message.chat_context"):
+                with patch(
+                    "chainlit.message.get_data_layer", return_value=mock_data_layer
+                ):
+                    await msg.update()
+                    await asyncio.sleep(0)
+
+                    persisted = mock_data_layer.update_step.call_args[0][0]
+                    assert "wait" not in persisted
+
+                    emitted = ctx.emitter.update_step.call_args[0][0]
+                    assert "wait" in emitted

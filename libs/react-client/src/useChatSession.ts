@@ -52,6 +52,7 @@ import {
 import {
   addMessage,
   deleteMessageById,
+  stampChatProfile,
   updateMessageById,
   updateMessageContentById
 } from 'src/utils/message';
@@ -105,6 +106,12 @@ const useChatSession = () => {
   const setChatSettingsInputs = useSetRecoilState(chatSettingsInputsState);
   const setTokenCount = useSetRecoilState(tokenCountState);
   const [chatProfile, setChatProfile] = useRecoilState(chatProfileState);
+  // The socket handlers below are registered once per connect and would
+  // otherwise close over the profile that was active at that moment; the
+  // ref always carries the current one, so every incoming message is
+  // stamped with the profile it is actually generated under.
+  const chatProfileRef = useRef(chatProfile);
+  chatProfileRef.current = chatProfile;
   const idToResume = useRecoilValue(threadIdToResumeState);
   const setThreadResumeError = useSetRecoilState(resumeThreadErrorState);
   const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
@@ -357,7 +364,15 @@ const useChatSession = () => {
       });
 
       socket.on('new_message', (message: IStep) => {
-        setMessages((oldMessages) => addMessage(oldMessages, message));
+        setMessages((oldMessages) =>
+          // For an already known id addMessage merges fields into the stored
+          // step; `wait` is transient, so the explicit (possibly undefined)
+          // value overwrites any stored one instead of surviving the merge.
+          addMessage(oldMessages, {
+            ...stampChatProfile(message, chatProfileRef.current),
+            wait: message.wait
+          })
+        );
       });
 
       socket.on(
@@ -370,7 +385,13 @@ const useChatSession = () => {
 
       socket.on('update_message', (message: IStep) => {
         setMessages((oldMessages) =>
-          updateMessageById(oldMessages, message.id, message)
+          updateMessageById(oldMessages, message.id, {
+            // updateMessageById merges fields into the stored step; `wait` is
+            // transient and an update without it must end wait mode, so the
+            // explicit (possibly undefined) value overwrites any stored one.
+            ...stampChatProfile(message, chatProfileRef.current),
+            wait: message.wait
+          })
         );
       });
 
@@ -381,7 +402,15 @@ const useChatSession = () => {
       });
 
       socket.on('stream_start', (message: IStep) => {
-        setMessages((oldMessages) => addMessage(oldMessages, message));
+        setMessages((oldMessages) =>
+          // Same as new_message: a stream_start for an id that was in wait
+          // mode must clear the stored `wait`, or the rotation text would
+          // hide the streamed tokens.
+          addMessage(oldMessages, {
+            ...stampChatProfile(message, chatProfileRef.current),
+            wait: message.wait
+          })
+        );
       });
 
       socket.on(
@@ -420,7 +449,9 @@ const useChatSession = () => {
         // A re-emitted ask (reconnect restore) simply rebinds the form to
         // the live socket; addMessage upserts the message by id.
         setAskUser({ spec, callback: reply, parentId: msg.parentId });
-        setMessages((oldMessages) => addMessage(oldMessages, msg));
+        setMessages((oldMessages) =>
+          addMessage(oldMessages, stampChatProfile(msg, chatProfileRef.current))
+        );
 
         setLoading(false);
       });

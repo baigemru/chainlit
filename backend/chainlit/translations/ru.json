@@ -75,7 +75,8 @@
       "actions": {
         "send": "Отправить сообщение",
         "stop": "Остановить задачу",
-        "attachFiles": "Прикрепить файлы"
+        "attachFiles": "Прикрепить файлы",
+        "openParentThread": "Вернуться в исходный чат"
       }
     },
     "favorites": {
@@ -113,6 +114,14 @@
     "messages": {
       "newChat": "Новый чат",
       "newChatIn": "Новый чат · {{profile}}",
+      "backToParent": "Возврат в исходный чат",
+      "collapseTranscript": "Схлопнуть",
+      "expandTranscript": "Развернуть",
+      "collapsedChildMessages_one": "{{count}} сообщение дочернего чата",
+      "collapsedChildMessages_few": "{{count}} сообщения дочернего чата",
+      "collapsedChildMessages_many": "{{count}} сообщений дочернего чата",
+      "collapsedChildMessages_other": "{{count}} сообщения дочернего чата",
+      "threadUnavailable": "Чат недоступен",
       "status": {
         "using": "Используется",
         "used": "Использовано",

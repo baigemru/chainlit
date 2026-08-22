@@ -8,6 +8,7 @@ import ChatSettingsSidebar from '@/components/ChatSettings/ChatSettingsSidebar';
 import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
 import { TaskList } from '@/components/Tasklist';
+import ThreadReturnListener from '@/components/ThreadReturnListener';
 import { Header } from '@/components/header';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
@@ -62,6 +63,7 @@ const Page = ({ children }: Props) => {
       defaultOpen={config?.ui.default_sidebar_state !== 'closed'}
     >
       <ChatProfileSwitchListener />
+      <ThreadReturnListener />
       {historyEnabled && !sidebarHidden ? (
         <>
           <LeftSidebar />

@@ -659,6 +659,92 @@ class TestConnectionSuccessfulIdempotency:
         assert on_chat_start.call_count == 1
 
 
+class TestSendParentThread:
+    """connection_successful delivers the session's parent thread id.
+
+    A fresh transit thread has its parent only on the session until the
+    first interaction persists it, so the client must receive it on every
+    (re)connect; the resumed-thread case travels via thread metadata
+    instead and needs nothing here.
+    """
+
+    SESSION_ID = "parent_thread_session_id"
+
+    @pytest.fixture(autouse=True)
+    def clean_state(self):
+        transit.clear()
+        user_sessions.pop(self.SESSION_ID, None)
+        yield
+        transit.clear()
+        user_sessions.pop(self.SESSION_ID, None)
+
+    def make_context(self, mock_session_factory, **session_kwargs):
+        session_kwargs.setdefault("id", self.SESSION_ID)
+        session_kwargs.setdefault("user", None)
+        session_kwargs.setdefault("has_first_interaction", False)
+        session = mock_session_factory(**session_kwargs)
+        session.restored = False
+        session.chat_started = False
+        session.current_task = None
+        session.thread_id_to_resume = None
+
+        context = Mock()
+        context.session = session
+        context.emitter = AsyncMock()
+        return context
+
+    def patch_environment(self, context):
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+        return (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+        )
+
+    @pytest.mark.asyncio
+    async def test_fresh_transit_thread_receives_parent(self, mock_session_factory):
+        context = self.make_context(mock_session_factory)
+        transit.store(self.SESSION_ID, None, None, parent="thread-a")
+
+        ws_patch, config_patch = self.patch_environment(context)
+        with ws_patch, config_patch:
+            await connection_successful("sid-1")
+
+        context.emitter.emit.assert_any_await(
+            "parent_thread", {"parentThreadId": "thread-a"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_reconnect_re_delivers_parent(self, mock_session_factory):
+        # The restored-session branch of connection_successful must send the
+        # parent again: the client's copy died with the previous socket.
+        context = self.make_context(mock_session_factory)
+        context.session.restored = True
+        context.session.parent_thread_id = "thread-a"
+
+        ws_patch, config_patch = self.patch_environment(context)
+        with ws_patch, config_patch:
+            await connection_successful("sid-1")
+
+        context.emitter.emit.assert_any_await(
+            "parent_thread", {"parentThreadId": "thread-a"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_without_parent_stays_silent(self, mock_session_factory):
+        context = self.make_context(mock_session_factory)
+
+        ws_patch, config_patch = self.patch_environment(context)
+        with ws_patch, config_patch:
+            await connection_successful("sid-1")
+
+        assert not any(
+            call.args[0] == "parent_thread"
+            for call in context.emitter.emit.await_args_list
+        )
+
+
 class TestApplyTransitMessage:
     """apply_transit_message: a claimed transit record enters the new session."""
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import time
 import uuid
 from abc import ABC
@@ -14,7 +15,7 @@ from chainlit.context import context, local_steps
 from chainlit.data import get_data_layer
 from chainlit.element import CustomElement, ElementBased
 from chainlit.logger import logger
-from chainlit.step import StepDict
+from chainlit.step import StepDict, WaitDict
 from chainlit.types import (
     AskActionResponse,
     AskActionSpec,
@@ -46,6 +47,11 @@ class MessageBase(ABC):
     metadata: Optional[Dict] = None
     tags: Optional[List[str]] = None
     wait_for_answer = False
+    # Client-side waiting presentation mode (shimmer + text rotation).
+    # Transient: emitted over the socket only, never persisted.
+    wait: Union[bool, List[str]] = False
+    wait_interval: float = 5.0
+    wait_loop: bool = False
 
     def __post_init__(self) -> None:
         self.thread_id = context.session.thread_id
@@ -97,6 +103,36 @@ class MessageBase(ABC):
 
         return _dict
 
+    def _wait_payload(self) -> Optional[WaitDict]:
+        """Normalize the transient `wait` presentation payload.
+
+        Returns None when wait mode is off. Never included in `to_dict()` so
+        it can not leak into the data layer — callers attach it to a copy of
+        the step dict that goes to the emitter only.
+        """
+        # An empty texts list means "shimmer only", same as wait=True.
+        if not self.wait and not isinstance(self.wait, list):
+            return None
+
+        texts = list(self.wait) if isinstance(self.wait, list) else []
+
+        # A presentation hint must never break send()/update(): fall back to
+        # the default interval if the value is not a finite number.
+        try:
+            interval = float(self.wait_interval)
+        except (TypeError, ValueError):
+            interval = 5.0
+        if not math.isfinite(interval):
+            interval = 5.0
+
+        interval_ms = round(max(interval, 2.0) * 1000)
+
+        return {
+            "texts": texts,
+            "intervalMs": interval_ms,
+            "loop": bool(self.wait_loop),
+        }
+
     async def update(
         self,
     ):
@@ -119,7 +155,14 @@ class MessageBase(ABC):
                     raise e
                 logger.error(f"Failed to persist message update: {e!s}")
 
-        await context.emitter.update_step(step_dict)
+        wait_payload = self._wait_payload()
+        if wait_payload is not None:
+            # Transient field for the emitter only; the data layer above got
+            # the original dict without it. Consumed on emit.
+            await context.emitter.update_step({**step_dict, "wait": wait_payload})
+            self.wait = False
+        else:
+            await context.emitter.update_step(step_dict)
 
         return True
 
@@ -170,7 +213,15 @@ class MessageBase(ABC):
 
         step_dict = await self._create()
         chat_context.add(self)
-        await context.emitter.send_step(step_dict)
+
+        wait_payload = self._wait_payload()
+        if wait_payload is not None:
+            # Transient field for the emitter only; the data layer (via
+            # _create) got the original dict without it. Consumed on emit.
+            await context.emitter.send_step({**step_dict, "wait": wait_payload})
+            self.wait = False
+        else:
+            await context.emitter.send_step(step_dict)
 
         return self
 
@@ -209,6 +260,9 @@ class Message(MessageBase):
         language (str, optional): Language of the code is the content is code. See https://react-code-blocks-rajinwonderland.vercel.app/?path=/story/codeblock--supported-languages for a list of supported languages.
         actions (List[Action], optional): A list of actions to send with the message.
         elements (List[ElementBased], optional): A list of elements to send with the message.
+        wait (Union[bool, List[str]], optional): Client-side waiting presentation mode. False (default) — regular message. True — shimmer over the content, no text rotation. List of strings — shimmer plus client-side rotation of these texts. Transient: not persisted, consumed on the next send()/update().
+        wait_interval (float, optional): Seconds between text rotations (minimum 2). Defaults to 5.
+        wait_loop (bool, optional): Whether the rotation loops back to the first text after the last one (True) or holds the last text (False, default).
     """
 
     def __init__(
@@ -226,6 +280,9 @@ class Message(MessageBase):
         command: Optional[str] = None,
         modes: Optional[Dict[str, str]] = None,
         created_at: Union[str, None] = None,
+        wait: Union[bool, List[str]] = False,
+        wait_interval: float = 5.0,
+        wait_loop: bool = False,
     ):
         time.sleep(0.001)
         self.language = language
@@ -264,6 +321,12 @@ class Message(MessageBase):
         self.type = type
         self.actions = actions if actions is not None else []
         self.elements = elements if elements is not None else []
+
+        self.wait = wait
+        self.wait_interval = wait_interval
+        self.wait_loop = wait_loop
+        if not self.content and isinstance(wait, list) and wait:
+            self.content = wait[0]
 
         super().__post_init__()
 

@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { isWaitActive } from '@/lib/waitMessage';
 import { MessageContext } from 'contexts/MessageContext';
 import { memo, useContext, useMemo, useRef } from 'react';
 
@@ -41,8 +42,15 @@ const Message = memo(
     isScorable,
     scorableRun
   }: Props) => {
-    const { allowHtml, cot, cotDisplay, latex, renderUserMarkdown, onError } =
-      useContext(MessageContext);
+    const {
+      activeWaitStepId,
+      allowHtml,
+      cot,
+      cotDisplay,
+      latex,
+      renderUserMarkdown,
+      onError
+    } = useContext(MessageContext);
     const layoutMaxWidth = useLayoutMaxWidth();
     const contentRef = useRef<HTMLDivElement>(null);
     const isUserMessage = message.type === 'user_message';
@@ -54,6 +62,9 @@ const Message = memo(
     const hiddenSkip = isStep && cot === 'hidden';
 
     const skip = toolCallSkip || hiddenSkip;
+    // Transient wait presentation (shimmer + text rotation): only while this
+    // message is still the last step of the conversation.
+    const waitActive = isWaitActive(message, activeWaitStepId);
     const showInputSection = Boolean(message.input && message.showInput);
     const shouldRenderOutput = !showInputSection || Boolean(message.output);
 
@@ -88,7 +99,11 @@ const Message = memo(
 
     return (
       <>
-        <div data-step-type={message.type} className="step py-2">
+        <div
+          data-step-type={message.type}
+          data-test={waitActive ? 'wait-message' : undefined}
+          className="step py-2"
+        >
           <div
             className="flex flex-col"
             style={{
@@ -113,6 +128,7 @@ const Message = memo(
                       author={message.metadata?.avatarName || message.name}
                       isError={message.isError}
                       iconName={message.metadata?.icon}
+                      messageChatProfile={message.metadata?.chat_profile}
                     />
                   ) : null}
                   {/* Display the step and its children */}
@@ -166,6 +182,7 @@ const Message = memo(
                         allowHtml={allowHtml}
                         latex={latex}
                         renderMarkdown={true}
+                        waitActive={waitActive}
                       />
 
                       <AskFileButton messageId={message.id} onError={onError} />

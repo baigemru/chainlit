@@ -23,6 +23,8 @@ import {
   SelectValue
 } from '@/components/ui/select';
 
+import { useResetKeptTranscript } from '@/hooks/useParentThread';
+
 import { IAttachment, attachmentsState } from '@/state/chat';
 
 import { NewChatDialog } from './NewChat';
@@ -38,6 +40,7 @@ export default function ChatProfiles({ navigate }: Props) {
   const { firstInteraction } = useChatMessages();
   const { clear } = useChatInteract();
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
+  const resetKeptTranscript = useResetKeptTranscript();
   const [newChatProfile, setNewChatProfile] = useState<string | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
 
@@ -75,6 +78,9 @@ export default function ChatProfiles({ navigate }: Props) {
     setChatProfile(profile);
     setNewChatProfile(null);
     setAttachments([]);
+    // A manual profile change blanks the screen; transcripts kept by
+    // returns to a parent thread would otherwise linger above it.
+    resetKeptTranscript();
     clear();
     handleClose();
   };

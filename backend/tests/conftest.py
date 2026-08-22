@@ -37,6 +37,7 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.environ = kwargs.get("environ", None)
         mock.client_type = kwargs.get("client_type", "webapp")
         mock.thread_id = kwargs.get("thread_id", "test_thread_id")
+        mock.parent_thread_id = kwargs.get("parent_thread_id", None)
         mock.emit = AsyncMock()
         mock.emit_call = AsyncMock()
         # Present on every real WebsocketSession; tests exercising the

@@ -19,6 +19,8 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
+import { useResetKeptTranscript } from '@/hooks/useParentThread';
+
 import { EditSquare } from '../icons/EditSquare';
 
 type NewChatDialogProps = {
@@ -76,6 +78,7 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
   const [open, setOpen] = useState(false);
   const { clear } = useChatInteract();
   const { config } = useConfig();
+  const resetKeptTranscript = useResetKeptTranscript();
 
   const handleClickOpen = () => {
     if (config?.ui?.confirm_new_chat === false) {
@@ -93,6 +96,9 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
     if (onConfirm) {
       onConfirm();
     } else {
+      // A new chat blanks the screen; transcripts kept by returns to a
+      // parent thread would otherwise linger above it.
+      resetKeptTranscript();
       clear();
       navigate?.('/');
     }

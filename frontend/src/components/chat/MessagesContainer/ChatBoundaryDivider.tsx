@@ -11,9 +11,24 @@ import { Separator } from '@/components/ui/separator';
 interface Props {
   /** Profile the chat below this divider started on. */
   profile?: string;
+  /**
+   * Marks the divider drawn by a return to the parent thread. It keeps the
+   * regular divider look but labels the return and carries the collapse
+   * toggle for the child-chat segment right above it.
+   */
+  isReturn?: boolean;
+  /** Whether the segment above this (return) divider is collapsed. */
+  collapsed?: boolean;
+  /** Collapse/expand the segment above this (return) divider. */
+  onToggleCollapse?: () => void;
 }
 
-export default function ChatBoundaryDivider({ profile }: Props) {
+export default function ChatBoundaryDivider({
+  profile,
+  isReturn,
+  collapsed,
+  onToggleCollapse
+}: Props) {
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
   const { t } = useTranslation();
@@ -24,12 +39,16 @@ export default function ChatBoundaryDivider({ profile }: Props) {
     ? apiClient.buildEndpoint(chatProfile.icon)
     : chatProfile?.icon;
 
-  const label = name
-    ? t('chat.messages.newChatIn', {
-        defaultValue: 'New chat · {{profile}}',
-        profile: name
+  const label = isReturn
+    ? t('chat.messages.backToParent', {
+        defaultValue: 'Returned to the original chat'
       })
-    : t('chat.messages.newChat', { defaultValue: 'New chat' });
+    : name
+      ? t('chat.messages.newChatIn', {
+          defaultValue: 'New chat · {{profile}}',
+          profile: name
+        })
+      : t('chat.messages.newChat', { defaultValue: 'New chat' });
 
   return (
     <div
@@ -43,6 +62,22 @@ export default function ChatBoundaryDivider({ profile }: Props) {
           <img src={icon} alt="" className="size-4 rounded object-cover" />
         ) : null}
         <span>{label}</span>
+        {isReturn && onToggleCollapse ? (
+          <button
+            type="button"
+            data-test="collapse-transcript"
+            onClick={onToggleCollapse}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {collapsed
+              ? t('chat.messages.expandTranscript', {
+                  defaultValue: 'Expand'
+                })
+              : t('chat.messages.collapseTranscript', {
+                  defaultValue: 'Collapse'
+                })}
+          </button>
+        ) : null}
       </div>
       <Separator className="w-auto flex-1" />
     </div>

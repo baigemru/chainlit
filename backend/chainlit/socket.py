@@ -20,6 +20,7 @@ from chainlit.data import get_data_layer
 from chainlit.emitter import _make_legacy_ask_ack
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
+from chainlit.persist_barrier import create_persist_task, wait_for_persist
 from chainlit.resume_policy import split_resume_delete
 from chainlit.server import sio
 from chainlit.session import ClientType, WebsocketSession
@@ -91,6 +92,10 @@ async def resume_thread(session: WebsocketSession):
     data_layer = get_data_layer()
     if not data_layer or not session.user or not session.thread_id_to_resume:
         return
+    # Step persistence is fire-and-forget; a wholesale resume_thread
+    # snapshot read before those tasks land would drop the freshest steps
+    # from the client's feed until the next reload.
+    await wait_for_persist(session.thread_id_to_resume)
     thread = await data_layer.get_thread(thread_id=session.thread_id_to_resume)
     if not thread:
         return
@@ -351,7 +356,7 @@ async def claim_transit_message(sid, payload):
 
 async def cleanup_resume_delete_steps(
     context, thread_id: str, doomed_steps: list, doomed_elements: list
-):
+) -> Tuple[list, list]:
     """Delete the doomed steps from the data layer and from the client.
 
     Must run after ``has_first_interaction`` is set (``delete_step`` /
@@ -359,18 +364,28 @@ async def cleanup_resume_delete_steps(
     hang in the queue otherwise) and after the ``resume_thread`` emit (the
     client rebuilds the whole feed on ``resume_thread``, so an earlier
     ``delete_message`` would be lost; the client already drew the history
-    from REST, which makes the emit a mandatory safety net). Every
-    operation is individually guarded: a double resume, a race between two
-    tabs or an already-deleted step must not crash the resume.
+    from REST, which makes the emit a mandatory safety net). It also runs
+    before ``on_chat_resume`` — the handler may block for a long time and
+    the doomed steps must not linger on screen meanwhile. Every operation
+    is individually guarded: a double resume, a race between two tabs or an
+    already-deleted step must not crash the resume.
+
+    Returns ``(failed_steps, failed_elements)``: the doomed steps whose
+    data-layer deletion did not fully succeed (kept rows), with their
+    still-undeleted elements. The caller stores them on the session and
+    retries them on its next entry into the resume branch.
     """
     if not doomed_steps:
-        return
+        return [], []
 
     data_layer = get_data_layer()
 
     elements_by_step: Dict[Any, list] = {}
     for element in doomed_elements:
         elements_by_step.setdefault(element.get("forId"), []).append(element)
+
+    failed_steps: list = []
+    failed_elements: list = []
 
     for step in doomed_steps:
         step_id = step.get("id")
@@ -381,13 +396,15 @@ async def cleanup_resume_delete_steps(
             # deletion fails, the step is kept — once the step is gone its
             # elements would be orphaned forever (their forId never enters
             # the doomed set again); keeping it leaves the state retryable,
-            # the next resume finishes the job.
+            # this session retries on its next resume entry.
             elements_deleted = True
+            remaining_elements: list = []
             for element in elements_by_step.get(step_id, []):
                 try:
                     await data_layer.delete_element(element["id"], thread_id)
                 except Exception as e:
                     elements_deleted = False
+                    remaining_elements.append(element)
                     logger.warning(
                         f"resume=delete: failed to delete element "
                         f"{element.get('id')} of step {step_id}: {e}"
@@ -396,10 +413,13 @@ async def cleanup_resume_delete_steps(
                 try:
                     await data_layer.delete_step(step_id)
                 except Exception as e:
+                    failed_steps.append(step)
                     logger.warning(
                         f"resume=delete: failed to delete step {step_id}: {e}"
                     )
             else:
+                failed_steps.append(step)
+                failed_elements.extend(remaining_elements)
                 logger.warning(
                     f"resume=delete: keeping step {step_id} until its "
                     f"elements can be deleted; will retry on the next resume"
@@ -411,37 +431,168 @@ async def cleanup_resume_delete_steps(
                 f"resume=delete: failed to emit delete_message for step {step_id}: {e}"
             )
 
+    return failed_steps, failed_elements
 
-async def restore_pending_ask(context, client_has_ui_state: bool):
+
+def repopulate_chat_context(session, thread) -> None:
+    """Fill the in-memory transcript from a thread payload.
+
+    Message steps are added to ``chat_context`` deduplicated by id (the
+    resume branch runs again on every reconnect, and Message objects
+    compare by identity — without the id check every re-entry would append
+    duplicates). The thread's element dicts are recorded per step id in
+    ``session.transcript_element_dicts`` (replaced wholesale):
+    ``Message.from_dict`` carries no elements, so the in-memory transcript
+    replay reads attachments from that map.
+    """
+    element_dicts: Dict[str, list] = {}
+    for element in thread.get("elements") or []:
+        for_id = element.get("forId")
+        if for_id:
+            element_dicts.setdefault(for_id, []).append(element)
+    try:
+        session.transcript_element_dicts = element_dicts
+    except Exception:
+        logger.debug("Failed to store transcript element dicts", exc_info=True)
+
+    try:
+        existing_ids = {m.id for m in chat_context.get()}
+    except Exception:
+        existing_ids = set()
+    for step in thread.get("steps") or []:
+        if "message" not in (step.get("type") or ""):
+            continue
+        if step.get("id") in existing_ids:
+            continue
+        try:
+            chat_context.add(Message.from_dict(step))
+        except Exception:
+            logger.debug(
+                "Failed to restore a persisted step into the chat context",
+                exc_info=True,
+            )
+
+
+async def replay_transcript_from_data_layer(context, session):
+    """Re-emit the thread's message steps read back from the data layer.
+
+    Fallback for the reconnect resync when the in-memory transcript is
+    empty — typically the finishing task's session context was lost (or the
+    server recreated the session), while the steps already went to the data
+    layer. Waits for pending background persists first, so the read does
+    not outrun in-flight ``create_step`` tasks. Emits ``new_message`` /
+    ``element`` — both upserts by id on the client, so re-emission is
+    idempotent. Deliberately does NOT filter resume="delete" steps: a live
+    restored session's flagged steps are legitimately alive, deletion is
+    first-entry-only. The replayed steps are also added to the in-memory
+    transcript so the next reconnect replays from memory.
+    """
+    if not getattr(session, "has_first_interaction", False):
+        return
+    data_layer = get_data_layer()
+    if not data_layer or not session.thread_id:
+        return
+    try:
+        await wait_for_persist(session.thread_id)
+        thread = await data_layer.get_thread(thread_id=session.thread_id)
+    except Exception:
+        logger.debug(
+            "Failed to read the thread for a reconnect transcript resync",
+            exc_info=True,
+        )
+        return
+    if not thread:
+        return
+
+    steps = [
+        step
+        for step in thread.get("steps") or []
+        if "message" in (step.get("type") or "")
+    ]
+    if not steps:
+        return
+    step_ids = {step.get("id") for step in steps}
+    elements_by_step: Dict[Any, list] = {}
+    for element in thread.get("elements") or []:
+        if element.get("forId") in step_ids:
+            elements_by_step.setdefault(element.get("forId"), []).append(element)
+
+    for step in steps:
+        try:
+            await context.emitter.send_step(step)
+            for element in elements_by_step.get(step.get("id"), []):
+                await context.emitter.send_element(element)
+        except Exception:
+            logger.debug(
+                "Failed to replay a persisted step on reconnect", exc_info=True
+            )
+
+    # The NEXT reconnect replays from memory (with attachments from the
+    # element-dict map the helper records).
+    repopulate_chat_context(session, thread)
+
+
+async def restore_pending_ask(
+    context, client_has_ui_state: bool, skip_transcript_replay: bool = False
+):
     """Rebuild a live pending ask in the UI, or clear the ask state.
 
     Must run after the resume/transit branches of ``connection_successful``:
     ``resume_thread`` replaces the client's message/element state wholesale
-    and would wipe a form re-emitted before it.
+    and would wipe a form re-emitted before it. ``skip_transcript_replay``
+    is set by the resume branch when a fresh (barrier'd) ``resume_thread``
+    snapshot was emitted in this same cycle — re-emitting the transcript on
+    top of it would be redundant wire volume; the ask restore below is
+    unaffected.
     """
     session = context.session
 
-    if not client_has_ui_state and session.restored:
-        # The page was reloaded and the client lost everything: replay the
-        # transcript (a paid flow's results live above the form) together
-        # with the elements attached to its messages. On a plain transport
-        # reconnect the client still has all of it — skip. This also runs
-        # when the session was kept for a still-running task without a
-        # pending ask.
+    if session.restored and not skip_transcript_replay:
+        # Replay the transcript (a paid flow's results live above the form)
+        # together with the elements attached to its messages — on EVERY
+        # reconnect of a restored session, not just a page reload: emits
+        # into a dead/reconnecting socket are dropped by the server, so a
+        # plain transport reconnect must converge too. The client upserts
+        # new_message/element by id, which makes the re-emission idempotent.
+        # This also runs when the session was kept for a still-running task
+        # without a pending ask.
         try:
             transcript = chat_context.get()
         except Exception:
             transcript = []
-        for message in transcript:
-            try:
-                await context.emitter.send_step(message.to_dict())
-                for element in getattr(message, "elements", None) or []:
-                    await context.emitter.send_element(element.to_dict())
-            except Exception:
-                logger.debug(
-                    "Failed to replay a transcript message on reconnect",
-                    exc_info=True,
-                )
+        if transcript:
+            stored_elements = getattr(session, "transcript_element_dicts", None) or {}
+            for message in transcript:
+                try:
+                    step_dict = message.to_dict()
+                    wait_payload = getattr(message, "_active_wait_payload", None)
+                    if wait_payload is not None:
+                        # Same transient field the original emit carried:
+                        # the client force-overwrites `wait` on every
+                        # new_message, so a replay without it would kill a
+                        # still-running shimmer.
+                        step_dict = {**step_dict, "wait": wait_payload}
+                    await context.emitter.send_step(step_dict)
+                    # Attachments come from the live objects AND from the
+                    # element dicts recorded at repopulation time (a
+                    # Message rebuilt from a thread payload carries no
+                    # element objects), deduplicated by element id.
+                    emitted_element_ids = set()
+                    for element in getattr(message, "elements", None) or []:
+                        element_dict = element.to_dict()
+                        emitted_element_ids.add(element_dict.get("id"))
+                        await context.emitter.send_element(element_dict)
+                    for element_dict in stored_elements.get(message.id, []):
+                        if element_dict.get("id") in emitted_element_ids:
+                            continue
+                        await context.emitter.send_element(element_dict)
+                except Exception:
+                    logger.debug(
+                        "Failed to replay a transcript message on reconnect",
+                        exc_info=True,
+                    )
+        else:
+            await replay_transcript_from_data_layer(context, session)
 
     pending_ask = session.pending_ask
     if pending_ask is None or not pending_ask.is_live:
@@ -496,6 +647,10 @@ async def connection_successful(sid):
     # plain reconnect of a loaded page. Old clients never set the flag and
     # get the full restore.
     client_has_ui_state = not getattr(context.session, "fresh_page_load", True)
+    # Set by the resume branch after it emits a fresh resume_thread
+    # snapshot: the transcript replay in restore_pending_ask would then be
+    # redundant wire volume on top of the snapshot.
+    resume_snapshot_emitted = False
 
     try:
         if context.session.restored and not context.session.has_first_interaction:
@@ -526,31 +681,75 @@ async def connection_successful(sid):
                 # Filtered BEFORE on_chat_resume: the app and the client
                 # both get a payload already free of resume="delete" steps.
                 # The actual deletion happens after resume_thread below.
-                # Only a true resume of a dead session qualifies — a
-                # restored session re-enters this branch on F5 (its
-                # thread_id_to_resume is never cleared), and deleting then
-                # would kill live flagged messages of a running task.
+                # Only the FIRST entry into the resume branch qualifies — a
+                # genuine resume of a dead session. The session re-enters
+                # this branch on every reconnect (its thread_id_to_resume is
+                # never cleared), and deleting then would kill live flagged
+                # messages of a running task; resume_processed gates it.
+                # Note: a first entry may already run on a restored
+                # transport (the connection blipped between connect and
+                # connection_successful) — it is still a genuine resume of
+                # a dead session and must filter and delete.
                 doomed_steps: list = []
                 doomed_elements: list = []
-                if not context.session.restored:
+                if not getattr(context.session, "resume_processed", False):
                     thread, doomed_steps, doomed_elements = split_resume_delete(thread)
+                else:
+                    # Re-entry: never re-run split_resume_delete here — it
+                    # would doom fresh live flagged messages of a running
+                    # task. But steps kept in the DB only because their
+                    # deletion failed on a previous entry must not resurface
+                    # in the payload: hide exactly them (plain id filter)
+                    # and retry the deletion below.
+                    retry_steps, retry_elements = getattr(
+                        context.session, "resume_delete_retry", ([], [])
+                    )
+                    if retry_steps:
+                        doomed_steps = list(retry_steps)
+                        doomed_elements = list(retry_elements)
+                        retry_ids = {step.get("id") for step in doomed_steps}
+                        thread = {
+                            **thread,
+                            "steps": [
+                                step
+                                for step in thread.get("steps") or []
+                                if step.get("id") not in retry_ids
+                            ],
+                        }
+                        if "elements" in thread:
+                            thread["elements"] = [
+                                el
+                                for el in thread.get("elements") or []
+                                if el.get("forId") not in retry_ids
+                            ]
 
                 context.session.has_first_interaction = True
                 await context.emitter.emit(
                     "first_interaction",
                     {"interaction": "resume", "thread_id": thread.get("id")},
                 )
-                await config.code.on_chat_resume(thread)
 
-                for step in thread.get("steps", []):
-                    if "message" in step["type"]:
-                        chat_context.add(Message.from_dict(step))
+                # In-memory transcript + attachment map for later memory
+                # replays; deduplicated by id (this branch runs again on
+                # every reconnect).
+                repopulate_chat_context(context.session, thread)
 
                 await context.emitter.resume_thread(thread)
+                resume_snapshot_emitted = True
 
-                await cleanup_resume_delete_steps(
+                failed_steps, failed_elements = await cleanup_resume_delete_steps(
                     context, thread.get("id"), doomed_steps, doomed_elements
                 )
+                # Whatever could not be deleted is hidden and retried on the
+                # next entry; resume_processed stays True from here on.
+                context.session.resume_delete_retry = (failed_steps, failed_elements)
+                context.session.resume_processed = True
+
+                # AFTER the resume_thread emit on purpose: the handler may
+                # block for a long time and send messages of its own — they
+                # must land on top of the already-rebuilt feed instead of
+                # being wiped by a stale snapshot emitted afterwards.
+                await config.code.on_chat_resume(thread)
                 return
             else:
                 await context.emitter.send_resume_thread_error("Thread not found.")
@@ -563,7 +762,11 @@ async def connection_successful(sid):
             task = asyncio.create_task(config.code.on_chat_start())
             context.session.current_task = task
     finally:
-        await restore_pending_ask(context, client_has_ui_state)
+        await restore_pending_ask(
+            context,
+            client_has_ui_state,
+            skip_transcript_replay=resume_snapshot_emitted,
+        )
 
 
 @sio.on("clear_session")  # pyright: ignore [reportOptionalCall]
@@ -841,7 +1044,9 @@ async def audio_end(sid):
 
         if not session.has_first_interaction:
             session.has_first_interaction = True
-            asyncio.create_task(context.emitter.init_thread("audio"))
+            create_persist_task(
+                context.emitter.init_thread("audio"), thread_id=session.thread_id
+            )
 
         config: ChainlitConfig = session.get_config()  # type: ignore
 

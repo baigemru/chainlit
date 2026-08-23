@@ -1353,6 +1353,8 @@ class TestTranscriptReplay:
         context = self._context(session)
         message = Mock()
         message.to_dict = Mock(return_value={"id": "m1", "output": "paid result"})
+        message.elements = []
+        message._active_wait_payload = None
 
         with patch("chainlit.socket.chat_context") as mock_chat_context:
             mock_chat_context.get.return_value = [message]
@@ -1372,18 +1374,383 @@ class TestTranscriptReplay:
         assert call_names.index("send_step") < ask_emit_index
 
     @pytest.mark.asyncio
-    async def test_transcript_not_replayed_on_transport_reconnect(
+    async def test_transcript_replayed_on_transport_reconnect_of_restored_session(
         self, mock_session_factory
     ):
+        """Messages emitted into a dead socket are dropped by the server:
+        even a plain transport reconnect (client kept its UI state) must
+        converge — the client upserts new_message by id, so the re-emission
+        is idempotent."""
         pending = TestAskSurvivesReconnect._pending_ask()
-        session = mock_session_factory(pending_ask=pending)
+        session = mock_session_factory(pending_ask=pending, restored=True)
+        context = self._context(session)
+        message = Mock()
+        message.to_dict = Mock(return_value={"id": "m1", "output": "late finale"})
+        message.elements = []
+        message._active_wait_payload = None
+
+        with patch("chainlit.socket.chat_context") as mock_chat_context:
+            mock_chat_context.get.return_value = [message]
+            await restore_pending_ask(context, client_has_ui_state=True)
+
+        context.emitter.send_step.assert_awaited_once_with(
+            {"id": "m1", "output": "late finale"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_replay_emits_stored_element_dicts(self, mock_session_factory):
+        """A Message rebuilt from a thread payload carries no element
+        objects — the replay reads the attachments from the session's
+        element-dict map recorded at repopulation time."""
+        session = mock_session_factory(
+            restored=True,
+            transcript_element_dicts={"m1": [{"id": "el-1", "forId": "m1"}]},
+        )
+        context = self._context(session)
+        message = Mock()
+        message.id = "m1"
+        message.to_dict = Mock(return_value={"id": "m1", "output": "with attachment"})
+        message.elements = []
+        message._active_wait_payload = None
+
+        with patch("chainlit.socket.chat_context") as mock_chat_context:
+            mock_chat_context.get.return_value = [message]
+            await restore_pending_ask(context, client_has_ui_state=False)
+
+        context.emitter.send_element.assert_awaited_once_with(
+            {"id": "el-1", "forId": "m1"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_replay_dedups_live_and_stored_elements(self, mock_session_factory):
+        """A live element object wins over the stored dict of the same id;
+        stored-only attachments are still emitted."""
+        session = mock_session_factory(
+            restored=True,
+            transcript_element_dicts={
+                "m1": [
+                    {"id": "el-1", "forId": "m1", "name": "stale"},
+                    {"id": "el-2", "forId": "m1"},
+                ]
+            },
+        )
+        context = self._context(session)
+        live_element = Mock()
+        live_element.to_dict = Mock(
+            return_value={"id": "el-1", "forId": "m1", "name": "live"}
+        )
+        message = Mock()
+        message.id = "m1"
+        message.to_dict = Mock(return_value={"id": "m1", "output": "x"})
+        message.elements = [live_element]
+        message._active_wait_payload = None
+
+        with patch("chainlit.socket.chat_context") as mock_chat_context:
+            mock_chat_context.get.return_value = [message]
+            await restore_pending_ask(context, client_has_ui_state=False)
+
+        emitted = [
+            call.args[0] for call in context.emitter.send_element.await_args_list
+        ]
+        assert emitted == [
+            {"id": "el-1", "forId": "m1", "name": "live"},
+            {"id": "el-2", "forId": "m1"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_replay_carries_active_wait_payload(self, mock_session_factory):
+        """The client force-overwrites the transient `wait` field on every
+        new_message — a replayed message still in wait mode must carry the
+        payload of its original emit or the shimmer dies on reconnect."""
+        session = mock_session_factory(restored=True)
+        context = self._context(session)
+        wait_payload = {"texts": ["thinking"], "intervalMs": 5000, "loop": False}
+        message = Mock()
+        message.id = "m1"
+        message.to_dict = Mock(return_value={"id": "m1", "output": ""})
+        message.elements = []
+        message._active_wait_payload = wait_payload
+
+        with patch("chainlit.socket.chat_context") as mock_chat_context:
+            mock_chat_context.get.return_value = [message]
+            await restore_pending_ask(context, client_has_ui_state=False)
+
+        context.emitter.send_step.assert_awaited_once_with(
+            {"id": "m1", "output": "", "wait": wait_payload}
+        )
+
+    @pytest.mark.asyncio
+    async def test_transcript_not_replayed_for_unrestored_session(
+        self, mock_session_factory
+    ):
+        """A fresh session never lost anything — nothing to resync."""
+        pending = TestAskSurvivesReconnect._pending_ask()
+        session = mock_session_factory(pending_ask=pending, restored=False)
         context = self._context(session)
 
         with patch("chainlit.socket.chat_context") as mock_chat_context:
             mock_chat_context.get.return_value = [Mock()]
+            await restore_pending_ask(context, client_has_ui_state=False)
+
+        context.emitter.send_step.assert_not_awaited()
+
+
+class TestTranscriptResyncFallback:
+    """When the in-memory transcript is empty, the reconnect resync reads
+    the thread back from the data layer (after the persist barrier)."""
+
+    THREAD = {
+        "id": "test_thread_id",
+        "steps": [
+            {"id": "s1", "type": "user_message", "output": "hi"},
+            {"id": "s2", "type": "assistant_message", "output": "done"},
+            {"id": "r1", "type": "run", "output": ""},
+        ],
+        "elements": [
+            {"id": "el-1", "forId": "s2"},
+            {"id": "el-run", "forId": "r1"},
+        ],
+    }
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    def _session(self, mock_session_factory):
+        return mock_session_factory(
+            restored=True, has_first_interaction=True, thread_id="test_thread_id"
+        )
+
+    @pytest.mark.asyncio
+    async def test_fallback_reads_data_layer_when_transcript_empty(
+        self, mock_session_factory
+    ):
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        order = []
+
+        data_layer = AsyncMock()
+
+        async def get_thread(thread_id):
+            order.append("get_thread")
+            return self.THREAD
+
+        data_layer.get_thread.side_effect = get_thread
+
+        async def record_wait(thread_id, *args, **kwargs):
+            order.append("wait_for_persist")
+
+        with (
+            patch("chainlit.socket.chat_context") as mock_chat_context,
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch(
+                "chainlit.socket.wait_for_persist", AsyncMock(side_effect=record_wait)
+            ),
+            patch("chainlit.socket.Message") as mock_message,
+        ):
+            mock_chat_context.get.return_value = []
+            mock_message.from_dict.side_effect = lambda d: Mock(id=d["id"])
+            await restore_pending_ask(context, client_has_ui_state=True)
+
+        # The barrier runs BEFORE the read, so fresh steps still sitting in
+        # background persist tasks make it into the payload.
+        assert order == ["wait_for_persist", "get_thread"]
+        data_layer.get_thread.assert_awaited_once_with(thread_id="test_thread_id")
+
+        # Only message-type steps are replayed, with their elements.
+        replayed = [
+            call.args[0]["id"] for call in context.emitter.send_step.await_args_list
+        ]
+        assert replayed == ["s1", "s2"]
+        context.emitter.send_element.assert_awaited_once_with(
+            {"id": "el-1", "forId": "s2"}
+        )
+
+        # The in-memory transcript is repopulated so the NEXT reconnect
+        # replays from memory.
+        added = [call.args[0].id for call in mock_chat_context.add.call_args_list]
+        assert added == ["s1", "s2"]
+
+    @pytest.mark.asyncio
+    async def test_fallback_skipped_without_data_layer(self, mock_session_factory):
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+
+        with (
+            patch("chainlit.socket.chat_context") as mock_chat_context,
+            patch("chainlit.socket.get_data_layer", return_value=None),
+            patch("chainlit.socket.wait_for_persist", AsyncMock()) as mock_wait,
+        ):
+            mock_chat_context.get.return_value = []
             await restore_pending_ask(context, client_has_ui_state=True)
 
         context.emitter.send_step.assert_not_awaited()
+        mock_wait.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fallback_skipped_when_thread_missing(self, mock_session_factory):
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+        data_layer.get_thread.return_value = None
+
+        with (
+            patch("chainlit.socket.chat_context") as mock_chat_context,
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch("chainlit.socket.wait_for_persist", AsyncMock()),
+        ):
+            mock_chat_context.get.return_value = []
+            await restore_pending_ask(context, client_has_ui_state=True)
+
+        context.emitter.send_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fallback_skipped_before_first_interaction(
+        self, mock_session_factory
+    ):
+        session = mock_session_factory(restored=True, has_first_interaction=False)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with (
+            patch("chainlit.socket.chat_context") as mock_chat_context,
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+        ):
+            mock_chat_context.get.return_value = []
+            await restore_pending_ask(context, client_has_ui_state=True)
+
+        data_layer.get_thread.assert_not_awaited()
+        context.emitter.send_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fallback_does_not_delete_flagged_steps(self, mock_session_factory):
+        """A live restored session's resume='delete' steps are legitimately
+        alive — the resync path re-emits them and never deletes."""
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+        data_layer.get_thread.return_value = {
+            "id": "test_thread_id",
+            "steps": [
+                {
+                    "id": "flagged-1",
+                    "type": "assistant_message",
+                    "output": "offer",
+                    "metadata": {"resume_policy": "delete"},
+                }
+            ],
+            "elements": [],
+        }
+
+        with (
+            patch("chainlit.socket.chat_context") as mock_chat_context,
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch("chainlit.socket.wait_for_persist", AsyncMock()),
+            patch("chainlit.socket.Message") as mock_message,
+        ):
+            mock_chat_context.get.return_value = []
+            mock_message.from_dict.side_effect = lambda d: Mock(id=d["id"])
+            await restore_pending_ask(context, client_has_ui_state=True)
+
+        context.emitter.send_step.assert_awaited_once()
+        assert context.emitter.send_step.await_args.args[0]["id"] == "flagged-1"
+        data_layer.delete_step.assert_not_awaited()
+        data_layer.delete_element.assert_not_awaited()
+        context.emitter.delete_step.assert_not_awaited()
+
+
+class _FakeChatContext:
+    """Real list semantics for tests running connection_successful whole."""
+
+    def __init__(self, messages=None):
+        self.messages = list(messages or [])
+
+    def get(self):
+        return list(self.messages)
+
+    def add(self, message):
+        self.messages.append(message)
+
+
+def _fake_transcript_message(step_id):
+    return Mock(
+        id=step_id,
+        elements=[],
+        _active_wait_payload=None,
+        to_dict=Mock(return_value={"id": step_id}),
+    )
+
+
+class TestResumeSnapshotSkipsReplay:
+    """A fresh resume_thread snapshot already rebuilt the client's feed —
+    re-emitting the transcript on top of it is redundant wire volume."""
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    @pytest.mark.asyncio
+    async def test_no_transcript_replay_after_resume_snapshot(
+        self, mock_session_factory
+    ):
+        session = mock_session_factory(
+            thread_id="thread_123", restored=True, resume_processed=True
+        )
+        session.has_first_interaction = True
+        session.chat_started = True
+        session.current_task = None
+        session.thread_id_to_resume = "thread_123"
+        context = self._context(session)
+        thread = {"id": "thread_123", "steps": [], "elements": []}
+        fake_chat_context = _FakeChatContext([_fake_transcript_message("m1")])
+
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = AsyncMock()
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+            patch("chainlit.socket.resume_thread", AsyncMock(return_value=thread)),
+            patch("chainlit.socket.get_data_layer", return_value=AsyncMock()),
+            patch("chainlit.socket.chat_context", fake_chat_context),
+            patch("chainlit.socket.Message"),
+        ):
+            await connection_successful("sid-1")
+
+        context.emitter.resume_thread.assert_awaited_once()
+        context.emitter.send_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_plain_reconnect_without_resume_branch_still_replays(
+        self, mock_session_factory
+    ):
+        """A restored session without a thread to resume (no snapshot in
+        this cycle) still gets the transcript resync."""
+        session = mock_session_factory(restored=True)
+        session.has_first_interaction = True
+        session.chat_started = True
+        session.current_task = None
+        session.thread_id_to_resume = None
+        context = self._context(session)
+        fake_chat_context = _FakeChatContext([_fake_transcript_message("m1")])
+
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+            patch("chainlit.socket.chat_context", fake_chat_context),
+        ):
+            await connection_successful("sid-1")
+
+        context.emitter.send_step.assert_awaited_once_with({"id": "m1"})
 
 
 class TestResumeDeleteFlag:
@@ -1586,30 +1953,251 @@ class TestResumeDeleteFlag:
         context.emitter.resume_thread.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_restored_session_skips_deletion(self, mock_session_factory):
-        """A restored (live) session re-entering the resume branch on F5
-        must not strip or delete flagged steps: a running task's live
-        resume="delete" message would be killed and later resurrected as an
-        orphan row by its own update()."""
+    async def test_second_entry_skips_deletion(self, mock_session_factory):
+        """Only the FIRST entry into the resume branch deletes. A re-entry
+        of the same session (F5, transport reconnect — thread_id_to_resume
+        is never cleared) must not strip or delete flagged steps: a running
+        task's live resume="delete" message would be killed and later
+        resurrected as an orphan row by its own update()."""
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        # First entry: the flagged step is stripped and deleted.
+        first_thread = self._thread(
+            steps=[self._plain_step("keep-1"), self._flagged_step("doomed-1")]
+        )
+        await self._run_resume(first_thread, session, context, data_layer)
+        data_layer.delete_step.assert_awaited_once_with("doomed-1")
+        assert session.resume_processed is True
+
+        # Second entry (now a restored, live session): a flagged live step
+        # stays in the payload and nothing is deleted.
+        data_layer.reset_mock()
+        context.emitter.reset_mock()
+        session.restored = True
+        session.has_first_interaction = True
         doomed = self._flagged_step("live-1")
         thread = self._thread(
             steps=[self._plain_step("keep-1"), doomed],
             elements=[{"id": "el-live", "forId": "live-1"}],
         )
-        session = self._session(mock_session_factory)
-        session.restored = True
-        session.has_first_interaction = True
-        context = self._context(session)
-        data_layer = AsyncMock()
 
         on_chat_resume = await self._run_resume(thread, session, context, data_layer)
 
         resumed = on_chat_resume.await_args.args[0]
         assert [s["id"] for s in resumed["steps"]] == ["keep-1", "live-1"]
         assert [e["id"] for e in resumed["elements"]] == ["el-live"]
+        emitted = context.emitter.resume_thread.await_args.args[0]
+        assert [s["id"] for s in emitted["steps"]] == ["keep-1", "live-1"]
         data_layer.delete_step.assert_not_awaited()
         data_layer.delete_element.assert_not_awaited()
         context.emitter.delete_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_first_entry_on_restored_transport_still_deletes(
+        self, mock_session_factory
+    ):
+        """A first entry that happens on an already-restored transport (the
+        connection blipped between connect and connection_successful) is
+        still a genuine resume of a dead session — it must filter and
+        delete."""
+        doomed = self._flagged_step("doomed-1")
+        thread = self._thread(steps=[self._plain_step("keep-1"), doomed])
+        session = self._session(mock_session_factory)
+        session.restored = True
+        session.has_first_interaction = True
+        session.resume_processed = False
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        on_chat_resume = await self._run_resume(thread, session, context, data_layer)
+
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["keep-1"]
+        data_layer.delete_step.assert_awaited_once_with("doomed-1")
+        assert session.resume_processed is True
+
+    @pytest.mark.asyncio
+    async def test_resume_thread_emitted_before_on_chat_resume(
+        self, mock_session_factory
+    ):
+        """The snapshot must reach the client BEFORE the handler runs: the
+        handler can block for minutes and send messages of its own — a
+        stale snapshot emitted afterwards would wipe them. The doomed-step
+        cleanup stays between the emit and the handler."""
+        doomed = self._flagged_step("doomed-1")
+        thread = self._thread(steps=[self._plain_step("keep-1"), doomed])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+        order = []
+
+        context.emitter.resume_thread = AsyncMock(
+            side_effect=lambda _thread: order.append("resume_thread")
+        )
+        context.emitter.delete_step = AsyncMock(
+            side_effect=lambda _step: order.append("delete_step")
+        )
+        on_chat_resume = AsyncMock(
+            side_effect=lambda _thread: order.append("on_chat_resume")
+        )
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config(on_chat_resume)),
+            patch("chainlit.socket.resume_thread", AsyncMock(return_value=thread)),
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch("chainlit.socket.chat_context"),
+            patch("chainlit.socket.Message"),
+        ):
+            await connection_successful("sid-1")
+
+        assert order == ["resume_thread", "delete_step", "on_chat_resume"]
+        # Nothing re-emits the snapshot after the handler: whatever the
+        # handler sent stays on screen.
+        context.emitter.resume_thread.assert_awaited_once()
+
+    def test_live_task_on_thread_protects_all_flagged_steps(self):
+        """A thread with a running task on ANY of its sessions is alive:
+        nothing is doomed — a second tab resuming the thread must not
+        delete the first tab's live flagged messages (the task's later
+        update() would resurrect the row and the feeds would diverge)."""
+        import chainlit.session as session_module
+        from chainlit.resume_policy import split_resume_delete
+
+        doomed = self._flagged_step("live-1")
+        thread = self._thread(steps=[self._plain_step("keep-1"), doomed])
+
+        holder = Mock(spec=WebsocketSession)
+        holder.thread_id = self.THREAD_ID
+        holder.pending_ask = None
+        live_task = Mock()
+        live_task.done.return_value = False
+        holder.current_task = live_task
+
+        with patch.dict(
+            session_module.ws_sessions_id, {"holder-session": holder}, clear=True
+        ):
+            new_thread, doomed_steps, doomed_elements = split_resume_delete(thread)
+
+        assert new_thread is thread
+        assert doomed_steps == []
+        assert doomed_elements == []
+
+    def test_done_task_does_not_protect_flagged_steps(self):
+        """A finished task means the thread is idle — flagged steps are
+        doomed as before."""
+        import chainlit.session as session_module
+        from chainlit.resume_policy import split_resume_delete
+
+        doomed = self._flagged_step("live-1")
+        thread = self._thread(steps=[self._plain_step("keep-1"), doomed])
+
+        holder = Mock(spec=WebsocketSession)
+        holder.thread_id = self.THREAD_ID
+        holder.pending_ask = None
+        finished_task = Mock()
+        finished_task.done.return_value = True
+        holder.current_task = finished_task
+
+        with patch.dict(
+            session_module.ws_sessions_id, {"holder-session": holder}, clear=True
+        ):
+            new_thread, doomed_steps, _doomed_elements = split_resume_delete(thread)
+
+        assert [s["id"] for s in new_thread["steps"]] == ["keep-1"]
+        assert [s["id"] for s in doomed_steps] == ["live-1"]
+
+    @pytest.mark.asyncio
+    async def test_failed_deletion_is_retried_on_next_entry(self, mock_session_factory):
+        """First entry: element deletion fails → the step is kept in the DB
+        and stored for retry. Second entry: the kept step is hidden from
+        the payload (plain id filter — no split re-run) and the deletion is
+        retried; fresh live flagged steps are untouched."""
+        doomed = self._flagged_step("doomed-1")
+        thread1 = self._thread(
+            steps=[self._plain_step("keep-1"), doomed],
+            elements=[{"id": "el-doomed", "forId": "doomed-1"}],
+        )
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+        data_layer.delete_element.side_effect = RuntimeError("storage down")
+
+        await self._run_resume(thread1, session, context, data_layer)
+
+        retry_steps, retry_elements = session.resume_delete_retry
+        assert [s["id"] for s in retry_steps] == ["doomed-1"]
+        assert [e["id"] for e in retry_elements] == ["el-doomed"]
+        assert session.resume_processed is True
+        data_layer.delete_step.assert_not_awaited()
+
+        # Second entry: deletion now succeeds.
+        data_layer = AsyncMock()
+        context.emitter.reset_mock()
+        session.restored = True
+        session.has_first_interaction = True
+        fresh_flagged = self._flagged_step("fresh-live")
+        thread2 = self._thread(
+            steps=[self._plain_step("keep-1"), doomed, fresh_flagged],
+            elements=[{"id": "el-doomed", "forId": "doomed-1"}],
+        )
+
+        await self._run_resume(thread2, session, context, data_layer)
+
+        emitted = context.emitter.resume_thread.await_args.args[0]
+        assert [s["id"] for s in emitted["steps"]] == ["keep-1", "fresh-live"]
+        assert emitted["elements"] == []
+        data_layer.delete_element.assert_awaited_once_with("el-doomed", self.THREAD_ID)
+        data_layer.delete_step.assert_awaited_once_with("doomed-1")
+        assert session.resume_delete_retry == ([], [])
+
+    @pytest.mark.asyncio
+    async def test_chat_context_repopulation_dedups_across_entries(
+        self, mock_session_factory
+    ):
+        """Two entries into the resume branch must not duplicate the
+        in-memory transcript (Message objects compare by identity)."""
+        thread = self._thread(steps=[self._plain_step("s1"), self._plain_step("s2")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        class FakeChatContext:
+            def __init__(self):
+                self.messages = []
+
+            def get(self):
+                return list(self.messages)
+
+            def add(self, message):
+                self.messages.append(message)
+
+        fake_chat_context = FakeChatContext()
+        on_chat_resume = AsyncMock()
+
+        def fake_from_dict(step):
+            return Mock(
+                id=step["id"],
+                elements=[],
+                to_dict=Mock(return_value=step),
+            )
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config(on_chat_resume)),
+            patch("chainlit.socket.resume_thread", AsyncMock(return_value=thread)),
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch("chainlit.socket.chat_context", fake_chat_context),
+            patch("chainlit.socket.Message") as mock_message,
+        ):
+            mock_message.from_dict.side_effect = fake_from_dict
+            await connection_successful("sid-1")
+            session.restored = True
+            await connection_successful("sid-1")
+
+        assert [m.id for m in fake_chat_context.messages] == ["s1", "s2"]
 
     @pytest.mark.asyncio
     async def test_data_layer_thread_dict_not_mutated(self, mock_session_factory):
@@ -1692,3 +2280,43 @@ class TestResumeDeleteFlag:
         data_layer.delete_step.assert_not_awaited()
         context.emitter.delete_step.assert_awaited_once()
         context.emitter.resume_thread.assert_awaited_once()
+
+
+class TestResumeThreadPersistBarrier:
+    """The resume snapshot read waits for in-flight background persists."""
+
+    @pytest.mark.asyncio
+    async def test_resume_thread_waits_for_pending_persist(self):
+        from chainlit.persist_barrier import _pending_persists, create_persist_task
+
+        thread_id = "barrier_thread"
+        mock_session = Mock(spec=WebsocketSession)
+        mock_session.user = Mock(identifier="user123")
+        mock_session.thread_id_to_resume = thread_id
+        mock_session.id = "session_123"
+
+        persisted = {"done": False}
+
+        async def slow_persist():
+            await asyncio.sleep(0.05)
+            persisted["done"] = True
+
+        observed = {}
+
+        async def get_thread(thread_id):
+            observed["persist_done"] = persisted["done"]
+            return None
+
+        data_layer = AsyncMock()
+        data_layer.get_thread.side_effect = get_thread
+
+        try:
+            create_persist_task(slow_persist(), thread_id=thread_id)
+            with patch("chainlit.socket.get_data_layer", return_value=data_layer):
+                await resume_thread(mock_session)
+        finally:
+            _pending_persists.pop(thread_id, None)
+
+        # get_thread ran only after the pending create_step-style task
+        # finished — the snapshot cannot outrun the write anymore.
+        assert observed["persist_done"] is True

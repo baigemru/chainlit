@@ -1039,6 +1039,34 @@ class TestMessageWait:
                 assert updated["output"] == "done"
 
     @pytest.mark.asyncio
+    async def test_active_wait_payload_tracked_for_replay(self):
+        """The last emitted wait payload is kept on the message (the
+        reconnect replay re-attaches it), and a plain update clears it."""
+        with mock_chainlit_context():
+            msg = Message(content="loading", wait=["a", "b"], wait_interval=8)
+
+            with _patched_runtime():
+                await msg.send()
+                assert msg._active_wait_payload == {
+                    "texts": ["a", "b"],
+                    "intervalMs": 8000,
+                    "loop": False,
+                }
+
+                msg.content = "done"
+                await msg.update()
+                assert msg._active_wait_payload is None
+
+    @pytest.mark.asyncio
+    async def test_active_wait_payload_none_for_plain_message(self):
+        with mock_chainlit_context():
+            msg = Message(content="plain")
+
+            with _patched_runtime():
+                await msg.send()
+                assert msg._active_wait_payload is None
+
+    @pytest.mark.asyncio
     async def test_wait_reassigned_before_update(self):
         """Test that reassigning wait restarts wait mode on update()."""
         with mock_chainlit_context() as ctx:

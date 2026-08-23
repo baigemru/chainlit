@@ -15,6 +15,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Tuple,
     Union,
 )
 
@@ -388,6 +389,23 @@ class WebsocketSession(BaseSession):
         # True when the current connection is the first one after a full
         # page load (the client lost its UI state); set on every connect.
         self.fresh_page_load = False
+        # True once a resume of this session has been fully processed
+        # (resume="delete" filtering and deletion done). Never reset: only
+        # the first entry into the resume branch — a genuine resume of a
+        # dead session — may delete flagged steps; re-entries of the same
+        # session (F5, transport reconnect) must not.
+        self.resume_processed = False
+        # Doomed steps whose data-layer deletion did not fully succeed on a
+        # resume entry, with their still-undeleted elements. Filtered out of
+        # the thread payload and retried on this session's next entry into
+        # the resume branch (re-entries never re-run split_resume_delete —
+        # that would doom fresh live flagged messages).
+        self.resume_delete_retry: Tuple[List[Dict], List[Dict]] = ([], [])
+        # Element dicts of the resumed/replayed thread, keyed by step id.
+        # Message objects rebuilt via Message.from_dict carry no elements,
+        # so the in-memory transcript replay reads attachments from here.
+        # Replaced wholesale on every repopulation from a thread payload.
+        self.transcript_element_dicts: Dict[str, List[Dict]] = {}
 
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}

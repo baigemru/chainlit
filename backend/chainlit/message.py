@@ -15,6 +15,7 @@ from chainlit.context import context, local_steps
 from chainlit.data import get_data_layer
 from chainlit.element import CustomElement, ElementBased
 from chainlit.logger import logger
+from chainlit.persist_barrier import create_persist_task
 from chainlit.resume_policy import (
     RESUME_POLICY_DELETE,
     RESUME_POLICY_KEEP,
@@ -55,6 +56,12 @@ class MessageBase(ABC):
     # Client-side waiting presentation mode (shimmer + text rotation).
     # Transient: emitted over the socket only, never persisted.
     wait: Union[bool, List[str]] = False
+    # The wait payload of the last send()/update() (None when the message
+    # left wait mode). `wait` itself is consumed on emit, but a reconnect
+    # replay must re-emit the same payload — the client force-overwrites
+    # the transient field on every new_message, so a replay without it
+    # would kill a still-running shimmer.
+    _active_wait_payload: Optional[WaitDict] = None
     wait_interval: float = 5.0
     wait_loop: bool = False
 
@@ -175,13 +182,16 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer:
             try:
-                asyncio.create_task(data_layer.update_step(step_dict))
+                create_persist_task(data_layer.update_step(step_dict))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
                 logger.error(f"Failed to persist message update: {e!s}")
 
         wait_payload = self._wait_payload()
+        # A plain update ends the wait mode; a wait update renews it — the
+        # reconnect replay mirrors whatever the last emit carried.
+        self._active_wait_payload = wait_payload
         if wait_payload is not None:
             # Transient field for the emitter only; the data layer above got
             # the original dict without it. Consumed on emit.
@@ -201,7 +211,7 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer:
             try:
-                asyncio.create_task(data_layer.delete_step(step_dict["id"]))
+                create_persist_task(data_layer.delete_step(step_dict["id"]))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -216,7 +226,7 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer and not self.persisted:
             try:
-                asyncio.create_task(data_layer.create_step(step_dict))
+                create_persist_task(data_layer.create_step(step_dict))
                 self.persisted = True
             except Exception as e:
                 if self.fail_on_persist_error:
@@ -241,6 +251,8 @@ class MessageBase(ABC):
         chat_context.add(self)
 
         wait_payload = self._wait_payload()
+        # Remembered for the reconnect replay (see _active_wait_payload).
+        self._active_wait_payload = wait_payload
         if wait_payload is not None:
             # Transient field for the emitter only; the data layer (via
             # _create) got the original dict without it. Consumed on emit.

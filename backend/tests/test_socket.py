@@ -1384,3 +1384,311 @@ class TestTranscriptReplay:
             await restore_pending_ask(context, client_has_ui_state=True)
 
         context.emitter.send_step.assert_not_awaited()
+
+
+class TestResumeDeleteFlag:
+    """Steps flagged resume="delete" are stripped and deleted on the resume
+    of a dead session, while a live pending ask protects its step."""
+
+    THREAD_ID = "thread_123"
+
+    def _thread(self, steps=None, elements=None):
+        return {
+            "id": self.THREAD_ID,
+            "userIdentifier": "test_user_identifier",
+            "metadata": {},
+            "steps": steps if steps is not None else [],
+            "elements": elements if elements is not None else [],
+        }
+
+    def _flagged_step(self, step_id, metadata=None):
+        return {
+            "id": step_id,
+            "type": "assistant_message",
+            "output": "flagged",
+            "metadata": (
+                metadata if metadata is not None else {"resume_policy": "delete"}
+            ),
+        }
+
+    def _plain_step(self, step_id):
+        return {
+            "id": step_id,
+            "type": "assistant_message",
+            "output": "plain",
+            "metadata": {},
+        }
+
+    def _session(self, mock_session_factory):
+        session = mock_session_factory(
+            has_first_interaction=False, thread_id=self.THREAD_ID
+        )
+        session.restored = False
+        session.chat_started = False
+        session.current_task = None
+        session.thread_id_to_resume = self.THREAD_ID
+        return session
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    def _config(self, on_chat_resume):
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = on_chat_resume
+        return mock_config
+
+    async def _run_resume(self, thread, session, context, data_layer):
+        on_chat_resume = AsyncMock()
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config(on_chat_resume)),
+            patch("chainlit.socket.resume_thread", AsyncMock(return_value=thread)),
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch("chainlit.socket.chat_context"),
+            patch("chainlit.socket.Message"),
+        ):
+            await connection_successful("sid-1")
+        return on_chat_resume
+
+    @pytest.mark.asyncio
+    async def test_flagged_step_deleted_on_resume(self, mock_session_factory):
+        """A flagged step is stripped from the payload, deleted from the
+        data layer with its elements, and delete_message is emitted."""
+        doomed = self._flagged_step("doomed-1")
+        kept = self._plain_step("keep-1")
+        thread = self._thread(
+            steps=[kept, doomed],
+            elements=[
+                {"id": "el-keep", "forId": "keep-1"},
+                {"id": "el-doomed", "forId": "doomed-1"},
+            ],
+        )
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        on_chat_resume = await self._run_resume(thread, session, context, data_layer)
+
+        # The app and the resume_thread emit both see the cleaned payload.
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["keep-1"]
+        assert [e["id"] for e in resumed["elements"]] == ["el-keep"]
+        emitted = context.emitter.resume_thread.await_args.args[0]
+        assert [s["id"] for s in emitted["steps"]] == ["keep-1"]
+        assert [e["id"] for e in emitted["elements"]] == ["el-keep"]
+
+        # Data layer cleanup: element first, then the step; only the doomed one.
+        data_layer.delete_element.assert_awaited_once_with("el-doomed", self.THREAD_ID)
+        data_layer.delete_step.assert_awaited_once_with("doomed-1")
+
+        # delete_message is emitted for the doomed step, after resume_thread.
+        context.emitter.delete_step.assert_awaited_once()
+        assert context.emitter.delete_step.await_args.args[0]["id"] == "doomed-1"
+        call_names = [name for name, _, _ in context.emitter.mock_calls]
+        assert call_names.index("resume_thread") < call_names.index("delete_step")
+
+    @pytest.mark.asyncio
+    async def test_unflagged_thread_untouched(self, mock_session_factory):
+        """A thread with no flagged steps triggers no deletion at all."""
+        thread = self._thread(
+            steps=[self._plain_step("keep-1"), self._plain_step("keep-2")],
+            elements=[{"id": "el-1", "forId": "keep-1"}],
+        )
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        on_chat_resume = await self._run_resume(thread, session, context, data_layer)
+
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["keep-1", "keep-2"]
+        assert [e["id"] for e in resumed["elements"]] == ["el-1"]
+        data_layer.delete_step.assert_not_awaited()
+        data_layer.delete_element.assert_not_awaited()
+        context.emitter.delete_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_live_pending_ask_protects_flagged_step(self, mock_session_factory):
+        """A flagged step held by a live pending ask of a session on this
+        thread is neither stripped nor deleted."""
+        import chainlit.session as session_module
+
+        doomed = self._flagged_step("doomed-1")
+        protected = self._flagged_step("ask-step")
+        thread = self._thread(
+            steps=[protected, doomed],
+            elements=[{"id": "el-ask", "forId": "ask-step"}],
+        )
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        holder = Mock(spec=WebsocketSession)
+        holder.thread_id = self.THREAD_ID
+        holder.pending_ask = PendingAsk(
+            step_dict={"id": "ask-step"},
+            spec=AskSpec(timeout=60, type="element", step_id="ask-step"),
+            future=asyncio.get_event_loop().create_future(),
+            deadline=time.monotonic() + 60,
+        )
+
+        with patch.dict(
+            session_module.ws_sessions_id, {"holder-session": holder}, clear=True
+        ):
+            on_chat_resume = await self._run_resume(
+                thread, session, context, data_layer
+            )
+
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["ask-step"]
+        assert [e["id"] for e in resumed["elements"]] == ["el-ask"]
+        data_layer.delete_step.assert_awaited_once_with("doomed-1")
+        assert context.emitter.delete_step.await_args.args[0]["id"] == "doomed-1"
+
+    @pytest.mark.asyncio
+    async def test_string_metadata_recognized(self, mock_session_factory):
+        """SQLite/SQLAlchemy returns metadata as a JSON string."""
+        doomed = self._flagged_step(
+            "doomed-1", metadata=json.dumps({"resume_policy": "delete"})
+        )
+        thread = self._thread(steps=[doomed, self._plain_step("keep-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        on_chat_resume = await self._run_resume(thread, session, context, data_layer)
+
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["keep-1"]
+        data_layer.delete_step.assert_awaited_once_with("doomed-1")
+
+    @pytest.mark.asyncio
+    async def test_delete_step_failure_warns_without_crash(self, mock_session_factory):
+        """An already-deleted step (double resume, tab race) must not crash
+        the resume — a warning is logged and the flow completes."""
+        doomed = self._flagged_step("doomed-1")
+        thread = self._thread(steps=[doomed])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+        data_layer.delete_step.side_effect = RuntimeError("already gone")
+
+        with patch("chainlit.socket.logger") as mock_logger:
+            await self._run_resume(thread, session, context, data_layer)
+
+        assert mock_logger.warning.called
+        # The client-side delete is still emitted despite the failure.
+        context.emitter.delete_step.assert_awaited_once()
+        context.emitter.resume_thread.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_restored_session_skips_deletion(self, mock_session_factory):
+        """A restored (live) session re-entering the resume branch on F5
+        must not strip or delete flagged steps: a running task's live
+        resume="delete" message would be killed and later resurrected as an
+        orphan row by its own update()."""
+        doomed = self._flagged_step("live-1")
+        thread = self._thread(
+            steps=[self._plain_step("keep-1"), doomed],
+            elements=[{"id": "el-live", "forId": "live-1"}],
+        )
+        session = self._session(mock_session_factory)
+        session.restored = True
+        session.has_first_interaction = True
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        on_chat_resume = await self._run_resume(thread, session, context, data_layer)
+
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["keep-1", "live-1"]
+        assert [e["id"] for e in resumed["elements"]] == ["el-live"]
+        data_layer.delete_step.assert_not_awaited()
+        data_layer.delete_element.assert_not_awaited()
+        context.emitter.delete_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_data_layer_thread_dict_not_mutated(self, mock_session_factory):
+        """The dict returned by the data layer may be a live reference to
+        its internal state — filtering must work on a copy."""
+        import copy
+
+        thread = self._thread(
+            steps=[self._plain_step("keep-1"), self._flagged_step("doomed-1")],
+            elements=[
+                {"id": "el-keep", "forId": "keep-1"},
+                {"id": "el-doomed", "forId": "doomed-1"},
+            ],
+        )
+        snapshot = copy.deepcopy(thread)
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        await self._run_resume(thread, session, context, data_layer)
+
+        assert thread == snapshot
+        # The filtering still happened — on the copy.
+        emitted = context.emitter.resume_thread.await_args.args[0]
+        assert [s["id"] for s in emitted["steps"]] == ["keep-1"]
+
+    @pytest.mark.asyncio
+    async def test_nested_steps_deleted_with_parent(self, mock_session_factory):
+        """Steps nested under a doomed step (transitively) are doomed too,
+        along with their elements — no dangling parentId rows."""
+        doomed = self._flagged_step("doomed-1")
+        child = dict(self._plain_step("child-1"), parentId="doomed-1")
+        grandchild = dict(self._plain_step("grand-1"), parentId="child-1")
+        kept = self._plain_step("keep-1")
+        thread = self._thread(
+            steps=[kept, doomed, child, grandchild],
+            elements=[
+                {"id": "el-child", "forId": "child-1"},
+                {"id": "el-keep", "forId": "keep-1"},
+            ],
+        )
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        await self._run_resume(thread, session, context, data_layer)
+
+        emitted = context.emitter.resume_thread.await_args.args[0]
+        assert [s["id"] for s in emitted["steps"]] == ["keep-1"]
+        assert [e["id"] for e in emitted["elements"]] == ["el-keep"]
+        deleted_steps = {
+            call.args[0] for call in data_layer.delete_step.await_args_list
+        }
+        assert deleted_steps == {"doomed-1", "child-1", "grand-1"}
+        data_layer.delete_element.assert_awaited_once_with("el-child", self.THREAD_ID)
+        deleted_msgs = {
+            call.args[0]["id"] for call in context.emitter.delete_step.await_args_list
+        }
+        assert deleted_msgs == {"doomed-1", "child-1", "grand-1"}
+
+    @pytest.mark.asyncio
+    async def test_element_failure_skips_step_delete(self, mock_session_factory):
+        """If an element deletion fails, the step must be kept (retryable
+        on the next resume) — deleting it would orphan the element forever.
+        The client-side delete_message is still emitted."""
+        doomed = self._flagged_step("doomed-1")
+        thread = self._thread(
+            steps=[doomed],
+            elements=[{"id": "el-doomed", "forId": "doomed-1"}],
+        )
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+        data_layer.delete_element.side_effect = RuntimeError("storage down")
+
+        with patch("chainlit.socket.logger") as mock_logger:
+            await self._run_resume(thread, session, context, data_layer)
+
+        assert mock_logger.warning.called
+        data_layer.delete_step.assert_not_awaited()
+        context.emitter.delete_step.assert_awaited_once()
+        context.emitter.resume_thread.assert_awaited_once()

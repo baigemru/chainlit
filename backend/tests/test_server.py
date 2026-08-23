@@ -1152,3 +1152,192 @@ def test_health_check(test_client: TestClient):
     response = test_client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_get_thread_filters_resume_delete_steps(
+    test_client: TestClient,
+):
+    """GET /project/thread/{id} hides resume="delete" steps and their
+    elements, and returns unflagged ones untouched (no deletion here)."""
+    from chainlit.server import app as _app, get_current_user as _get_current_user
+
+    author = PersistedUser(
+        id="u1",
+        createdAt=datetime.datetime.now().isoformat(),
+        identifier="author",
+    )
+    _app.dependency_overrides[_get_current_user] = lambda: author
+
+    from unittest.mock import AsyncMock
+
+    dl = AsyncMock()
+    dl.get_thread.return_value = {
+        "id": "t1",
+        "name": "Thread 1",
+        "userIdentifier": "author",
+        "metadata": {},
+        "steps": [
+            {"id": "keep-1", "type": "assistant_message", "metadata": {}},
+            {
+                "id": "doomed-1",
+                "type": "assistant_message",
+                "metadata": {"resume_policy": "delete"},
+            },
+        ],
+        "elements": [
+            {"id": "el-keep", "forId": "keep-1"},
+            {"id": "el-doomed", "forId": "doomed-1"},
+        ],
+    }
+    dl.get_thread_author.return_value = "author"
+
+    import chainlit.data as data_mod
+
+    data_mod._data_layer = dl
+    data_mod._data_layer_initialized = True
+
+    try:
+        r = test_client.get("/project/thread/t1")
+        assert r.status_code == 200
+        thread = r.json()
+        assert [s["id"] for s in thread["steps"]] == ["keep-1"]
+        assert [e["id"] for e in thread["elements"]] == ["el-keep"]
+        # Read path only filters — it must never delete.
+        dl.delete_step.assert_not_awaited()
+        dl.delete_element.assert_not_awaited()
+        # And never mutate the dict the data layer handed out.
+        assert [s["id"] for s in dl.get_thread.return_value["steps"]] == [
+            "keep-1",
+            "doomed-1",
+        ]
+        assert [e["id"] for e in dl.get_thread.return_value["elements"]] == [
+            "el-keep",
+            "el-doomed",
+        ]
+    finally:
+        del _app.dependency_overrides[_get_current_user]
+        data_mod._data_layer = None
+        data_mod._data_layer_initialized = False
+
+
+def test_get_shared_thread_filters_resume_delete_steps(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+):
+    """GET /project/share/{id} must not leak resume="delete" steps to
+    (anonymous) viewers."""
+    from unittest.mock import AsyncMock
+
+    dl = AsyncMock()
+    dl.get_thread.return_value = {
+        "id": "t1",
+        "name": "Thread 1",
+        "userIdentifier": "author",
+        "metadata": {"is_shared": True},
+        "steps": [
+            {"id": "keep-1", "type": "assistant_message", "metadata": {}},
+            {
+                "id": "doomed-1",
+                "type": "assistant_message",
+                "metadata": {"resume_policy": "delete"},
+            },
+        ],
+        "elements": [
+            {"id": "el-keep", "forId": "keep-1"},
+            {"id": "el-doomed", "forId": "doomed-1"},
+        ],
+    }
+
+    import chainlit.data as data_mod
+
+    data_mod._data_layer = dl
+    data_mod._data_layer_initialized = True
+
+    try:
+        r = test_client.get("/project/share/t1")
+        assert r.status_code == 200
+        thread = r.json()
+        assert [s["id"] for s in thread["steps"]] == ["keep-1"]
+        assert [e["id"] for e in thread["elements"]] == ["el-keep"]
+        dl.delete_step.assert_not_awaited()
+        dl.delete_element.assert_not_awaited()
+        # The data layer's dict is untouched.
+        assert [s["id"] for s in dl.get_thread.return_value["steps"]] == [
+            "keep-1",
+            "doomed-1",
+        ]
+    finally:
+        data_mod._data_layer = None
+        data_mod._data_layer_initialized = False
+
+
+def test_list_threads_filters_resume_delete_steps(
+    test_client: TestClient,
+):
+    """POST /project/threads hides resume="delete" steps in each listed
+    thread (SQLAlchemy returns full steps+elements per thread)."""
+    from chainlit.server import app as _app, get_current_user as _get_current_user
+
+    owner = PersistedUser(
+        id="u1",
+        createdAt=datetime.datetime.now().isoformat(),
+        identifier="owner",
+    )
+    _app.dependency_overrides[_get_current_user] = lambda: owner
+
+    from typing import Any, Dict
+    from unittest.mock import AsyncMock
+
+    listed: Dict[str, Any] = {
+        "pageInfo": {"hasNextPage": False, "startCursor": None, "endCursor": None},
+        "data": [
+            {
+                "id": "t1",
+                "steps": [
+                    {"id": "keep-1", "type": "assistant_message", "metadata": {}},
+                    {
+                        "id": "doomed-1",
+                        "type": "assistant_message",
+                        "metadata": {"resume_policy": "delete"},
+                    },
+                ],
+                "elements": [{"id": "el-doomed", "forId": "doomed-1"}],
+            },
+            {
+                "id": "t2",
+                "steps": [
+                    {"id": "keep-2", "type": "assistant_message", "metadata": {}}
+                ],
+                "elements": [],
+            },
+        ],
+    }
+
+    dl = AsyncMock()
+    dl.list_threads.return_value = Mock(to_dict=Mock(return_value=listed))
+
+    import chainlit.data as data_mod
+
+    data_mod._data_layer = dl
+    data_mod._data_layer_initialized = True
+
+    try:
+        r = test_client.post(
+            "/project/threads",
+            json={"pagination": {"first": 20}, "filter": {}},
+        )
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert [s["id"] for s in data[0]["steps"]] == ["keep-1"]
+        assert data[0]["elements"] == []
+        assert [s["id"] for s in data[1]["steps"]] == ["keep-2"]
+        dl.delete_step.assert_not_awaited()
+        # The data layer's dicts are untouched.
+        assert [s["id"] for s in listed["data"][0]["steps"]] == [
+            "keep-1",
+            "doomed-1",
+        ]
+    finally:
+        del _app.dependency_overrides[_get_current_user]
+        data_mod._data_layer = None
+        data_mod._data_layer_initialized = False

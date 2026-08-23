@@ -1220,6 +1220,62 @@ def test_get_thread_filters_resume_delete_steps(
         data_mod._data_layer_initialized = False
 
 
+def test_get_thread_waits_for_pending_persists(
+    test_client: TestClient,
+):
+    """GET /project/thread/{id} runs the persist barrier BEFORE reading the
+    thread — a post-reconnect read must not outrun in-flight background
+    create_step tasks, or the freshest steps vanish until the next reload."""
+    from unittest.mock import AsyncMock, patch
+
+    from chainlit.server import app as _app, get_current_user as _get_current_user
+
+    author = PersistedUser(
+        id="u1",
+        createdAt=datetime.datetime.now().isoformat(),
+        identifier="author",
+    )
+    _app.dependency_overrides[_get_current_user] = lambda: author
+
+    order = []
+
+    dl = AsyncMock()
+
+    async def get_thread(thread_id):
+        order.append("get_thread")
+        return {
+            "id": "t1",
+            "name": "Thread 1",
+            "userIdentifier": "author",
+            "metadata": {},
+            "steps": [],
+            "elements": [],
+        }
+
+    dl.get_thread.side_effect = get_thread
+    dl.get_thread_author.return_value = "author"
+
+    async def record_wait(thread_id, *args, **kwargs):
+        order.append(f"wait_for_persist:{thread_id}")
+
+    import chainlit.data as data_mod
+
+    data_mod._data_layer = dl
+    data_mod._data_layer_initialized = True
+
+    try:
+        with patch(
+            "chainlit.server.wait_for_persist", AsyncMock(side_effect=record_wait)
+        ):
+            r = test_client.get("/project/thread/t1")
+        assert r.status_code == 200
+        assert order == ["wait_for_persist:t1", "get_thread"]
+    finally:
+        del _app.dependency_overrides[_get_current_user]
+        data_mod._data_layer = None
+        data_mod._data_layer_initialized = False
+
+
 def test_get_shared_thread_filters_resume_delete_steps(
     test_client: TestClient,
     test_config: ChainlitConfig,

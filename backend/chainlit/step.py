@@ -16,6 +16,7 @@ from chainlit.context import CL_RUN_NAMES, context, local_steps
 from chainlit.data import get_data_layer
 from chainlit.element import Element
 from chainlit.logger import logger
+from chainlit.persist_barrier import create_persist_task
 from chainlit.types import FeedbackDict
 from chainlit.utils import utc_now
 
@@ -355,7 +356,7 @@ class Step:
 
         if data_layer:
             try:
-                asyncio.create_task(data_layer.update_step(step_dict.copy()))
+                create_persist_task(data_layer.update_step(step_dict.copy()))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -380,7 +381,7 @@ class Step:
 
         if data_layer:
             try:
-                asyncio.create_task(data_layer.delete_step(self.id))
+                create_persist_task(data_layer.delete_step(self.id))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -406,7 +407,7 @@ class Step:
 
         if data_layer:
             try:
-                asyncio.create_task(data_layer.create_step(step_dict.copy()))
+                create_persist_task(data_layer.create_step(step_dict.copy()))
                 self.persisted = True
             except Exception as e:
                 if self.fail_on_persist_error:
@@ -506,7 +507,7 @@ class Step:
                 self.parent_id = parent_step.id
         local_steps.set(previous_steps + [self])
 
-        asyncio.create_task(self.send())
+        create_persist_task(self.send())
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -521,4 +522,4 @@ class Step:
             current_steps.remove(self)
             local_steps.set(current_steps)
 
-        asyncio.create_task(self.update())
+        create_persist_task(self.update())

@@ -18,11 +18,11 @@ from typing import (
 import filetype
 from pydantic import Field
 from pydantic.dataclasses import dataclass
-from syncer import asyncio
 
 from chainlit.context import context
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
+from chainlit.persist_barrier import create_persist_task
 
 mime_types = {
     "text": "text/plain",
@@ -209,7 +209,9 @@ class Element:
 
         if (data_layer := get_data_layer()) and persist:
             try:
-                asyncio.create_task(data_layer.create_element(self))
+                create_persist_task(
+                    data_layer.create_element(self), thread_id=self.thread_id
+                )
             except Exception as e:
                 logger.error(f"Failed to create element: {e!s}")
         if not self.url and (not self.chainlit_key or self.updatable):

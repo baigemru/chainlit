@@ -95,8 +95,11 @@ def init_http_context(
 
     if data_layer := get_data_layer():
         if user_id := getattr(user, "id", None):
-            asyncio.create_task(
-                data_layer.update_thread(thread_id=thread_id, user_id=user_id)
+            from chainlit.persist_barrier import create_persist_task
+
+            create_persist_task(
+                data_layer.update_thread(thread_id=thread_id, user_id=user_id),
+                thread_id=thread_id,
             )
 
     return context

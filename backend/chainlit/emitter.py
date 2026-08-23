@@ -13,6 +13,7 @@ from chainlit.element import Element, ElementDict, File
 from chainlit.logger import logger
 from chainlit.message import Message
 from chainlit.mode import Mode
+from chainlit.persist_barrier import create_persist_task
 from chainlit.session import BaseSession, PendingAsk, WebsocketSession
 from chainlit.step import StepDict
 from chainlit.types import (
@@ -309,7 +310,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
                     await data_layer.update_thread(**kwargs)
             except Exception as e:
                 logger.error(f"Error updating thread: {e}")
-            asyncio.create_task(self.session.flush_method_queue())
+            create_persist_task(
+                self.session.flush_method_queue(),
+                thread_id=self.session.thread_id,
+            )
 
     async def init_thread(self, interaction: str):
         await self.flush_thread_queues(interaction)
@@ -332,11 +336,19 @@ class ChainlitEmitter(BaseChainlitEmitter):
         message.created_at = utc_now()
         chat_context.add(message)
 
-        asyncio.create_task(message._create())
+        # Tracked as persistence work: the inner data-layer task only
+        # registers once this wrapper runs — tracking the wrapper itself
+        # closes the window where wait_for_persist would see nothing pending.
+        create_persist_task(message._create(), thread_id=self.session.thread_id)
 
         if not self.session.has_first_interaction:
             self.session.has_first_interaction = True
-            asyncio.create_task(self.init_thread(message.content))
+            # init_thread awaits update_thread (real I/O) BEFORE scheduling
+            # the tracked queue flush; tracking it closes that window too.
+            create_persist_task(
+                self.init_thread(message.content),
+                thread_id=self.session.thread_id,
+            )
 
         if file_refs:
             files = [
@@ -366,7 +378,9 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 for element in message.elements:
                     await element.send(for_id=message.id)
 
-            asyncio.create_task(send_elements())
+            # element.send() persists each element; track the wrapper so
+            # thread reads wait for the attachments too.
+            create_persist_task(send_elements(), thread_id=self.session.thread_id)
 
         return message
 

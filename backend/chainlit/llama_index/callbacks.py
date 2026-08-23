@@ -84,6 +84,10 @@ class LlamaIndexCallbackHandler(TokenCountingHandler):
         self.steps[event_id] = step
         step.start = utc_now()
         step.input = step_input or {}
+        # Deliberately NOT create_persist_task: llama_index callbacks may
+        # fire from a thread without a running event loop, and the tracked
+        # helper requires one in the current thread. These persists stay
+        # outside the wait_for_persist barrier.
         context_var.get().loop.create_task(step.send())
         return event_id
 

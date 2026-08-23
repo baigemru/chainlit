@@ -1,9 +1,9 @@
-import asyncio
 from typing import Union
 
 from literalai import ChatGeneration, CompletionGeneration
 
 from chainlit.context import get_context
+from chainlit.persist_barrier import create_persist_task
 from chainlit.step import Step
 from chainlit.utils import timestamp_utc
 
@@ -45,6 +45,6 @@ def instrument_mistralai():
             step.input = generation.prompt  # type: ignore
             step.output = generation.completion  # type: ignore
 
-        asyncio.create_task(step.send())
+        create_persist_task(step.send())
 
     instrument_mistralai(None, on_new_generation)

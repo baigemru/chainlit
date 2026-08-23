@@ -1,9 +1,9 @@
-import asyncio
 from typing import Union
 
 from literalai import ChatGeneration, CompletionGeneration
 
 from chainlit.context import local_steps
+from chainlit.persist_barrier import create_persist_task
 from chainlit.step import Step
 from chainlit.utils import check_module_version, timestamp_utc
 
@@ -48,6 +48,6 @@ def instrument_openai():
             step.input = generation.prompt  # type: ignore
             step.output = generation.completion  # type: ignore
 
-        asyncio.create_task(step.send())
+        create_persist_task(step.send())
 
     instrument_openai(None, on_new_generation)

@@ -59,6 +59,7 @@ from chainlit.data.acl import is_thread_author
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
 from chainlit.oauth_providers import get_direct_grant_provider, get_oauth_provider
+from chainlit.persist_barrier import create_persist_task, wait_for_persist
 from chainlit.resume_policy import split_resume_delete
 from chainlit.secret import random_secret
 from chainlit.types import (
@@ -1104,6 +1105,11 @@ async def get_thread(
 
     await is_thread_author(current_user.identifier, thread_id)
 
+    # Step persistence is fire-and-forget; the client's post-reconnect
+    # thread read must not outrun the in-flight background writes, or the
+    # freshest steps vanish from the feed until the next reload.
+    await wait_for_persist(thread_id)
+
     res = await data_layer.get_thread(thread_id)
 
     # Steps flagged resume="delete" are hidden from the read payload (no
@@ -1417,7 +1423,10 @@ async def call_action(
     if callback:
         if not context.session.has_first_interaction:
             context.session.has_first_interaction = True
-            asyncio.create_task(context.emitter.init_thread(action.name))
+            create_persist_task(
+                context.emitter.init_thread(action.name),
+                thread_id=context.session.thread_id,
+            )
 
         response = await callback(action)
     else:

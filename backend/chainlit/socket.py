@@ -20,6 +20,7 @@ from chainlit.data import get_data_layer
 from chainlit.emitter import _make_legacy_ask_ack
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
+from chainlit.resume_policy import split_resume_delete
 from chainlit.server import sio
 from chainlit.session import ClientType, WebsocketSession
 from chainlit.types import (
@@ -348,6 +349,69 @@ async def claim_transit_message(sid, payload):
     transit.reassign(session.id, next_id)
 
 
+async def cleanup_resume_delete_steps(
+    context, thread_id: str, doomed_steps: list, doomed_elements: list
+):
+    """Delete the doomed steps from the data layer and from the client.
+
+    Must run after ``has_first_interaction`` is set (``delete_step`` /
+    ``delete_element`` are wrapped in ``queue_until_user_message`` and would
+    hang in the queue otherwise) and after the ``resume_thread`` emit (the
+    client rebuilds the whole feed on ``resume_thread``, so an earlier
+    ``delete_message`` would be lost; the client already drew the history
+    from REST, which makes the emit a mandatory safety net). Every
+    operation is individually guarded: a double resume, a race between two
+    tabs or an already-deleted step must not crash the resume.
+    """
+    if not doomed_steps:
+        return
+
+    data_layer = get_data_layer()
+
+    elements_by_step: Dict[Any, list] = {}
+    for element in doomed_elements:
+        elements_by_step.setdefault(element.get("forId"), []).append(element)
+
+    for step in doomed_steps:
+        step_id = step.get("id")
+        if data_layer:
+            # Elements first and explicitly: not every data layer cascades
+            # element deletion from delete_step (DynamoDB does not); where
+            # it does, the second delete is idempotent. If any element
+            # deletion fails, the step is kept — once the step is gone its
+            # elements would be orphaned forever (their forId never enters
+            # the doomed set again); keeping it leaves the state retryable,
+            # the next resume finishes the job.
+            elements_deleted = True
+            for element in elements_by_step.get(step_id, []):
+                try:
+                    await data_layer.delete_element(element["id"], thread_id)
+                except Exception as e:
+                    elements_deleted = False
+                    logger.warning(
+                        f"resume=delete: failed to delete element "
+                        f"{element.get('id')} of step {step_id}: {e}"
+                    )
+            if elements_deleted:
+                try:
+                    await data_layer.delete_step(step_id)
+                except Exception as e:
+                    logger.warning(
+                        f"resume=delete: failed to delete step {step_id}: {e}"
+                    )
+            else:
+                logger.warning(
+                    f"resume=delete: keeping step {step_id} until its "
+                    f"elements can be deleted; will retry on the next resume"
+                )
+        try:
+            await context.emitter.delete_step(step)
+        except Exception as e:
+            logger.warning(
+                f"resume=delete: failed to emit delete_message for step {step_id}: {e}"
+            )
+
+
 async def restore_pending_ask(context, client_has_ui_state: bool):
     """Rebuild a live pending ask in the UI, or clear the ask state.
 
@@ -459,6 +523,18 @@ async def connection_successful(sid):
                         "otherwise be delivered late into an unrelated chat."
                     )
 
+                # Filtered BEFORE on_chat_resume: the app and the client
+                # both get a payload already free of resume="delete" steps.
+                # The actual deletion happens after resume_thread below.
+                # Only a true resume of a dead session qualifies — a
+                # restored session re-enters this branch on F5 (its
+                # thread_id_to_resume is never cleared), and deleting then
+                # would kill live flagged messages of a running task.
+                doomed_steps: list = []
+                doomed_elements: list = []
+                if not context.session.restored:
+                    thread, doomed_steps, doomed_elements = split_resume_delete(thread)
+
                 context.session.has_first_interaction = True
                 await context.emitter.emit(
                     "first_interaction",
@@ -471,6 +547,10 @@ async def connection_successful(sid):
                         chat_context.add(Message.from_dict(step))
 
                 await context.emitter.resume_thread(thread)
+
+                await cleanup_resume_delete_steps(
+                    context, thread.get("id"), doomed_steps, doomed_elements
+                )
                 return
             else:
                 await context.emitter.send_resume_thread_error("Thread not found.")

@@ -59,6 +59,7 @@ from chainlit.data.acl import is_thread_author
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
 from chainlit.oauth_providers import get_direct_grant_provider, get_oauth_provider
+from chainlit.resume_policy import split_resume_delete
 from chainlit.secret import random_secret
 from chainlit.types import (
     AskFileSpec,
@@ -1072,7 +1073,18 @@ async def get_user_threads(
         payload.filter.userId = current_user.id
 
     res = await data_layer.list_threads(payload.pagination, payload.filter)
-    return JSONResponse(content=res.to_dict())
+    res_dict = res.to_dict()
+    # Some data layers (SQLAlchemy) return full steps+elements per thread:
+    # hide resume="delete" steps here too. Read path — filter only, no
+    # deletion, and never mutate what the data layer handed out.
+    res_dict = {
+        **res_dict,
+        "data": [
+            split_resume_delete(thread)[0] if isinstance(thread, dict) else thread
+            for thread in res_dict.get("data") or []
+        ],
+    }
+    return JSONResponse(content=res_dict)
 
 
 @router.get("/project/thread/{thread_id}")
@@ -1093,6 +1105,15 @@ async def get_thread(
     await is_thread_author(current_user.identifier, thread_id)
 
     res = await data_layer.get_thread(thread_id)
+
+    # Steps flagged resume="delete" are hidden from the read payload (no
+    # deletion here — this endpoint also serves the F5 of a live session,
+    # whose live ask form is re-emitted by restore_pending_ask over the
+    # socket). Steps held by a live pending ask stay visible. The helper
+    # returns a filtered copy, never mutating the data layer's dict.
+    if res and isinstance(res, dict):
+        res = split_resume_delete(res)[0]
+
     return JSONResponse(content=res)
 
 
@@ -1119,6 +1140,12 @@ async def get_shared_thread(
 
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Steps flagged resume="delete" must not leak to (anonymous) viewers.
+    # Filter only, no deletion; the helper returns a filtered copy.
+    if isinstance(thread, dict):
+        thread = split_resume_delete(thread)[0]
+
     # Extract and normalize metadata (may be dict, strified JSON, or None)
     metadata = (thread.get("metadata") if isinstance(thread, dict) else {}) or {}
     if isinstance(metadata, str):

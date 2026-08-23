@@ -4,7 +4,7 @@ import math
 import time
 import uuid
 from abc import ABC
-from typing import Dict, List, Optional, Union, cast
+from typing import Dict, List, Literal, Optional, Union, cast
 
 from literalai.observability.step import MessageStepType
 
@@ -15,6 +15,11 @@ from chainlit.context import context, local_steps
 from chainlit.data import get_data_layer
 from chainlit.element import CustomElement, ElementBased
 from chainlit.logger import logger
+from chainlit.resume_policy import (
+    RESUME_POLICY_DELETE,
+    RESUME_POLICY_KEEP,
+    RESUME_POLICY_KEY,
+)
 from chainlit.step import StepDict, WaitDict
 from chainlit.types import (
     AskActionResponse,
@@ -63,6 +68,27 @@ class MessageBase(ABC):
 
         if not getattr(self, "id", None):
             self.id = str(uuid.uuid4())
+
+    def _apply_resume_policy(self, resume: str) -> None:
+        """Record the resume policy in the step metadata.
+
+        ``"keep"`` (the default) is a strict no-op: the metadata is left
+        untouched. ``"delete"`` marks the step as not surviving a thread
+        resume of a dead session — see ``chainlit.resume_policy``. Written
+        into ``self.metadata`` at construction time so every persist path
+        (``_create``, ``update``, favorite toggles) carries the flag.
+        """
+        if resume == RESUME_POLICY_KEEP:
+            return
+        if resume != RESUME_POLICY_DELETE:
+            raise ValueError(
+                f'resume must be "{RESUME_POLICY_KEEP}" or '
+                f'"{RESUME_POLICY_DELETE}", got {resume!r}'
+            )
+        self.metadata = {
+            **(self.metadata or {}),
+            RESUME_POLICY_KEY: RESUME_POLICY_DELETE,
+        }
 
     @classmethod
     def from_dict(self, _dict: StepDict):
@@ -263,6 +289,7 @@ class Message(MessageBase):
         wait (Union[bool, List[str]], optional): Client-side waiting presentation mode. False (default) — regular message. True — shimmer over the content, no text rotation. List of strings — shimmer plus client-side rotation of these texts. Transient: not persisted, consumed on the next send()/update().
         wait_interval (float, optional): Seconds between text rotations (minimum 2). Defaults to 5.
         wait_loop (bool, optional): Whether the rotation loops back to the first text after the last one (True) or holds the last text (False, default).
+        resume (Literal["keep", "delete"], optional): Whether the message survives a thread resume of a dead session. "keep" (default) — regular behavior. "delete" — on resume the message is hidden and deleted from the data layer together with its elements.
     """
 
     def __init__(
@@ -283,6 +310,7 @@ class Message(MessageBase):
         wait: Union[bool, List[str]] = False,
         wait_interval: float = 5.0,
         wait_loop: bool = False,
+        resume: Literal["keep", "delete"] = "keep",
     ):
         time.sleep(0.001)
         self.language = language
@@ -327,6 +355,8 @@ class Message(MessageBase):
         self.wait_loop = wait_loop
         if not self.content and isinstance(wait, list) and wait:
             self.content = wait[0]
+
+        self._apply_resume_policy(resume)
 
         super().__post_init__()
 
@@ -421,6 +451,7 @@ class AskUserMessage(AskMessageBase):
         author (str, optional): The author of the message, this will be used in the UI. Defaults to the assistant name (see config).
         timeout (int, optional): The number of seconds to wait for an answer before raising a TimeoutError.
         raise_on_timeout (bool, optional): Whether to raise a socketio TimeoutError if the user does not answer in time.
+        resume (Literal["keep", "delete"], optional): "delete" — the step does not survive a thread resume of a dead session (a live pending ask is untouched). Defaults to "keep".
     """
 
     def __init__(
@@ -430,12 +461,15 @@ class AskUserMessage(AskMessageBase):
         type: MessageStepType = "assistant_message",
         timeout: int = 60,
         raise_on_timeout: bool = False,
+        resume: Literal["keep", "delete"] = "keep",
     ):
         self.content = content
         self.author = author
         self.timeout = timeout
         self.type = type
         self.raise_on_timeout = raise_on_timeout
+
+        self._apply_resume_policy(resume)
 
         super().__post_init__()
 
@@ -486,6 +520,7 @@ class AskFileMessage(AskMessageBase):
         author (str, optional): The author of the message, this will be used in the UI. Defaults to the assistant name (see config).
         timeout (int, optional): The number of seconds to wait for an answer before raising a TimeoutError.
         raise_on_timeout (bool, optional): Whether to raise a socketio TimeoutError if the user does not answer in time.
+        resume (Literal["keep", "delete"], optional): "delete" — the step does not survive a thread resume of a dead session (a live pending ask is untouched). Defaults to "keep".
     """
 
     def __init__(
@@ -498,6 +533,7 @@ class AskFileMessage(AskMessageBase):
         type: MessageStepType = "assistant_message",
         timeout=90,
         raise_on_timeout=False,
+        resume: Literal["keep", "delete"] = "keep",
     ):
         self.content = content
         self.max_size_mb = max_size_mb
@@ -507,6 +543,8 @@ class AskFileMessage(AskMessageBase):
         self.author = author
         self.timeout = timeout
         self.raise_on_timeout = raise_on_timeout
+
+        self._apply_resume_policy(resume)
 
         super().__post_init__()
 
@@ -575,12 +613,15 @@ class AskActionMessage(AskMessageBase):
         author=config.ui.name,
         timeout=90,
         raise_on_timeout=False,
+        resume: Literal["keep", "delete"] = "keep",
     ):
         self.content = content
         self.actions = actions
         self.author = author
         self.timeout = timeout
         self.raise_on_timeout = raise_on_timeout
+
+        self._apply_resume_policy(resume)
 
         super().__post_init__()
 
@@ -650,12 +691,15 @@ class AskElementMessage(AskMessageBase):
         author=config.ui.name,
         timeout=90,
         raise_on_timeout=False,
+        resume: Literal["keep", "delete"] = "keep",
     ):
         self.content = content
         self.element = element
         self.author = author
         self.timeout = timeout
         self.raise_on_timeout = raise_on_timeout
+
+        self._apply_resume_policy(resume)
 
         super().__post_init__()
 

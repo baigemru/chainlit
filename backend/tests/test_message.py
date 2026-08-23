@@ -1078,3 +1078,90 @@ class TestMessageWait:
 
                     emitted = ctx.emitter.update_step.call_args[0][0]
                     assert "wait" in emitted
+
+
+class TestMessageResumePolicy:
+    """Test suite for the resume="keep"/"delete" flag."""
+
+    def test_resume_keep_default_leaves_metadata_untouched(self):
+        """Default resume="keep" must be a strict no-op on metadata."""
+        with mock_chainlit_context():
+            msg = Message(content="test")
+            assert msg.metadata is None
+            assert msg.to_dict()["metadata"] == {}
+
+    def test_resume_keep_explicit_leaves_metadata_untouched(self):
+        with mock_chainlit_context():
+            msg = Message(content="test", resume="keep")
+            assert msg.metadata is None
+
+    def test_resume_delete_sets_metadata_flag(self):
+        with mock_chainlit_context():
+            msg = Message(content="test", resume="delete")
+            assert msg.metadata == {"resume_policy": "delete"}
+            assert msg.to_dict()["metadata"] == {"resume_policy": "delete"}
+
+    def test_resume_delete_preserves_existing_metadata(self):
+        with mock_chainlit_context():
+            msg = Message(content="test", metadata={"a": 1}, resume="delete")
+            assert msg.metadata == {"a": 1, "resume_policy": "delete"}
+            assert msg.to_dict()["metadata"] == {"a": 1, "resume_policy": "delete"}
+
+    def test_resume_invalid_value_raises(self):
+        with mock_chainlit_context():
+            with pytest.raises(ValueError, match="resume must be"):
+                Message(content="test", resume="drop")
+
+    def test_ask_user_message_resume_delete(self):
+        with mock_chainlit_context():
+            msg = AskUserMessage(content="Question?", resume="delete")
+            assert msg.metadata == {"resume_policy": "delete"}
+            assert msg.to_dict()["metadata"] == {"resume_policy": "delete"}
+
+    def test_ask_user_message_resume_default_keep(self):
+        with mock_chainlit_context():
+            msg = AskUserMessage(content="Question?")
+            assert msg.metadata is None
+
+    def test_ask_file_message_resume_delete(self):
+        with mock_chainlit_context():
+            msg = AskFileMessage(
+                content="Upload", accept=["text/plain"], resume="delete"
+            )
+            assert msg.metadata == {"resume_policy": "delete"}
+
+    def test_ask_action_message_resume_delete(self):
+        with mock_chainlit_context():
+            action = Mock(spec=Action)
+            msg = AskActionMessage(content="Choose", actions=[action], resume="delete")
+            assert msg.metadata == {"resume_policy": "delete"}
+
+    def test_ask_element_message_resume_delete(self):
+        with mock_chainlit_context():
+            element = Mock()
+            msg = AskElementMessage(content="Submit", element=element, resume="delete")
+            assert msg.metadata == {"resume_policy": "delete"}
+
+    def test_ask_message_resume_invalid_value_raises(self):
+        with mock_chainlit_context():
+            with pytest.raises(ValueError, match="resume must be"):
+                AskUserMessage(content="Question?", resume="wipe")
+
+    @pytest.mark.asyncio
+    async def test_resume_delete_flag_reaches_data_layer(self):
+        """The flag must be inside the dict handed to create_step."""
+        with mock_chainlit_context():
+            msg = Message(content="test", resume="delete")
+            mock_data_layer = AsyncMock()
+
+            with patch("chainlit.message.chat_context"):
+                with patch(
+                    "chainlit.message.get_data_layer", return_value=mock_data_layer
+                ):
+                    with patch("chainlit.message.config") as mock_config:
+                        mock_config.code.author_rename = None
+                        await msg.send()
+                        await asyncio.sleep(0)
+
+            persisted = mock_data_layer.create_step.call_args[0][0]
+            assert persisted["metadata"] == {"resume_policy": "delete"}

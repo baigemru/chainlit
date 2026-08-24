@@ -1,6 +1,7 @@
 import { debounce } from 'lodash';
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import {
+  useRecoilCallback,
   useRecoilState,
   useRecoilValue,
   useResetRecoilState,
@@ -49,6 +50,7 @@ import {
   ITasklistElement,
   IThread
 } from 'src/types';
+import { pruneAskActions } from 'src/utils/ask';
 import {
   addMessage,
   deleteMessageById,
@@ -118,6 +120,22 @@ const useChatSession = () => {
 
   const [currentThreadId, setCurrentThreadId] =
     useRecoilState(currentThreadIdState);
+
+  // A dead ask's buttons must not outlive it in the actions atom (they
+  // would render as regular action buttons whose click 404s). Called by
+  // the handlers that end or replace the current ask; the incoming step
+  // id (when there is one) protects the reconnect re-emit of the SAME
+  // ask from erasing its own just-restored buttons.
+  const pruneStaleAskActions = useRecoilCallback(
+    ({ set, snapshot }) =>
+      (incomingStepId?: string) => {
+        const prevAsk = snapshot.getLoadable(askUserState).valueMaybe();
+        set(actionState, (old) =>
+          pruneAskActions(old, prevAsk, incomingStepId)
+        );
+      },
+    []
+  );
 
   // Use currentThreadId as thread id in websocket header
   useEffect(() => {
@@ -446,6 +464,10 @@ const useChatSession = () => {
               : prev
           );
         };
+        // A foreign ask replacing the previous one orphans that ask's
+        // buttons — drop them. The step_id guard inside makes the SAME
+        // ask's re-emit (reconnect restore) a no-op here.
+        pruneStaleAskActions(spec.step_id);
         // A re-emitted ask (reconnect restore) simply rebinds the form to
         // the live socket; addMessage upserts the message by id.
         setAskUser({ spec, callback: reply, parentId: msg.parentId });
@@ -457,11 +479,13 @@ const useChatSession = () => {
       });
 
       socket.on('ask_timeout', () => {
+        pruneStaleAskActions();
         setAskUser(undefined);
         setLoading(false);
       });
 
       socket.on('clear_ask', () => {
+        pruneStaleAskActions();
         setAskUser(undefined);
       });
 

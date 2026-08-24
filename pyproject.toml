@@ -3,7 +3,7 @@ dev = ["actionlint-py>=1.7.12.24"]
 backend = ["chainlit"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 
 [[tool.mypy.overrides]]
 module = [
@@ -13,7 +13,6 @@ module = [
     "langflow",
     "lazify",
     "plotly",
-    "nest_asyncio",
     "socketio.*",
     "syncer",
     "azure.storage.filedatalake",

@@ -20,7 +20,7 @@ authors = [
 ]
 license = { text = "Apache-2.0" }
 readme = "README.md"
-requires-python = ">=3.10,<3.14.0"
+requires-python = ">=3.11,<3.15"
 classifiers = [
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -43,10 +43,13 @@ dependencies = [
     "syncer>=2.0.3,<3.0.0",
     "asyncer>=0.0.8,<0.1.0",
     "mcp>=1.11.0,<2.0.0",
-    "nest-asyncio>=1.6.0,<2.0.0",
     "click>=8.1.3,<9.0.0",
     "tomli>=2.0.1,<3.0.0",
-    "pydantic>=2.7.2,<3",
+    # Forked by python version: pydantic-core gets cp314 wheels only from
+    # the 2.12 line, while semantic-kernel (tests extra, <3.14 only) pins
+    # pydantic below 2.12 — so the resolver must be free to pick per-split.
+    "pydantic>=2.7.2,<3; python_version<'3.14'",
+    "pydantic>=2.12,<3; python_version>='3.14'",
     "python-dotenv>=1.0.0,<2.0.0",
     "watchfiles>=1.1.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
@@ -80,7 +83,10 @@ tests = [
     "openai>=2.0.0,<3.0.0",
     "langchain>=1.0.0",
     "llama-index>=0.13.0,<1.0.0",
-    "semantic-kernel>=1.24.0,<2.0.0",
+    # No 3.14-capable release yet: every current version pins pydantic
+    # below the first release with cp314 wheels (and newer ones require a
+    # pre-release azure-ai-agents).
+    "semantic-kernel>=1.24.0,<2.0.0; python_version<'3.14'",
     "tenacity>=9.0.0,<10.0.0",
     "transformers>=5.0,<6.0",
     "matplotlib>=3.7.1,<4.0.0",

@@ -259,7 +259,7 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         unquote(url_encoded_chat_profile) if url_encoded_chat_profile else None
     )
 
-    WebsocketSession(
+    session = WebsocketSession(
         id=session_id,
         socket_id=sid,
         emit=emit_fn,
@@ -273,6 +273,12 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         environ=environ,
         emit_ask=emit_ask_fn,
     )
+
+    # Resolve chat-profile config overrides asynchronously. Awaited here,
+    # in the async connect handler, instead of the old
+    # run_until_complete-inside-the-running-loop in get_config() — that
+    # re-entry only ever worked through nest_asyncio's patch.
+    await session.resolve_config()
 
     return True
 

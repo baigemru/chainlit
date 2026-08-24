@@ -1267,7 +1267,11 @@ class TestPageLoadGate:
                 patch("chainlit.socket.restore_existing_session") as mock_restore,
             ):
                 mock_ws.get_by_id.return_value = stale
-                mock_ws.side_effect = lambda **kwargs: order.append("create")
+                mock_ws.return_value.resolve_config = AsyncMock()
+                mock_ws.side_effect = lambda **kwargs: (
+                    order.append("create"),
+                    mock_ws.return_value,
+                )[-1]
                 await connect("sid-1", {}, self._auth(page_load=True))
 
             stale.delete.assert_awaited_once()
@@ -1347,6 +1351,7 @@ class TestPageLoadGate:
             patch("chainlit.socket.restore_existing_session") as mock_restore,
         ):
             mock_ws.get_by_id.return_value = stale
+            mock_ws.return_value.resolve_config = AsyncMock()
             await connect("sid-1", {}, self._auth(page_load=True))
             await asyncio.sleep(0)
 

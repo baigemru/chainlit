@@ -20,6 +20,7 @@ from chainlit.socket import (
     clean_session,
     connect,
     connection_successful,
+    disconnect,
     load_user_env,
     persist_user_session,
     restore_existing_session,
@@ -2327,6 +2328,455 @@ class TestResumeDeleteFlag:
         data_layer.delete_step.assert_not_awaited()
         context.emitter.delete_step.assert_awaited_once()
         context.emitter.resume_thread.assert_awaited_once()
+
+
+class TestSupersedeAbandonedAskSessions:
+    """A new session's first resume entry evicts abandoned ask-parked
+    sessions of the same thread, so the resume="delete" cleanup can find
+    the thread genuinely idle again (48h offer asks used to block it
+    forever)."""
+
+    THREAD_ID = "thread_123"
+
+    def _thread(self, steps=None, elements=None):
+        return {
+            "id": self.THREAD_ID,
+            "userIdentifier": "test_user_identifier",
+            "metadata": {},
+            "steps": steps if steps is not None else [],
+            "elements": elements if elements is not None else [],
+        }
+
+    def _flagged_step(self, step_id):
+        return {
+            "id": step_id,
+            "type": "assistant_message",
+            "output": "flagged",
+            "metadata": {"resume_policy": "delete"},
+        }
+
+    def _plain_step(self, step_id):
+        return {
+            "id": step_id,
+            "type": "assistant_message",
+            "output": "plain",
+            "metadata": {},
+        }
+
+    def _session(self, mock_session_factory):
+        session = mock_session_factory(
+            has_first_interaction=False, thread_id=self.THREAD_ID
+        )
+        session.restored = False
+        session.chat_started = False
+        session.current_task = None
+        session.thread_id_to_resume = self.THREAD_ID
+        return session
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    def _config(self, on_chat_resume):
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = on_chat_resume
+        mock_config.code.on_thread_ready = None
+        return mock_config
+
+    async def _run_resume(self, thread, session, context, data_layer):
+        on_chat_resume = AsyncMock()
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config(on_chat_resume)),
+            patch("chainlit.socket.resume_thread", AsyncMock(return_value=thread)),
+            patch("chainlit.socket.get_data_layer", return_value=data_layer),
+            patch("chainlit.socket.chat_context"),
+            patch("chainlit.socket.Message"),
+        ):
+            await connection_successful("sid-1")
+        return on_chat_resume
+
+    def _live_ask(self, step_id):
+        return PendingAsk(
+            step_dict={"id": step_id},
+            spec=AskSpec(timeout=60, type="action", step_id=step_id),
+            future=asyncio.get_event_loop().create_future(),
+            deadline=time.monotonic() + 60,
+        )
+
+    def _live_task(self):
+        task = Mock()
+        task.done.return_value = False
+        return task
+
+    def _holder(
+        self,
+        session_id="abandoned-1",
+        *,
+        thread_id=None,
+        disconnected=True,
+        pending_ask="live",
+        thread_ready_task="live",
+        current_task=None,
+    ):
+        """An old session left behind on the thread. Its delete() mimics
+        the real one's synchronous prefix: pop from the registry, cancel
+        the ask — that pop is exactly what lets the cleanup gate recompute
+        on the same entry."""
+        import chainlit.session as session_module
+
+        holder = Mock(spec=WebsocketSession)
+        holder.id = session_id
+        holder.thread_id = thread_id or self.THREAD_ID
+        if disconnected is not None:
+            holder.socket_disconnected = disconnected
+        holder.pending_ask = (
+            self._live_ask(f"ask-step-{session_id}")
+            if pending_ask == "live"
+            else pending_ask
+        )
+        holder.thread_ready_task = (
+            self._live_task() if thread_ready_task == "live" else thread_ready_task
+        )
+        holder.current_task = current_task
+
+        async def fake_delete():
+            session_module.ws_sessions_id.pop(holder.id, None)
+            if holder.pending_ask is not None:
+                holder.pending_ask.cancel()
+                holder.pending_ask = None
+
+        holder.delete = AsyncMock(side_effect=fake_delete)
+        return holder
+
+    @pytest.mark.asyncio
+    async def test_abandoned_ask_session_superseded_and_cleanup_fires(
+        self, mock_session_factory
+    ):
+        """The core prod repro: a disconnected session whose hook is parked
+        on a 48h offer ask no longer blocks the cleanup — it is deleted
+        (user_sessions entry included) and the old offer step is doomed on
+        the SAME entry."""
+        import chainlit.session as session_module
+
+        holder = self._holder("abandoned-1")
+        old_offer = self._flagged_step("ask-step-abandoned-1")
+        thread = self._thread(steps=[self._plain_step("keep-1"), old_offer])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with (
+            patch.dict(
+                session_module.ws_sessions_id,
+                {holder.id: holder, session.id: session},
+                clear=True,
+            ),
+            patch.dict(user_sessions, {holder.id: {"stale": True}}),
+        ):
+            on_chat_resume = await self._run_resume(
+                thread, session, context, data_layer
+            )
+            assert holder.id not in user_sessions
+
+        holder.delete.assert_awaited_once()
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == ["keep-1"]
+        data_layer.delete_step.assert_awaited_once_with("ask-step-abandoned-1")
+
+    @pytest.mark.asyncio
+    async def test_connected_ask_session_survives_and_blocks_cleanup(
+        self, mock_session_factory
+    ):
+        """A second CONNECTED tab with a live ask: not superseded, and the
+        cleanup stays blocked entirely (accepted parity)."""
+        import chainlit.session as session_module
+
+        holder = self._holder("second-tab", disconnected=False)
+        offer = self._flagged_step("ask-step-second-tab")
+        thread = self._thread(steps=[self._plain_step("keep-1"), offer])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {holder.id: holder, session.id: session},
+            clear=True,
+        ):
+            on_chat_resume = await self._run_resume(
+                thread, session, context, data_layer
+            )
+
+        holder.delete.assert_not_awaited()
+        resumed = on_chat_resume.await_args.args[0]
+        assert [s["id"] for s in resumed["steps"]] == [
+            "keep-1",
+            "ask-step-second-tab",
+        ]
+        data_layer.delete_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_missing_flag_attribute_treated_as_connected(
+        self, mock_session_factory
+    ):
+        """The flag is read tolerantly (getattr default False): a
+        Mock(spec=WebsocketSession) without the instance attribute — the
+        shape every pre-existing test fake has — counts as connected."""
+        import chainlit.session as session_module
+
+        holder = self._holder("bare-fake", disconnected=None)
+        thread = self._thread(steps=[self._flagged_step("live-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {holder.id: holder, session.id: session},
+            clear=True,
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        holder.delete.assert_not_awaited()
+        data_layer.delete_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disconnected_pipeline_between_asks_not_superseded(
+        self, mock_session_factory
+    ):
+        """A disconnected session whose task runs BETWEEN asks
+        (pending_ask is None) is a working pipeline — untouched, and it
+        keeps blocking the cleanup as designed."""
+        import chainlit.session as session_module
+
+        holder = self._holder(
+            "pipeline",
+            pending_ask=None,
+            thread_ready_task=None,
+            current_task=self._live_task(),
+        )
+        thread = self._thread(steps=[self._flagged_step("loader-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {holder.id: holder, session.id: session},
+            clear=True,
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        holder.delete.assert_not_awaited()
+        data_layer.delete_step.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_expired_ask_not_superseded(self, mock_session_factory):
+        """An expired ask fails the live-ask criterion: the session is about to die
+        on its own timeout path — no eviction."""
+        import chainlit.session as session_module
+
+        expired = PendingAsk(
+            step_dict={"id": "old-ask"},
+            spec=AskSpec(timeout=60, type="action", step_id="old-ask"),
+            future=asyncio.get_event_loop().create_future(),
+            deadline=time.monotonic() - 1,
+        )
+        holder = self._holder("expired", pending_ask=expired, thread_ready_task=None)
+        thread = self._thread(steps=[self._plain_step("keep-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {holder.id: holder, session.id: session},
+            clear=True,
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        holder.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_other_thread_session_untouched(self, mock_session_factory):
+        """Criterion (в): a disconnected ask session of ANOTHER thread —
+        potentially another user's — is never touched."""
+        import chainlit.session as session_module
+
+        holder = self._holder("foreign", thread_id="other_thread")
+        thread = self._thread(steps=[self._plain_step("keep-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {holder.id: holder, session.id: session},
+            clear=True,
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        holder.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_incoming_session_never_superseded(self, mock_session_factory):
+        """Identity exclusion: even a (theoretically) flagged incoming
+        session with a live ask must not evict itself."""
+        import chainlit.session as session_module
+
+        session = self._session(mock_session_factory)
+        session.socket_disconnected = True
+        session.pending_ask = self._live_ask("own-ask")
+        thread = self._thread(steps=[self._plain_step("keep-1")])
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id, {session.id: session}, clear=True
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        session.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recheck_prevents_deleting_reconnected_candidate(
+        self, mock_session_factory
+    ):
+        """delete() awaits (MCP close); a later candidate can reconnect
+        meanwhile. The criteria are re-checked synchronously right before
+        each delete — the revived session survives."""
+        import chainlit.session as session_module
+
+        first = self._holder("a-first")
+        second = self._holder("b-second")
+
+        async def slow_delete_reviving_second():
+            session_module.ws_sessions_id.pop(first.id, None)
+            # While the first delete is in flight, the second candidate's
+            # socket comes back (restore() clears the flag).
+            second.socket_disconnected = False
+
+        first.delete = AsyncMock(side_effect=slow_delete_reviving_second)
+        thread = self._thread(steps=[self._plain_step("keep-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {first.id: first, second.id: second, session.id: session},
+            clear=True,
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        first.delete.assert_awaited_once()
+        second.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_failure_does_not_break_resume(self, mock_session_factory):
+        """A zombie whose delete() raises (dirty files dir) must not break
+        the incoming user's handshake — the resume completes and the
+        failure is logged."""
+        import chainlit.session as session_module
+
+        holder = self._holder("dirty")
+        holder.delete = AsyncMock(side_effect=RuntimeError("files dir race"))
+        thread = self._thread(steps=[self._plain_step("keep-1")])
+        session = self._session(mock_session_factory)
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with (
+            patch.dict(
+                session_module.ws_sessions_id,
+                {holder.id: holder, session.id: session},
+                clear=True,
+            ),
+            patch("chainlit.socket.logger") as mock_logger,
+        ):
+            on_chat_resume = await self._run_resume(
+                thread, session, context, data_layer
+            )
+
+        holder.delete.assert_awaited_once()
+        on_chat_resume.assert_awaited_once()
+        context.emitter.resume_thread.assert_awaited_once()
+        assert mock_logger.exception.called
+
+    @pytest.mark.asyncio
+    async def test_no_supersede_on_reentry(self, mock_session_factory):
+        """Re-entries of the same session never supersede — consistent
+        with the first-entry-only cleanup they exist to unblock."""
+        import chainlit.session as session_module
+
+        holder = self._holder("abandoned-1")
+        thread = self._thread(steps=[self._plain_step("keep-1")])
+        session = self._session(mock_session_factory)
+        session.resume_processed = True
+        session.restored = True
+        session.has_first_interaction = True
+        context = self._context(session)
+        data_layer = AsyncMock()
+
+        with patch.dict(
+            session_module.ws_sessions_id,
+            {holder.id: holder, session.id: session},
+            clear=True,
+        ):
+            await self._run_resume(thread, session, context, data_layer)
+
+        holder.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_sets_flag_before_hooks(self, mock_session_factory):
+        """The flag is set at the very top of the disconnect handler —
+        before on_chat_end/persist, which may hang for a long time."""
+        session = mock_session_factory(has_first_interaction=False)
+        session.to_clear = True
+        session.socket_disconnected = False
+        flag_at_hook_time = []
+
+        async def record_flag():
+            flag_at_hook_time.append(session.socket_disconnected)
+
+        mock_config = Mock()
+        mock_config.code.on_chat_end = record_flag
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context"),
+            patch("chainlit.socket.config", mock_config),
+        ):
+            await disconnect("sid-gone")
+
+        assert session.socket_disconnected is True
+        assert flag_at_hook_time == [True]
+
+    def test_restore_clears_disconnected_flag(self):
+        """restore() is the single revival path: it must clear the flag
+        set by a previous disconnect. A fresh session starts connected."""
+        import chainlit.session as session_module
+
+        session = WebsocketSession(
+            id=str(uuid.uuid4()),
+            socket_id="sid-flag-old",
+            emit=Mock(),
+            emit_call=Mock(),
+            user_env={},
+            client_type="webapp",
+        )
+        try:
+            assert session.socket_disconnected is False
+            session.socket_disconnected = True
+            session.restore(new_socket_id="sid-flag-new")
+            assert session.socket_disconnected is False
+        finally:
+            session_module.ws_sessions_id.pop(session.id, None)
+            session_module.ws_sessions_sid.pop(session.socket_id, None)
 
 
 class TestResumeThreadPersistBarrier:

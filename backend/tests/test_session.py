@@ -892,3 +892,52 @@ class TestWebsocketSessionPendingAsk:
 
                 with pytest.raises(asyncio.CancelledError):
                     await task
+
+
+class TestAskResyncSessionState:
+    """Session-side state of the orphan ask_reply rescue (ask re-sync)."""
+
+    @staticmethod
+    def _session(**kwargs):
+        return WebsocketSession(
+            id=kwargs.pop("id", f"resync_{uuid.uuid4().hex[:8]}"),
+            socket_id=kwargs.pop("socket_id", f"sock_{uuid.uuid4().hex[:8]}"),
+            emit=Mock(),
+            emit_call=Mock(),
+            user_env={},
+            client_type="webapp",
+            **kwargs,
+        )
+
+    def test_new_session_starts_with_closed_gate_and_empty_dedup(self):
+        session = self._session()
+        # A fresh session has not finished any handshake yet: buffered
+        # replies must park until the first connection_successful completes.
+        assert not session.connection_inited.is_set()
+        assert session.last_resolved_ask_step_id is None
+        assert session.deferred_ask_reply_tasks == []
+
+    def test_restore_clears_the_handshake_gate(self):
+        session = self._session()
+        session.connection_inited.set()
+
+        session.restore("resync_new_socket")
+
+        # The send buffer flushes between connect and connection_successful;
+        # a gate left open from the previous connection would let a buffered
+        # reply convert into the half-initialized session.
+        assert not session.connection_inited.is_set()
+
+    @pytest.mark.asyncio
+    async def test_delete_cancels_parked_ask_reply_conversions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("chainlit.config.FILES_DIRECTORY", Path(tmpdir)):
+                session = self._session()
+                parked = asyncio.get_event_loop().create_task(asyncio.sleep(30))
+                session.deferred_ask_reply_tasks.append(parked)
+
+                await session.delete()
+                await asyncio.sleep(0)
+
+                assert parked.cancelled()
+                assert session.deferred_ask_reply_tasks == []

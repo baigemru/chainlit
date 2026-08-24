@@ -386,6 +386,26 @@ class WebsocketSession(BaseSession):
 
         self.restored = False
         self.pending_ask = None
+        # Step id of the last ask answered in this session (via the
+        # ask_reply event or the legacy socket.io ack). Dedup memory for the
+        # orphan-reply rescue: the pending_ask slot empties milliseconds
+        # after an answer is accepted, so a redelivered reply would
+        # otherwise be indistinguishable from one typed into a dead form.
+        # The stop handler deliberately does NOT record here — a cancelled
+        # ask was never answered, and a reply typed in the ~RTT window after
+        # the stop click is live input that must be rescued.
+        self.last_resolved_ask_step_id: Optional[str] = None
+        # Open once a connection_successful cycle has fully finished
+        # (including restore_pending_ask); closed again on every reconnect.
+        # The client flushes its send buffer BEFORE emitting
+        # connection_successful, so an orphaned ask_reply parked on this
+        # gate would otherwise convert into a half-initialized session
+        # (fresh thread, or a resumed thread renamed by init_thread).
+        self.connection_inited = asyncio.Event()
+        # Orphan ask_reply conversions parked on the gate above; cancelled
+        # (with a warning) if the session dies before a handshake releases
+        # them.
+        self.deferred_ask_reply_tasks: List[asyncio.Task] = []
         # True when the current connection is the first one after a full
         # page load (the client lost its UI state); set on every connect.
         self.fresh_page_load = False
@@ -463,6 +483,11 @@ class WebsocketSession(BaseSession):
         ws_sessions_sid[new_socket_id] = self
         self.socket_id = new_socket_id
         self.restored = True
+        # Closed here, in connect, NOT at the start of connection_successful:
+        # buffered client events flush in between, and a gate left open from
+        # the previous connection would let an orphaned ask_reply convert
+        # into the not-yet-restored session.
+        self.connection_inited.clear()
 
     async def delete(self):
         """Delete the session."""
@@ -475,6 +500,20 @@ class WebsocketSession(BaseSession):
         if self.pending_ask is not None:
             self.pending_ask.cancel()
             self.pending_ask = None
+
+        # A conversion still parked on the handshake gate has nowhere left
+        # to run — its handshake never finished. Logged, not silent: this is
+        # the one path where the user's rescued input is genuinely lost.
+        for task in list(getattr(self, "deferred_ask_reply_tasks", None) or []):
+            if not task.done():
+                logger.warning(
+                    "Cancelling a parked ask_reply conversion for session %s: "
+                    "the session is being deleted before a connection "
+                    "handshake released it.",
+                    self.id,
+                )
+                task.cancel()
+        self.deferred_ask_reply_tasks = []
 
         # Same fate as user_sessions (popped in the disconnect handler):
         # chat_contexts is keyed by session id and grows with every message,

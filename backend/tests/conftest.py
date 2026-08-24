@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,6 +53,16 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.resume_processed = kwargs.get("resume_processed", False)
         mock.resume_delete_retry = kwargs.get("resume_delete_retry", ([], []))
         mock.transcript_element_dicts = kwargs.get("transcript_element_dicts", {})
+        mock.last_resolved_ask_step_id = kwargs.get("last_resolved_ask_step_id", None)
+        # Default: the connection handshake has finished (the common state
+        # outside reconnect tests). Tests of the parked-conversion path pass
+        # their own cleared event.
+        if "connection_inited" in kwargs:
+            mock.connection_inited = kwargs["connection_inited"]
+        else:
+            mock.connection_inited = asyncio.Event()
+            mock.connection_inited.set()
+        mock.deferred_ask_reply_tasks = kwargs.get("deferred_ask_reply_tasks", [])
 
         return mock
 
@@ -111,6 +122,10 @@ def mock_websocket_session():
     session.files_spec = {}
     session.pending_ask = None
     session.has_first_interaction = True
+    session.last_resolved_ask_step_id = None
+    session.connection_inited = asyncio.Event()
+    session.connection_inited.set()
+    session.deferred_ask_reply_tasks = []
 
     return session
 

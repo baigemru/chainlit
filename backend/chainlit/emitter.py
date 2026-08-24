@@ -33,15 +33,19 @@ from chainlit.user import PersistedUser
 from chainlit.utils import utc_now
 
 
-def _make_legacy_ask_ack(future: "asyncio.Future"):
+def _make_legacy_ask_ack(session, future: "asyncio.Future", step_id: str):
     """Ack callback resolving the same future as the ask_reply event.
 
     Old cached client bundles answer an ask through the socket.io ack; the
-    future-based wait accepts whichever path delivers first.
+    future-based wait accepts whichever path delivers first. The resolved
+    step id is recorded on the session — the dedup memory the ask_reply
+    handler consults before rescuing an orphaned reply as a plain message.
     """
 
     def legacy_ack(value=None):
         if not future.done():
+            if session is not None:
+                session.last_resolved_ask_step_id = step_id
             future.set_result(value)
 
     return legacy_ack
@@ -433,7 +437,9 @@ class ChainlitEmitter(BaseChainlitEmitter):
             ask_payload = {"msg": step_dict, "spec": spec.to_dict()}
             emit_ask = getattr(session, "emit_ask", None)
             if emit_ask is not None:
-                await emit_ask(ask_payload, _make_legacy_ask_ack(future))
+                await emit_ask(
+                    ask_payload, _make_legacy_ask_ack(session, future, spec.step_id)
+                )
             else:
                 await self.emit("ask", ask_payload)
 

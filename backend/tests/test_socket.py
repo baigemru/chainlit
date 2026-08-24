@@ -1075,11 +1075,16 @@ class TestAskRestoreEdgeCases:
         return mock_config
 
     @pytest.mark.asyncio
-    async def test_reconnect_of_loaded_page_skips_actions_and_element(
+    async def test_reconnect_of_loaded_page_reemits_actions_but_not_element(
         self, mock_session_factory
     ):
-        """Plain transport reconnect: the client still has its UI state — re-emitting
-        the element would roll a live form back to a snapshot."""
+        """Plain transport reconnect (the client kept its UI state): the
+        buttons are re-emitted anyway — "no page load" never proves they
+        arrived (emits into a dying socket are silently dropped), and the
+        client upserts actions by id so nothing duplicates. The element
+        stays gated: re-emitting it would roll a live form back to a
+        snapshot (a client-driven updateElement never mutates the
+        server-side snapshot object) and wipe in-progress input."""
         element = Mock()
         element.to_dict = Mock(return_value={"id": "el-1"})
         pending = self._pending_ask(
@@ -1097,10 +1102,41 @@ class TestAskRestoreEdgeCases:
         ):
             await connection_successful("sid-1")
 
-        emitted = [call.args[0] for call in context.emitter.emit.call_args_list]
-        assert "action" not in emitted
+        emitted = {
+            call.args[0]: call.args[1] for call in context.emitter.emit.call_args_list
+        }
+        assert emitted.get("action") == {"id": "a1"}
         assert "element" not in emitted
+        element.to_dict.assert_not_called()
         session.emit_ask.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_actions_reemitted_before_ask_payload(self, mock_session_factory):
+        """Order: the buttons must be in the client's atom before the ask
+        payload makes askUser.spec.keys filter by them."""
+        pending = self._pending_ask(restore_actions=[{"id": "a1"}, {"id": "a2"}])
+        session = mock_session_factory(pending_ask=pending, fresh_page_load=False)
+        session.restored = True
+        session.chat_started = True
+        session.thread_id_to_resume = None
+        context = self._context(session)
+
+        order = []
+        context.emitter.emit = AsyncMock(
+            side_effect=lambda event, data: order.append(event)
+        )
+        session.emit_ask = AsyncMock(side_effect=lambda *a, **k: order.append("ask"))
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", self._config()),
+        ):
+            await connection_successful("sid-1")
+
+        action_positions = [i for i, event in enumerate(order) if event == "action"]
+        assert len(action_positions) == 2
+        assert "ask" in order
+        assert order.index("ask") > max(action_positions)
 
     @pytest.mark.asyncio
     async def test_answered_pending_ask_is_not_reemitted(self, mock_session_factory):

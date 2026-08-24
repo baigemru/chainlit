@@ -340,6 +340,8 @@ class WebsocketSession(BaseSession):
 
     pending_ask: Optional[PendingAsk] = None
 
+    thread_ready_task: Optional[asyncio.Task] = None
+
     mcp_sessions: dict[str, McpSession]
 
     def __init__(
@@ -386,6 +388,21 @@ class WebsocketSession(BaseSession):
 
         self.restored = False
         self.pending_ask = None
+        # Task running the app's on_thread_ready hook. Its own slot on
+        # purpose: current_task has two unconditional writers
+        # (client_message and the orphan-reply conversion) that would evict
+        # a long-lived hook almost immediately after launch, hiding it from
+        # stop, the F5 keep-alive check and thread_has_live_task. Read by
+        # all three of those and cancelled in delete().
+        self.thread_ready_task: Optional[asyncio.Task] = None
+        # One-shot launch flag for on_thread_ready, modeled on chat_started:
+        # the resume branch re-enters on every reconnect and must not start
+        # a second hook or overwrite the slot. Never reset.
+        self.resume_task_started = False
+        # Number of live owners of the task indicator (see
+        # emitter.task_acquire/task_release). Per-session, NOT reset on
+        # reconnect: it mirrors live server-side tasks, not client state.
+        self.task_counter = 0
         # Step id of the last ask answered in this session (via the
         # ask_reply event or the legacy socket.io ack). Dedup memory for the
         # orphan-reply rescue: the pending_ask slot empties milliseconds
@@ -500,6 +517,15 @@ class WebsocketSession(BaseSession):
         if self.pending_ask is not None:
             self.pending_ask.cancel()
             self.pending_ask = None
+
+        # The on_thread_ready task dies with its session: delete() is also
+        # the GC path (clear_on_timeout checks no liveness), and a surviving
+        # hook would be a zombie writing into the thread while a successor
+        # session starts a second one. current_task is deliberately NOT
+        # cancelled here — that would start killing in-flight on_message
+        # tasks of merely disconnected users.
+        if self.thread_ready_task is not None and not self.thread_ready_task.done():
+            self.thread_ready_task.cancel()
 
         # A conversion still parked on the handshake gate has nowhere left
         # to run — its handshake never finished. Logged, not silent: this is

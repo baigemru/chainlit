@@ -981,7 +981,9 @@ async def project_settings(
             "userEnv": cfg.project.user_env,
             "maskUserEnv": cfg.project.mask_user_env,
             "dataPersistence": data_layer is not None,
-            "threadResumable": bool(config.code.on_chat_resume),
+            "threadResumable": bool(
+                config.code.on_chat_resume or config.code.on_thread_ready
+            ),
             # Expose whether shared threads feature is enabled (flag + app callback)
             "threadSharing": bool(
                 getattr(cfg.features, "allow_thread_sharing", False)

@@ -463,7 +463,10 @@ class TestSendAskUser:
             call.args[0] for call in mock_websocket_session.emit.call_args_list
         ]
         assert "clear_ask" in emitted_events
-        assert "task_start" in emitted_events  # finally block ran
+        # An ownerless ask (owner counter at 0) must not relight the
+        # indicator in the finally — the old unconditional task_start left
+        # it burning forever.
+        assert "task_start" not in emitted_events
 
     async def test_ask_sent_via_emit_ask_not_emit_call(
         self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
@@ -528,7 +531,8 @@ class TestSendAskUser:
             call.args[0] for call in mock_websocket_session.emit.call_args_list
         ]
         assert "ask_timeout" in emitted_events
-        assert "task_start" in emitted_events
+        # Ownerless ask: no relight after the timeout either.
+        assert "task_start" not in emitted_events
 
     async def test_timeout_raises_socketio_timeout_error(
         self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock

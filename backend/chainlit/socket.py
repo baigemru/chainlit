@@ -610,11 +610,26 @@ async def restore_pending_ask(
         await context.emitter.clear("clear_ask")
         return
 
+    # The form's own buttons are re-emitted UNCONDITIONALLY: "no page load"
+    # never proves they arrived — the emits may have been dropped in a
+    # dying socket (the prod repro: connect → closed → reconnect with the
+    # same session id within ~1s), and the client upserts actions by id so
+    # a button it still holds is not duplicated. Known window, parity with
+    # the fresh-page-load path (accepted, not fixed here): if the ask dies
+    # by cancel or raise_on_timeout between these emits and the slot
+    # re-check below, AskActionMessage.send never reaches its
+    # remove_action loop and the re-emitted buttons linger client-side as
+    # plain action buttons.
+    for action_dict in pending_ask.restore_actions:
+        await context.emitter.emit("action", action_dict)
     if not client_has_ui_state:
-        # The form's own actions/element; a live element may hold newer
-        # props than any snapshot, so it is serialized only now.
-        for action_dict in pending_ask.restore_actions:
-            await context.emitter.emit("action", action_dict)
+        # The element stays gated: a live custom element may hold client
+        # state (a client-driven updateElement builds a NEW server-side
+        # object — this snapshot never sees those updates), and a re-emit
+        # replaces the atom object and remounts the JSX, wiping in-progress
+        # input. Re-emitted only after a genuine page load, when there is
+        # nothing left to lose; serialized only now so server-side updates
+        # of the live object are still picked up.
         if pending_ask.restore_element is not None:
             await context.emitter.emit("element", pending_ask.restore_element.to_dict())
 

@@ -75,6 +75,46 @@ describe('Ask reconnect', () => {
     cy.get('#continue-action').should('have.length.lte', 1);
   });
 
+  it('restores buttons whose emits were dropped in a dead socket', () => {
+    // "dropped" asks the app to wait 5s before sending the action ask —
+    // the window in which this test kills the transport, so the action
+    // and ask emits land in a dead socket and are silently dropped.
+    answerNameAsk('dropped');
+
+    cy.window().then((win) => {
+      const socket = (win as any).__chainlitSocket;
+      socket.io.reconnection(false);
+      socket.io.engine.close();
+    });
+    cy.window().its('__chainlitSocket.connected').should('eq', false);
+
+    // Stay offline past the app's window. The ask must NOT have arrived —
+    // this guards the test against silently degrading into the ordinary
+    // online-delivery scenario on a slow CI. The arbitrary wait IS the
+    // scenario here: wall-clock must pass while the transport is down so
+    // the server's emits land in a dead socket, and no client-observable
+    // signal can exist for that (the socket is dead).
+    // eslint-disable-next-line cypress/no-unnecessary-waiting
+    cy.wait(6000);
+    cy.get('.step').should('not.contain', 'Pick an action!');
+
+    cy.window().then((win) => {
+      const socket = (win as any).__chainlitSocket;
+      socket.io.reconnection(true);
+      socket.connect();
+    });
+    cy.window().its('__chainlitSocket.connected').should('eq', true);
+
+    // The restore must bring back BOTH halves of the form: the ask text
+    // (re-emitted ask payload) and the buttons (unconditional
+    // restore_actions re-emit — before the fix these stayed gated behind
+    // "the client has UI state" and the form came back buttonless).
+    cy.get('.step').should('contain', 'Pick an action!');
+    cy.get('#continue-action').should('be.visible').and('not.be.disabled');
+    cy.get('#continue-action').click();
+    cy.get('.step').should('contain', 'Action picked: continue');
+  });
+
   it('restores the transcript and action buttons after a page reload', () => {
     answerNameAsk();
     cy.get('#continue-action').should('be.visible');

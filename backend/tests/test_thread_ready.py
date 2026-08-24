@@ -258,7 +258,13 @@ class TestWrapperCounter:
             context.emitter.task_start = AsyncMock()
             context.emitter.task_end = AsyncMock()
 
-            wrapped = wrap_user_function(AsyncMock(), with_task=True)
+            # A real coroutine function, like every app callback the wrapper
+            # sees in production: inspect.signature on a Mock is a
+            # version-dependent minefield (raises on py3.10).
+            async def user_func():
+                pass
+
+            wrapped = wrap_user_function(user_func, with_task=True)
             await wrapped()
 
             context.emitter.task_acquire.assert_awaited_once()
@@ -277,10 +283,17 @@ class TestWrapperCounter:
             context.emitter.task_acquire = AsyncMock(side_effect=asyncio.CancelledError)
             context.emitter.task_release = AsyncMock()
 
-            wrapped = wrap_user_function(AsyncMock(), with_task=True)
+            called = False
+
+            async def user_func():
+                nonlocal called
+                called = True
+
+            wrapped = wrap_user_function(user_func, with_task=True)
             await wrapped()
 
             context.emitter.task_release.assert_awaited_once()
+            assert not called  # cancelled before the callback ran
 
 
 class TestThreadReadyTaskSlot:

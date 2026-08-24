@@ -289,6 +289,33 @@ def on_chat_resume(func: Callable[[ThreadDict], Any]) -> Callable:
     return func
 
 
+def on_thread_ready(func: Callable[[ThreadDict], Any]) -> Callable:
+    """
+    Hook running as a background task once a thread resume has completed.
+
+    on_chat_resume stays the fast inline handshake stage; this hook gets
+    the on_chat_start physics: launched via create_task (the handshake
+    never waits for it), owns the task indicator, is cancelled by the stop
+    button and keeps the session alive across page reloads. Runs at most
+    once per session. Requires blocking work (long asks, pipelines) to
+    live here instead of a bare asyncio.create_task.
+
+    Registered like on_chat_resume — without a step() wrapper on purpose:
+    "on_thread_ready" is not in CL_RUN_NAMES (backend and frontend), so a
+    run step would render as a visible collapsible step and accumulate a
+    run row in persistence per launch.
+
+    Args:
+        func (Callable[[ThreadDict], Any]): The hook to execute.
+
+    Returns:
+        Callable[[ThreadDict], Any]: The decorated hook.
+    """
+
+    config.code.on_thread_ready = wrap_user_function(func, with_task=True)
+    return func
+
+
 @overload
 def set_chat_profiles(
     func: Callable[[Optional["User"]], Awaitable[List["ChatProfile"]]],

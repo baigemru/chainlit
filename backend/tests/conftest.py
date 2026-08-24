@@ -48,6 +48,9 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.files = kwargs.get("files", {})
         mock.files_spec = kwargs.get("files_spec", {})
         mock.pending_ask = kwargs.get("pending_ask", None)
+        mock.thread_ready_task = kwargs.get("thread_ready_task", None)
+        mock.resume_task_started = kwargs.get("resume_task_started", False)
+        mock.task_counter = kwargs.get("task_counter", 0)
         mock.restored = kwargs.get("restored", False)
         mock.fresh_page_load = kwargs.get("fresh_page_load", True)
         mock.resume_processed = kwargs.get("resume_processed", False)
@@ -121,6 +124,9 @@ def mock_websocket_session():
     session.files = {}
     session.files_spec = {}
     session.pending_ask = None
+    session.thread_ready_task = None
+    session.resume_task_started = False
+    session.task_counter = 0
     session.has_first_interaction = True
     session.last_resolved_ask_step_id = None
     session.connection_inited = asyncio.Event()

@@ -154,6 +154,14 @@ class BaseChainlitEmitter:
         """Stub method to send a task end signal to the UI."""
         pass
 
+    async def task_acquire(self):
+        """Stub method to register an owner of the task indicator."""
+        pass
+
+    async def task_release(self):
+        """Stub method to release an owner of the task indicator."""
+        pass
+
     async def stream_start(self, step_dict: StepDict):
         """Stub method to send a stream start signal to the UI."""
         pass
@@ -443,6 +451,18 @@ class ChainlitEmitter(BaseChainlitEmitter):
             else:
                 await self.emit("ask", ask_payload)
 
+            # Pause the indicator for the wait so the User can answer the
+            # prompt. A raw emit, NOT a counter release: the ask must never
+            # mutate the owner counter. Releasing here and re-acquiring in
+            # the finally would poison it — a foreign owner exiting during
+            # the wait would have its release eaten by the zero clamp, and
+            # the paired re-acquire would then add back a unit no live task
+            # ever releases (a forever-burning indicator). The counter is
+            # mutated only by real acquire/release pairs of live tasks; the
+            # ask reads it and re-syncs the client on exit.
+            if session.task_counter > 0:
+                await self.task_end()
+
             user_res: Optional[
                 Union[
                     StepDict,
@@ -462,9 +482,6 @@ class ChainlitEmitter(BaseChainlitEmitter):
                     # Callers (and raise_on_timeout) expect the historical
                     # socketio.exceptions.TimeoutError, not the asyncio one.
                     raise TimeoutError from None
-
-            # End the task temporarily so that the User can answer the prompt
-            await self.task_end()
 
             final_res: Optional[
                 Union[StepDict, AskActionResponse, AskElementResponse, List[FileDict]]
@@ -527,7 +544,20 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 session.pending_ask = None
             if parent_id in self.session.files_spec:
                 del self.session.files_spec[parent_id]
-            await self.task_start()
+            # Level-triggered exit resync: the client forced loading=false
+            # on receiving 'ask'/'ask_timeout', so an edge emit cannot be
+            # trusted — re-emit from the counter's current truth. Owners
+            # alive right now (the blocked caller included — it cannot have
+            # released while waiting on this ask) relight the indicator;
+            # none alive leaves it dark, so an ownerless ask no longer
+            # burns forever after the answer or timeout. A live successor
+            # ask (stop freed the slot, on_stop installed a new one) owns
+            # the client state instead — same guard as the reconnect
+            # resync.
+            successor = session.pending_ask
+            has_live_successor = successor is not None and successor.is_live
+            if session.task_counter > 0 and not has_live_successor:
+                await self.task_start()
 
     async def send_call_fn(
         self, name: str, args: Dict[str, Any], timeout=300, raise_on_timeout=False
@@ -555,12 +585,47 @@ class ChainlitEmitter(BaseChainlitEmitter):
     def task_start(self):
         """
         Send a task start signal to the UI.
+
+        Raw emit. Task-owning code paths must go through
+        task_acquire/task_release instead; the raw emits are reserved for
+        the handshake (the early task_end in connection_successful) and the
+        level-triggered resyncs — reconnect and the ask-exit path in
+        send_ask_user — where the client is known to have forced its
+        loadingState on its own.
         """
         return self.emit("task_start", {})
 
     def task_end(self):
-        """Send a task end signal to the UI."""
+        """Send a task end signal to the UI. Raw emit — see task_start."""
         return self.emit("task_end", {})
+
+    async def task_acquire(self):
+        """Register an owner of the task indicator.
+
+        The indicator on the client is a single boolean; the per-session
+        counter makes it survive overlapping owners (a short
+        process_message must not darken it from under a live
+        on_thread_ready hook). Edge-triggered: only the 0→1 transition
+        emits task_start.
+        """
+        self.session.task_counter += 1
+        if self.session.task_counter == 1:
+            await self.task_start()
+
+    async def task_release(self):
+        """Release an owner of the task indicator.
+
+        Edge-triggered: only the 1→0 transition emits task_end. A release
+        at zero is a silent no-op (clamped) — e.g. an app's manual
+        compensating task_end sent before its callbacks migrated to the
+        counter.
+        """
+        if self.session.task_counter <= 0:
+            self.session.task_counter = 0
+            return
+        self.session.task_counter -= 1
+        if self.session.task_counter == 0:
+            await self.task_end()
 
     def stream_start(self, step_dict: StepDict):
         """Send a stream start signal to the UI."""

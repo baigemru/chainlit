@@ -458,6 +458,7 @@ class CodeSettings(BaseModel):
     on_chat_start: Optional[Callable[[], Any]] = None
     on_chat_end: Optional[Callable[[], Any]] = None
     on_chat_resume: Optional[Callable[["ThreadDict"], Any]] = None
+    on_thread_ready: Optional[Callable[["ThreadDict"], Any]] = None
     on_message: Optional[Callable[["Message"], Any]] = None
     on_feedback: Optional[Callable[["Feedback"], Any]] = None
     on_slack_reaction_added: Optional[Callable[[Dict[str, Any]], Any]] = None

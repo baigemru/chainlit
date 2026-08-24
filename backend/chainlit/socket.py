@@ -157,6 +157,23 @@ async def _authenticate_connection(
     return None, None
 
 
+def _session_has_live_work(session) -> bool:
+    """Whether the session still has a live ask or a live task.
+
+    The F5 keep-alive check: a page load reusing the session id keeps the
+    session only while something is actually running. Both task slots
+    count — ``current_task`` and the on_thread_ready hook's
+    ``thread_ready_task``.
+    """
+    pending_ask = session.pending_ask
+    if pending_ask is not None and pending_ask.is_live:
+        return True
+    for task in (session.current_task, session.thread_ready_task):
+        if task is not None and not task.done():
+            return True
+    return False
+
+
 @sio.on("connect")  # pyright: ignore [reportOptionalCall]
 async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth):
     user: User | PersistedUser | None = None
@@ -211,13 +228,7 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
             if not _session_owner_matches_user(existing, user):
                 logger.error("Authorization for the session failed.")
                 raise ConnectionRefusedError("session authorization failed")
-            has_live_ask = (
-                existing.pending_ask is not None and existing.pending_ask.is_live
-            )
-            has_live_task = (
-                existing.current_task is not None and not existing.current_task.done()
-            )
-            drop_stale_session = not has_live_ask and not has_live_task
+            drop_stale_session = not _session_has_live_work(existing)
 
     if not drop_stale_session and restore_existing_session(
         sid,
@@ -640,6 +651,8 @@ async def restore_pending_ask(
 async def connection_successful(sid):
     context = init_ws_context(sid)
 
+    # Raw emit: darken the handshake indicator early. The final word on
+    # the indicator is the level-triggered resync in the finally below.
     await context.emitter.task_end()
     # call_fn is bound to the old sid and cannot be restored — clear it
     # before any branch may schedule on_chat_start, whose own call_fn a
@@ -654,6 +667,9 @@ async def connection_successful(sid):
     # snapshot: the transcript replay in restore_pending_ask would then be
     # redundant wire volume on top of the snapshot.
     resume_snapshot_emitted = False
+    # The (filtered) thread of a resume that genuinely happened in THIS
+    # handshake — the launch argument for on_thread_ready in the finally.
+    resumed_thread: Optional[Dict] = None
 
     try:
         if context.session.restored and not context.session.has_first_interaction:
@@ -665,7 +681,9 @@ async def connection_successful(sid):
                 context.session.current_task = task
             return
 
-        if context.session.thread_id_to_resume and config.code.on_chat_resume:
+        if context.session.thread_id_to_resume and (
+            config.code.on_chat_resume or config.code.on_thread_ready
+        ):
             thread = await resume_thread(context.session)
             if thread:
                 # A transit record parked for this session would outlive the
@@ -739,6 +757,7 @@ async def connection_successful(sid):
 
                 await context.emitter.resume_thread(thread)
                 resume_snapshot_emitted = True
+                resumed_thread = thread
 
                 failed_steps, failed_elements = await cleanup_resume_delete_steps(
                     context, thread.get("id"), doomed_steps, doomed_elements
@@ -752,7 +771,10 @@ async def connection_successful(sid):
                 # block for a long time and send messages of its own — they
                 # must land on top of the already-rebuilt feed instead of
                 # being wiped by a stale snapshot emitted afterwards.
-                await config.code.on_chat_resume(thread)
+                # Optional since on_thread_ready: an app may register only
+                # the hook and skip the inline stage.
+                if config.code.on_chat_resume:
+                    await config.code.on_chat_resume(thread)
                 return
             else:
                 await context.emitter.send_resume_thread_error("Thread not found.")
@@ -765,6 +787,12 @@ async def connection_successful(sid):
             task = asyncio.create_task(config.code.on_chat_start())
             context.session.current_task = task
     finally:
+        # Invariant order of the handshake tail (do not reorder):
+        # resume_thread emit → cleanup + resume_processed → on_chat_resume
+        # inline → restore_pending_ask → on_thread_ready launch →
+        # indicator resync → connection_inited.set(). The gate opens last
+        # so a parked orphan-reply conversion always finds the hook slot
+        # already occupied.
         try:
             await restore_pending_ask(
                 context,
@@ -772,11 +800,51 @@ async def connection_successful(sid):
                 skip_transcript_replay=resume_snapshot_emitted,
             )
         finally:
-            # Opened last, and unconditionally — even when a branch above
-            # (on_chat_resume included: there is no try/except around it)
-            # raised. A gate left closed would park orphaned ask_reply
-            # conversions forever; see the ask_reply handler.
-            context.session.connection_inited.set()
+            try:
+                # Launched even when on_chat_resume raised (symmetric with
+                # start: a crash does not cancel restore_pending_ask
+                # either), and in its own finally tier so a
+                # restore_pending_ask crash cannot eat the launch. Guarded
+                # by resumed_thread — a resume genuinely happened in THIS
+                # handshake (thread_id_to_resume would be true even for a
+                # failed lookup, and never resets) — AND by the
+                # once-per-session flag: the resume branch re-enters on
+                # every reconnect.
+                if (
+                    resumed_thread is not None
+                    and config.code.on_thread_ready
+                    and not context.session.resume_task_started
+                ):
+                    context.session.resume_task_started = True
+                    task = asyncio.create_task(
+                        config.code.on_thread_ready(resumed_thread)
+                    )
+                    # Its own slot, NOT current_task: that slot has two
+                    # unconditional writers (client_message and the
+                    # orphan-reply conversion) which would evict the
+                    # long-lived hook almost immediately.
+                    context.session.thread_ready_task = task
+
+                # Level-triggered indicator resync — the final word after
+                # the raw task_end at the top of this handler. With a live
+                # restored ask the composer is in ask mode and owns the
+                # client state. A just-launched hook still counts 0 here
+                # (create_task has not ticked; its with_task wrapper
+                # acquires on the first tick and edge-emits task_start), so
+                # the resync emits task_end first and the wrapper corrects
+                # it — self-healing, do not "fix".
+                pending = context.session.pending_ask
+                has_live_ask = pending is not None and pending.is_live
+                if context.session.task_counter > 0 and not has_live_ask:
+                    await context.emitter.task_start()
+                else:
+                    await context.emitter.task_end()
+            finally:
+                # Opened last, and unconditionally — even when a branch
+                # above (on_chat_resume included: there is no try/except
+                # around it) raised. A gate left closed would park orphaned
+                # ask_reply conversions forever; see the ask_reply handler.
+                context.session.connection_inited.set()
 
 
 @sio.on("clear_session")  # pyright: ignore [reportOptionalCall]
@@ -836,6 +904,12 @@ async def stop(sid):
 
         if session.current_task:
             session.current_task.cancel()
+
+        # Deliberately coarse: one button cancels BOTH the message task and
+        # the on_thread_ready hook rather than guessing which one the user
+        # meant. A cancelled hook re-offers on the next resume.
+        if session.thread_ready_task:
+            session.thread_ready_task.cancel()
 
         if config.code.on_stop:
             await config.code.on_stop()
@@ -898,9 +972,10 @@ async def _convert_orphan_ask_reply(session: WebsocketSession, step_dict, step_i
             pending.future.set_result(step_dict)
             return
 
-        # A live successor ask (installed by a background task during the
-        # handshake) owns the UI: convert WITHOUT clear_ask and leave its
-        # slot alone — the parked reply predates it and cannot be its
+        # A live successor ask (installed during the handshake by the
+        # on_thread_ready task — or, in legacy apps, by a bare background
+        # task) owns the UI: convert WITHOUT clear_ask and leave its slot
+        # alone — the parked reply predates it and cannot be its
         # duplicate. Without a live successor, take the client out of the
         # stale ask mode.
         live_successor = pending is not None and pending.is_live
@@ -1025,7 +1100,7 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
     """Process a message from the user."""
     try:
         context = init_ws_context(session)
-        await context.emitter.task_start()
+        await context.emitter.task_acquire()
         message = await context.emitter.process_message(payload)
 
         if config.code.on_message:
@@ -1039,7 +1114,7 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
             author="Error", content=str(e) or e.__class__.__name__
         ).send()
     finally:
-        await context.emitter.task_end()
+        await context.emitter.task_release()
 
 
 @sio.on("edit_message")  # pyright: ignore [reportOptionalCall]
@@ -1069,15 +1144,19 @@ async def edit_message(sid, payload: MessagePayload):
         # the fresh session silently adopted the undeleted context.)
         return
 
-    await context.emitter.task_start()
-
+    # Acquire/release must stay paired — an unpaired acquire poisons the
+    # owner counter for the rest of the session; hence the acquire lives
+    # inside the try, and the whole block is skipped without an on_message
+    # to end it. (The old code emitted task_start here even without an
+    # on_message: a stuck indicator, gone now.)
     if config.code.on_message:
         try:
+            await context.emitter.task_acquire()
             await config.code.on_message(orig_message)
         except asyncio.CancelledError:
             pass
         finally:
-            await context.emitter.task_end()
+            await context.emitter.task_release()
 
 
 @sio.on("message_favorite")  # pyright: ignore [reportOptionalCall]
@@ -1195,7 +1274,7 @@ async def audio_end(sid):
 
     try:
         context = init_ws_context(session)
-        await context.emitter.task_start()
+        await context.emitter.task_acquire()
 
         if not session.has_first_interaction:
             session.has_first_interaction = True
@@ -1216,7 +1295,7 @@ async def audio_end(sid):
             author="Error", content=str(e) or e.__class__.__name__
         ).send()
     finally:
-        await context.emitter.task_end()
+        await context.emitter.task_release()
 
 
 @sio.on("chat_settings_change")

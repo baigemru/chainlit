@@ -157,8 +157,8 @@ class TestWrapUserFunction:
     async def test_wrap_user_function_with_task(self, mock_chainlit_context):
         """Test wrapping a function with task management."""
         async with mock_chainlit_context as ctx:
-            ctx.emitter.task_start = AsyncMock()
-            ctx.emitter.task_end = AsyncMock()
+            ctx.emitter.task_acquire = AsyncMock()
+            ctx.emitter.task_release = AsyncMock()
 
             def user_func(value):
                 return value * 2
@@ -167,8 +167,8 @@ class TestWrapUserFunction:
             result = await wrapped(10)
 
             assert result == 20
-            ctx.emitter.task_start.assert_called_once()
-            ctx.emitter.task_end.assert_called_once()
+            ctx.emitter.task_acquire.assert_called_once()
+            ctx.emitter.task_release.assert_called_once()
 
     async def test_wrap_user_function_handles_exception(self, mock_chainlit_context):
         """Test that wrapped function handles exceptions."""
@@ -188,8 +188,8 @@ class TestWrapUserFunction:
     ):
         """Test that wrapped function with task handles exceptions."""
         async with mock_chainlit_context as ctx:
-            ctx.emitter.task_start = AsyncMock()
-            ctx.emitter.task_end = AsyncMock()
+            ctx.emitter.task_acquire = AsyncMock()
+            ctx.emitter.task_release = AsyncMock()
 
             def user_func():
                 raise ValueError("Test error")
@@ -199,8 +199,8 @@ class TestWrapUserFunction:
                 result = await wrapped()
 
                 assert result is None
-                ctx.emitter.task_start.assert_called_once()
-                ctx.emitter.task_end.assert_called_once()
+                ctx.emitter.task_acquire.assert_called_once()
+                ctx.emitter.task_release.assert_called_once()
                 mock_logger.exception.assert_called_once()
 
     async def test_wrap_user_function_preserves_function_metadata(

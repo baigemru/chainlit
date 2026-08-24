@@ -48,10 +48,13 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
             param_name: arg for param_name, arg in zip(user_function_params, args)
         }
 
-        if with_task:
-            await context.emitter.task_start()
-
         try:
+            # Inside the try so a cancellation landing during the acquire's
+            # own emit await still reaches the paired release in the
+            # finally — an unpaired acquire poisons the owner counter.
+            if with_task:
+                await context.emitter.task_acquire()
+
             # Call the user-defined function with the arguments
             if inspect.iscoroutinefunction(user_function):
                 return await user_function(**params_values)
@@ -69,7 +72,7 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
                 ).send()
         finally:
             if with_task:
-                await context.emitter.task_end()
+                await context.emitter.task_release()
 
     return wrapper
 

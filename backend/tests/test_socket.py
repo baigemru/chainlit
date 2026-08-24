@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -2320,3 +2321,372 @@ class TestResumeThreadPersistBarrier:
         # get_thread ran only after the pending create_step-style task
         # finished — the snapshot cannot outrun the write anymore.
         assert observed["persist_done"] is True
+
+
+class TestOrphanAskReplyConversion:
+    """An ask_reply that cannot reach a live ask is rescued as a plain message.
+
+    The client's send buffer flushes buffered replies BEFORE it emits
+    connection_successful, so a reply typed into a dead form must not be
+    silently dropped (the historical behavior) — it is converted into the
+    same path a client_message takes, deferred until the handshake finished.
+    """
+
+    _pending_ask = staticmethod(TestAskSurvivesReconnect._pending_ask)
+
+    @staticmethod
+    def _text_value(**overrides):
+        value = {
+            "id": str(uuid.uuid4()),
+            "threadId": "",
+            "type": "user_message",
+            "name": "user",
+            "output": "typed into a dead form",
+            "createdAt": "2026-08-24T10:00:00.000Z",
+            "metadata": {"location": "http://localhost/"},
+        }
+        value.update(overrides)
+        return value
+
+    def _context(self, session):
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    @staticmethod
+    def _cleared(context):
+        return [call.args[0] for call in context.emitter.clear.call_args_list]
+
+    # -- Acceptance 0: the buffered reply survives and waits for the handshake
+
+    @pytest.mark.asyncio
+    async def test_buffered_orphan_text_reply_waits_for_handshake_then_converts(
+        self, mock_session_factory
+    ):
+        gate = asyncio.Event()  # connection_successful has not finished yet
+        session = mock_session_factory(pending_ask=None, connection_inited=gate)
+        context = self._context(session)
+        value = self._text_value()
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply("sid-1", {"stepId": "dead-step", "value": value})
+
+            parked = list(session.deferred_ask_reply_tasks)
+            assert parked, "the orphaned reply must be parked, not dropped"
+
+            # Not converted while the handshake is still running: an
+            # immediate conversion would land in a half-initialized session
+            # (fresh thread / renamed resumed thread).
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            mock_process.assert_not_awaited()
+
+            gate.set()
+            await asyncio.gather(*parked)
+
+            mock_process.assert_awaited_once()
+            payload = mock_process.await_args.args[1]
+            assert payload["message"]["output"] == value["output"]
+            # The reply's parentId pointed into the dead ask — must not leak.
+            assert payload["message"]["parentId"] is None
+            assert "clear_ask" in self._cleared(context)
+            # resume_thread wiped the local echo; the converted message must
+            # be emitted explicitly or it stays invisible until the next
+            # reconnect.
+            context.emitter.send_step.assert_awaited_once()
+            assert session.current_task is not None
+
+    # -- Acceptance 1/2: reply typed after the handshake converts immediately
+
+    @pytest.mark.asyncio
+    async def test_orphan_text_reply_converts_after_open_handshake(
+        self, mock_session_factory
+    ):
+        session = mock_session_factory(pending_ask=None)
+        context = self._context(session)
+        value = self._text_value()
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply("sid-1", {"stepId": "dead-step", "value": value})
+            await asyncio.gather(*list(session.deferred_ask_reply_tasks))
+
+            mock_process.assert_awaited_once()
+            assert "clear_ask" in self._cleared(context)
+
+    # -- Acceptance 3: redelivery of an already answered reply is not converted
+
+    @pytest.mark.asyncio
+    async def test_redelivered_answered_reply_is_not_converted(
+        self, mock_session_factory
+    ):
+        session = mock_session_factory(
+            pending_ask=None, last_resolved_ask_step_id="step-1"
+        )
+        context = self._context(session)
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply("sid-1", {"stepId": "step-1", "value": self._text_value()})
+            await asyncio.gather(*list(session.deferred_ask_reply_tasks))
+
+        mock_process.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_resolving_reply_records_last_resolved_step_id(
+        self, mock_session_factory
+    ):
+        pending = self._pending_ask()
+        session = mock_session_factory(pending_ask=pending)
+
+        with patch.object(WebsocketSession, "get", return_value=session):
+            await ask_reply("sid-1", {"stepId": "step-1", "value": {"name": "go"}})
+
+        assert pending.future.result() == {"name": "go"}
+        assert session.last_resolved_ask_step_id == "step-1"
+
+    @pytest.mark.asyncio
+    async def test_legacy_ack_records_last_resolved_step_id(self, mock_session_factory):
+        from chainlit.emitter import _make_legacy_ask_ack
+
+        session = mock_session_factory()
+        future = asyncio.get_event_loop().create_future()
+
+        ack = _make_legacy_ask_ack(session, future, "step-1")
+        ack({"name": "go"})
+
+        assert future.result() == {"name": "go"}
+        assert session.last_resolved_ask_step_id == "step-1"
+
+    # -- Acceptance 5: mismatch with a LIVE ask is ignored (immediate path)
+
+    @pytest.mark.asyncio
+    async def test_mismatch_with_live_pending_is_ignored(self, mock_session_factory):
+        pending = self._pending_ask()
+        session = mock_session_factory(pending_ask=pending)
+        context = self._context(session)
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply(
+                "sid-1", {"stepId": "old-step", "value": self._text_value()}
+            )
+
+        assert not pending.future.done()
+        assert not session.deferred_ask_reply_tasks
+        mock_process.assert_not_awaited()
+        # A clear_ask here would wipe the live form the server still waits on.
+        assert "clear_ask" not in self._cleared(context)
+
+    # -- Acceptance 6: expired-but-still-in-slot reply resolves, not converts
+
+    @pytest.mark.asyncio
+    async def test_expired_but_pending_reply_still_resolves(self, mock_session_factory):
+        pending = self._pending_ask(deadline=time.monotonic() - 1)
+        session = mock_session_factory(pending_ask=pending)
+        value = self._text_value()
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply("sid-1", {"stepId": "step-1", "value": value})
+
+        assert pending.future.result() == value
+        assert not session.deferred_ask_reply_tasks
+        mock_process.assert_not_awaited()
+
+    # -- Acceptance 7: text typed right after stop converts, not drops
+
+    @pytest.mark.asyncio
+    async def test_reply_after_stop_converts(self, mock_session_factory):
+        pending = self._pending_ask()
+        session = mock_session_factory(pending_ask=pending)
+        session.current_task = None
+        context = self._context(session)
+        mock_config = Mock()
+        mock_config.code.on_stop = None
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+            patch("chainlit.socket.Message") as mock_message,
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            mock_message.return_value.send = AsyncMock()
+            await stop("sid-1")
+
+            # stop must NOT poison the dedup memory: the cancelled ask was
+            # never answered, and a reply typed in the ~RTT window after the
+            # stop click is live input.
+            assert session.last_resolved_ask_step_id is None
+
+            await ask_reply("sid-1", {"stepId": "step-1", "value": self._text_value()})
+            await asyncio.gather(*list(session.deferred_ask_reply_tasks))
+
+            mock_process.assert_awaited_once()
+
+    # -- Acceptance 8/10: non-text orphans only clear the stale form
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "value",
+        [
+            # file-ask reply: a list, must not blow up on .get
+            [{"id": "file-1", "name": "a.pdf", "path": "/tmp/a", "size": 1}],
+            # element-ask reply: arbitrary app props + submitted flag
+            {
+                "submitted": True,
+                "id": str(uuid.uuid4()),
+                "type": "user_message",
+                "output": "sneaky",
+                "createdAt": "2026-08-24T10:00:00.000Z",
+            },
+            # action-ask reply
+            {"id": "a1", "name": "continue", "forId": "step-1"},
+            # garbage
+            "plain string",
+            None,
+        ],
+    )
+    async def test_non_text_orphans_only_clear_ask(self, mock_session_factory, value):
+        session = mock_session_factory(pending_ask=None)
+        context = self._context(session)
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply("sid-1", {"stepId": "dead-step", "value": value})
+
+        assert not session.deferred_ask_reply_tasks
+        mock_process.assert_not_awaited()
+        assert "clear_ask" in self._cleared(context)
+
+    # -- Acceptance 11: live successor at execution time — convert, no clear_ask
+
+    @pytest.mark.asyncio
+    async def test_deferred_conversion_with_live_successor_keeps_its_form(
+        self, mock_session_factory
+    ):
+        gate = asyncio.Event()
+        session = mock_session_factory(pending_ask=None, connection_inited=gate)
+        context = self._context(session)
+        value = self._text_value()
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as mock_process,
+        ):
+            await ask_reply("sid-1", {"stepId": "dead-step", "value": value})
+            parked = list(session.deferred_ask_reply_tasks)
+            assert parked
+
+            # A background task (e.g. the consumer's offers) installed a new
+            # live ask before the handshake finished.
+            successor = self._pending_ask(
+                step_dict={"id": "step-B", "parentId": "parent-B"},
+                spec=AskSpec(timeout=60, type="action", step_id="step-B"),
+            )
+            session.pending_ask = successor
+
+            gate.set()
+            await asyncio.gather(*parked)
+
+            mock_process.assert_awaited_once()
+            # The successor's form must survive: no clear_ask, slot untouched.
+            assert "clear_ask" not in self._cleared(context)
+            assert session.pending_ask is successor
+            assert not successor.future.done()
+
+    # -- Acceptance 14: the gate opens even when a handshake branch raises
+
+    @pytest.mark.asyncio
+    async def test_handshake_gate_opens_when_branch_raises(self, mock_session_factory):
+        gate = asyncio.Event()
+        session = mock_session_factory(pending_ask=None, connection_inited=gate)
+        session.restored = False
+        session.chat_started = True
+        session.thread_id_to_resume = None
+        context = self._context(session)
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+            patch(
+                "chainlit.socket.apply_transit_message",
+                AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+        ):
+            with pytest.raises(RuntimeError):
+                await connection_successful("sid-1")
+
+        assert gate.is_set()
+
+    @pytest.mark.asyncio
+    async def test_handshake_gate_opens_when_restore_itself_raises(
+        self, mock_session_factory
+    ):
+        gate = asyncio.Event()
+        session = mock_session_factory(pending_ask=None, connection_inited=gate)
+        session.restored = False
+        session.chat_started = True
+        session.thread_id_to_resume = None
+        context = self._context(session)
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+            patch(
+                "chainlit.socket.restore_pending_ask",
+                AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+        ):
+            with pytest.raises(RuntimeError):
+                await connection_successful("sid-1")
+
+        assert gate.is_set()
+
+    @pytest.mark.asyncio
+    async def test_normal_handshake_opens_the_gate(self, mock_session_factory):
+        gate = asyncio.Event()
+        session = mock_session_factory(pending_ask=None, connection_inited=gate)
+        session.restored = True
+        session.chat_started = True
+        session.thread_id_to_resume = None
+        context = self._context(session)
+
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", mock_config),
+        ):
+            await connection_successful("sid-1")
+
+        assert gate.is_set()

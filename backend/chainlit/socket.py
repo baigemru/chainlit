@@ -628,7 +628,10 @@ async def restore_pending_ask(
     ask_payload = {"msg": pending_ask.step_dict, "spec": spec_dict}
     emit_ask = getattr(session, "emit_ask", None)
     if emit_ask is not None:
-        await emit_ask(ask_payload, _make_legacy_ask_ack(pending_ask.future))
+        await emit_ask(
+            ask_payload,
+            _make_legacy_ask_ack(session, pending_ask.future, pending_ask.spec.step_id),
+        )
     else:
         await context.emitter.emit("ask", ask_payload)
 
@@ -762,11 +765,18 @@ async def connection_successful(sid):
             task = asyncio.create_task(config.code.on_chat_start())
             context.session.current_task = task
     finally:
-        await restore_pending_ask(
-            context,
-            client_has_ui_state,
-            skip_transcript_replay=resume_snapshot_emitted,
-        )
+        try:
+            await restore_pending_ask(
+                context,
+                client_has_ui_state,
+                skip_transcript_replay=resume_snapshot_emitted,
+            )
+        finally:
+            # Opened last, and unconditionally — even when a branch above
+            # (on_chat_resume included: there is no try/except around it)
+            # raised. A gate left closed would park orphaned ask_reply
+            # conversions forever; see the ask_reply handler.
+            context.session.connection_inited.set()
 
 
 @sio.on("clear_session")  # pyright: ignore [reportOptionalCall]
@@ -831,27 +841,142 @@ async def stop(sid):
             await config.code.on_stop()
 
 
+def _is_convertible_text_reply(value) -> bool:
+    """True when an orphaned ask_reply value is a text-ask user message.
+
+    The gate must be strict — it runs BEFORE process_message: a file-ask
+    reply is a list (``.get`` would raise), an element-ask reply is
+    ``{**props, "submitted": True}`` with arbitrary app props that could
+    smuggle a ``type``/``id`` past a weaker check and crash the conversion
+    into an ErrorMessage.
+    """
+    if not isinstance(value, dict):
+        return False
+    if value.get("type") != "user_message":
+        return False
+    if "submitted" in value:
+        return False
+    if not isinstance(value.get("output"), str):
+        return False
+    if not value.get("createdAt"):
+        return False
+    try:
+        if uuid.UUID(str(value.get("id"))).version != 4:
+            return False
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return True
+
+
+async def _convert_orphan_ask_reply(session: WebsocketSession, step_dict, step_id):
+    """Turn an orphaned text ask_reply into a regular incoming message.
+
+    Parked on the session's handshake gate first: the client flushes its
+    send buffer BEFORE emitting connection_successful, and converting into
+    the half-initialized session would send the message into a fresh empty
+    thread (or rename a resumed one via init_thread) and race
+    on_chat_start/on_chat_resume.
+    """
+    try:
+        await session.connection_inited.wait()
+
+        context = init_ws_context(session)
+
+        # Re-evaluate against the post-handshake state.
+        if step_id is not None and step_id == session.last_resolved_ask_step_id:
+            # Answered meanwhile through the legacy ack path.
+            return
+        pending = session.pending_ask
+        if (
+            pending is not None
+            and step_id == pending.spec.step_id
+            and not pending.future.done()
+        ):
+            # The very ask is (still) waiting after all — deliver the reply
+            # instead of duplicating it as a message.
+            session.last_resolved_ask_step_id = step_id
+            pending.future.set_result(step_dict)
+            return
+
+        # A live successor ask (installed by a background task during the
+        # handshake) owns the UI: convert WITHOUT clear_ask and leave its
+        # slot alone — the parked reply predates it and cannot be its
+        # duplicate. Without a live successor, take the client out of the
+        # stale ask mode.
+        live_successor = pending is not None and pending.is_live
+        if not live_successor:
+            await context.emitter.clear("clear_ask")
+
+        # Explicit new_message: a resume_thread snapshot has already wiped
+        # the client's unpersisted local echo, and process_message emits
+        # nothing itself — without this the rescued message would stay
+        # invisible until the next reconnect. Clients upsert by id, so the
+        # emit is idempotent where the echo is still alive.
+        await context.emitter.send_step(step_dict)
+
+        task = asyncio.create_task(
+            process_message(session, {"message": step_dict, "fileReferences": None})
+        )
+        # Assigned only now, after the gate: an assignment at arrival time
+        # would race the `session.current_task = task` in the on_chat_start
+        # branches of connection_successful.
+        session.current_task = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Failed to convert an orphaned ask_reply into a message")
+
+
 @sio.on("ask_reply")  # pyright: ignore [reportOptionalCall]
 async def ask_reply(sid, payload):
-    """Resolve the pending ask with the user's reply.
+    """Resolve the pending ask with the user's reply — or rescue the reply.
 
     Replies are plain events (not socket.io acks) so the client can buffer
-    them across reconnections. Stale or duplicate replies are ignored: the
-    send buffer may redeliver a reply, and a user may click again after a
-    re-emitted ask.
+    them across reconnections. A reply that cannot reach a live ask
+    (server restart, ask timeout, stop) is NOT silently dropped: a text
+    reply is converted into a regular incoming message (the same path a
+    client_message takes), other payloads just clear the stale form. The
+    user's input never silently disappears on a path where the server can
+    still save it.
     """
     session = WebsocketSession.get(sid)
     if session is None:
         logger.warning("ask_reply received for an unknown session; ignoring")
         return
 
+    payload = payload or {}
+    step_id = payload.get("stepId")
+    value = payload.get("value")
+
     pending_ask = session.pending_ask
-    if pending_ask is None:
-        logger.warning("ask_reply received but no ask is pending; ignoring")
+
+    # 1) The pending ask can take this reply — deliver it, even when the
+    # deadline has technically passed: the wait_for timer starts after the
+    # deadline is set, so an "expired but still in the slot" reply used to
+    # be accepted and converting it instead would hand the app BOTH a
+    # timeout (None) and a duplicate on_message.
+    if (
+        pending_ask is not None
+        and step_id == pending_ask.spec.step_id
+        and not pending_ask.future.done()
+    ):
+        session.last_resolved_ask_step_id = step_id
+        pending_ask.future.set_result(value)
         return
 
-    step_id = (payload or {}).get("stepId")
-    if step_id != pending_ask.spec.step_id:
+    # 2) A LIVE ask for another step owns the UI — a stale reply must
+    # neither resolve it, nor clear its form, nor spawn a parallel
+    # on_message while the server keeps waiting on it.
+    if (
+        pending_ask is not None
+        and pending_ask.is_live
+        and step_id != pending_ask.spec.step_id
+    ):
         logger.warning(
             "ask_reply received for step %s but step %s is pending; ignoring",
             step_id,
@@ -859,11 +984,41 @@ async def ask_reply(sid, payload):
         )
         return
 
-    if pending_ask.future.done():
-        logger.warning("ask_reply received for an already answered ask; ignoring")
+    # From here on the reply is orphaned: no ask, or an already
+    # answered/cancelled one. The pending_ask slot empties milliseconds
+    # after an answer is accepted, so redelivery of an accepted reply (the
+    # send buffer after a blip, a second tab) lands here too — the recorded
+    # last resolved step id is what tells the two cases apart.
+    if step_id is not None and step_id == session.last_resolved_ask_step_id:
+        logger.warning(
+            "ask_reply for step %s was already answered; ignoring the redelivery",
+            step_id,
+        )
+        await init_ws_context(session).emitter.clear("clear_ask")
         return
 
-    pending_ask.future.set_result((payload or {}).get("value"))
+    if not _is_convertible_text_reply(value):
+        # A click on a dead action/element/file form: nothing to rescue —
+        # just take the client out of the stale ask mode.
+        logger.warning(
+            "Orphaned non-text ask_reply for step %s; clearing the stale form",
+            step_id,
+        )
+        await init_ws_context(session).emitter.clear("clear_ask")
+        return
+
+    logger.warning(
+        "Orphaned text ask_reply for step %s; rescuing it as a regular message",
+        step_id,
+    )
+    step_dict = dict(value)
+    # Inherited from the dead ask's step — must not leak into the thread.
+    step_dict["parentId"] = None
+
+    task = asyncio.create_task(_convert_orphan_ask_reply(session, step_dict, step_id))
+    parked = session.deferred_ask_reply_tasks
+    parked.append(task)
+    task.add_done_callback(lambda t: t in parked and parked.remove(t))
 
 
 async def process_message(session: WebsocketSession, payload: MessagePayload):

@@ -1,5 +1,10 @@
 name: Publish libs
 
+# Manual-only in this fork: the consumer installs the Python wheel (the
+# built frontend ships inside it), nobody consumes the fork's libs via
+# npm, and the @chainlit scope belongs to upstream anyway. On releases
+# this workflow was a ~11-minute no-op ("There are no new packages that
+# should be published").
 on:
   workflow_dispatch:
     inputs:
@@ -8,8 +13,6 @@ on:
         required: false
         default: false
         type: boolean
-  release:
-    types: [published]
 
 permissions: read-all
 

@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
 
 import jwt as pyjwt
@@ -16,9 +16,9 @@ def create_jwt(data: User) -> str:
     to_encode: Dict[str, Any] = data.to_dict()
     to_encode.update(
         {
-            "exp": datetime.now(timezone.utc)
+            "exp": datetime.now(UTC)
             + timedelta(seconds=config.project.user_session_timeout),
-            "iat": datetime.now(timezone.utc),  # Add issued at time
+            "iat": datetime.now(UTC),  # Add issued at time
         }
     )
 

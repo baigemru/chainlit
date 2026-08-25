@@ -7,6 +7,7 @@ from typing import (
     Generic,
     List,
     Literal,
+    NotRequired,
     Optional,
     Protocol,
     TypedDict,
@@ -23,7 +24,6 @@ from dataclasses import field
 from dataclasses_json import DataClassJsonMixin
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
-from typing_extensions import NotRequired
 
 InputWidgetType = Literal[
     "switch",

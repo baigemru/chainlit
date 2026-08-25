@@ -153,7 +153,7 @@ class MessageBase(ABC):
         # the default interval if the value is not a finite number.
         try:
             interval = float(self.wait_interval)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             interval = 5.0
         if not math.isfinite(interval):
             interval = 5.0

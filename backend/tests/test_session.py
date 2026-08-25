@@ -1,5 +1,4 @@
 import asyncio
-import builtins
 import json
 import tempfile
 import time
@@ -18,13 +17,6 @@ from chainlit.session import (
     WebsocketSession,
     clean_metadata,
 )
-
-
-def make_exception_group(message: str, exceptions: list[BaseException]):
-    base_exception_group = getattr(builtins, "BaseExceptionGroup", None)
-    if base_exception_group is None:
-        pytest.skip("BaseExceptionGroup is unavailable on this Python version")
-    return base_exception_group(message, exceptions)  # type: ignore[misc]
 
 
 class TestJSONEncoderIgnoreNonSerializable:

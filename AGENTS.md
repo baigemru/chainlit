@@ -16,7 +16,7 @@ Chainlit is a Python framework for building production-ready conversational AI a
 
 ## Prerequisites
 
-- Python: **3.13** (3.13 is this fork's minimum; 3.14 is supported)
+- Python: **3.14** (the only version this fork supports)
 - Node.js: **24+**
 - [uv](https://docs.astral.sh/uv/) — Python package manager
 - [pnpm 9](https://pnpm.io/) — Node.js package manager (Corepack)
@@ -105,7 +105,7 @@ Examples:
 | **Frontend**                   | React 18, TypeScript 5.2, Vite 5, Tailwind CSS 3, Vitest, Zod 3                                                           |
 | **Frontend (state & routing)** | Recoil, React Router 6, react-hook-form, socket.io-client, SWR                                                            |
 | **Frontend (rendering)**       | react-markdown + remark-gfm/math + rehype-katex/raw, highlight.js, lucide-react (icons), Radix UI (primitives), Plotly.js |
-| **Backend**                    | Python 3.13, FastAPI, Starlette, Uvicorn, python-socketio, Pydantic 2, PyJWT, httpx                                       |
+| **Backend**                    | Python 3.14, FastAPI, Starlette, Uvicorn, python-socketio, Pydantic 2, PyJWT, httpx                                       |
 | **LLM integrations**           | MCP, LangChain, LlamaIndex, OpenAI SDK, Semantic Kernel, MistralAI                                                        |
 | **Infra / persistence**        | SQLAlchemy (PostgreSQL/SQLite), DynamoDB + S3 (boto3), Azure Blob / Data Lake, Google Cloud Storage, LiteralAI            |
 | **DX**                         | pre-commit hooks, linting, formatting, type checking, unit testing, E2E testing                                           |

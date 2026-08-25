@@ -28,7 +28,7 @@ def init_lc_cache():
                 ).SQLiteCache
             except ImportError:
                 SQLiteCache = importlib.import_module("langchain.cache").SQLiteCache
-        except (AttributeError, ImportError):
+        except AttributeError, ImportError:
             return
 
         if config.project.lc_cache_path is not None:

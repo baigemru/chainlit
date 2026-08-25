@@ -5,11 +5,10 @@ import time
 import uuid
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Dict, List, Optional, TypedDict, Union
+from typing import Callable, Dict, List, NotRequired, Optional, TypedDict, Union
 
 from literalai import BaseGeneration
 from literalai.observability.step import StepType, TrueStepType
-from typing_extensions import NotRequired
 
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps

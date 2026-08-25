@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Annotated, Dict, List, Optional, Union, cast
 
 import socketio
 from fastapi import (
@@ -31,7 +31,6 @@ from fastapi.security import OAuth2PasswordRequestForm
 from starlette.datastructures import URL
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import Receive, Scope, Send
-from typing_extensions import Annotated
 from watchfiles import awatch
 
 from chainlit.auth import create_jwt, decode_jwt, get_configuration, get_current_user

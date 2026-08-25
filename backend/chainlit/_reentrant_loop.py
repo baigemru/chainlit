@@ -38,8 +38,8 @@ Private APIs relied on
 - ``_asyncio._swap_current_task(loop, task)`` — sets the loop's current task
   and returns the previous one.
 
-``_swap_current_task`` is what makes this version-independent across the
-supported range. The obvious alternative, mutating ``asyncio.tasks``'
+``_swap_current_task`` is what 3.14 gives us to do this. The obvious
+alternative, mutating ``asyncio.tasks``'
 ``_current_tasks`` dict, stopped working in 3.14: current-task tracking moved
 into the thread state, so writing to that dict is a silent no-op and the task
 never actually gets suspended -- which is what broke nest_asyncio there.

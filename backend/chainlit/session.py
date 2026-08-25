@@ -60,7 +60,7 @@ class McpSession:
         self.stop_event.set()
         try:
             await asyncio.wait_for(self.task, timeout=_CLOSE_TIMEOUT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "MCP session %r did not shut down within %.1fs — cancelling",
                 self.name,

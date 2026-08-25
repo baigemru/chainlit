@@ -371,6 +371,72 @@ async def claim_transit_message(sid, payload):
     transit.reassign(session.id, next_id)
 
 
+async def supersede_abandoned_ask_sessions(current_session, thread_id) -> None:
+    """Evict abandoned ask-parked sessions of this thread.
+
+    Runs on the FIRST entry of a new session into the resume branch,
+    right before the resume="delete" cleanup decision. Since 2.11.33 an
+    on_thread_ready hook parked on a long (e.g. 48h) offer ask keeps its
+    session's ``thread_ready_task`` live, so every F5/tab-close left a
+    session that made ``thread_has_live_task`` true forever — the thread
+    was never "genuinely idle" again and flagged offer steps piled up one
+    per entry. Abandoned means ALL of: the socket is disconnected (the
+    explicit flag set by the disconnect handler), a live ``pending_ask``
+    is waiting for a user who is now HERE in the new session, and the
+    session belongs to this thread. A connected second tab (its form is
+    really on screen) and a disconnected pipeline running BETWEEN asks
+    (``pending_ask is None`` — it will finish and post its results) are
+    deliberately untouched.
+
+    Eviction is ``session.delete()``: its synchronous prefix pops the
+    session from the registry, so ``thread_has_live_task`` /
+    ``protected_step_ids`` recompute correctly on this same entry (a mere
+    task cancel would not do — a just-cancelled task is not ``done()``
+    yet). The cancelled hook re-offers on the next resume by contract;
+    nothing is written on the cancel path ("Timed out" is unreachable,
+    ``action.remove()`` is skipped). ``delete()`` awaits (MCP close, up
+    to 10s per session), so ALL criteria are re-checked synchronously
+    right before each delete — a candidate that reconnected while a
+    previous delete was in flight survives; there is no await between the
+    re-check and the delete.
+    """
+    from chainlit.session import ws_sessions_id
+
+    for candidate in list(ws_sessions_id.values()):
+        if candidate is current_session:
+            continue
+        if getattr(candidate, "thread_id", None) != thread_id:
+            continue
+        # Tolerant read on purpose (same convention as resume_processed):
+        # a session object without the flag counts as connected.
+        if not getattr(candidate, "socket_disconnected", False):
+            continue
+        pending_ask = getattr(candidate, "pending_ask", None)
+        if pending_ask is None or not pending_ask.is_live:
+            continue
+        if ws_sessions_id.get(candidate.id) is not candidate:
+            continue
+        logger.info(
+            "Superseding abandoned ask session %s of thread %s",
+            candidate.id,
+            thread_id,
+        )
+        # Parity with the drop_stale path in connect: delete() removes the
+        # sid mapping, so the disconnect GC's clear() would no-op and leak
+        # the user_sessions entry forever.
+        user_sessions.pop(candidate.id, None)
+        try:
+            await candidate.delete()
+        except Exception:
+            # A zombie's dirty state (e.g. a files-dir race under rmtree)
+            # must not break the incoming user's handshake. The candidate
+            # may then still sit in the registry, but its ask and tasks
+            # were already cancelled by delete()'s prefix — the cleanup
+            # gate unblocks by the next entry, and the GC remains the
+            # backstop.
+            logger.exception("Failed to delete superseded session %s", candidate.id)
+
+
 async def cleanup_resume_delete_steps(
     context, thread_id: str, doomed_steps: list, doomed_elements: list
 ) -> Tuple[list, list]:
@@ -735,6 +801,13 @@ async def connection_successful(sid):
                 doomed_steps: list = []
                 doomed_elements: list = []
                 if not getattr(context.session, "resume_processed", False):
+                    # The user is provably back: evict this thread's
+                    # abandoned ask-parked sessions BEFORE the cleanup
+                    # decision, so the gate below can find the thread
+                    # genuinely idle again.
+                    await supersede_abandoned_ask_sessions(
+                        context.session, thread.get("id")
+                    )
                     thread, doomed_steps, doomed_elements = split_resume_delete(thread)
                 else:
                     # Re-entry: never re-run split_resume_delete here — it
@@ -881,6 +954,12 @@ async def disconnect(sid):
 
     if not session:
         return
+
+    # Set FIRST, before anything below can await (on_chat_end / persist
+    # may hang for a long time): a new session resuming the same thread
+    # reads this flag to tell an abandoned session from a connected one
+    # (supersede_abandoned_ask_sessions). Cleared only in restore().
+    session.socket_disconnected = True
 
     init_ws_context(session)
 

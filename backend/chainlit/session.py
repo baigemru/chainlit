@@ -388,6 +388,15 @@ class WebsocketSession(BaseSession):
 
         self.restored = False
         self.pending_ask = None
+        # True while this session's socket is disconnected. The EXPLICIT
+        # liveness marker for the supersede check in the resume branch —
+        # deliberately not derived from ws_sessions_sid (the sid mapping
+        # changes hands during restore and proves nothing about the
+        # transport). Set at the very top of the disconnect handler,
+        # cleared only in restore() — the single revival path. An instance
+        # attribute on purpose: readers use getattr(s, ..., False) so
+        # Mock(spec=WebsocketSession) fakes without it count as connected.
+        self.socket_disconnected = False
         # Task running the app's on_thread_ready hook. Its own slot on
         # purpose: current_task has two unconditional writers
         # (client_message and the orphan-reply conversion) that would evict
@@ -521,6 +530,11 @@ class WebsocketSession(BaseSession):
         ws_sessions_sid[new_socket_id] = self
         self.socket_id = new_socket_id
         self.restored = True
+        # The socket is live again — the session is no longer a supersede
+        # candidate. (A late disconnect of the OLD socket cannot re-flag
+        # it: the sid mapping above was already handed over, so that
+        # handler finds no session.)
+        self.socket_disconnected = False
         # Closed here, in connect, NOT at the start of connection_successful:
         # buffered client events flush in between, and a gate left open from
         # the previous connection would let an orphaned ask_reply convert

@@ -2,6 +2,7 @@ import inspect
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload
 
 from fastapi import Request, Response
+from fastapi.routing import iter_route_contexts
 from mcp import ClientSession
 from starlette.datastructures import Headers
 
@@ -23,20 +24,12 @@ _CATCH_ALL_SUFFIX = "/{full_path:path}"
 def _holds_catch_all(route: Any) -> bool:
     """Whether ``route`` is the SPA catch-all, or the object that holds it.
 
-    FastAPI below 0.137 copied included routes straight into
-    ``app.router.routes``, so the catch-all sat there as a plain ``APIRoute``.
-    0.137 keeps an included router as a single object instead and the catch-all
-    lives inside it — anything appended after that object is shadowed by the
-    SPA, so it is what a custom route has to precede. ``iter_route_contexts``,
-    added in 0.137.2 for exactly this, flattens either shape.
+    Since FastAPI 0.137 an included router stays a single object in
+    ``app.router.routes`` and the catch-all lives inside it, so that object is
+    what a custom route has to precede — anything after it is shadowed by the
+    SPA. ``iter_route_contexts`` (0.137.2) flattens one entry's subtree, which
+    is what makes the enclosing object findable.
     """
-    try:
-        from fastapi.routing import iter_route_contexts
-    except ImportError:  # FastAPI < 0.137.2, where routes are already flat
-        from fastapi.routing import APIRoute
-
-        return isinstance(route, APIRoute) and route.path.endswith(_CATCH_ALL_SUFFIX)
-
     return any(
         (context.path or "").endswith(_CATCH_ALL_SUFFIX)
         for context in iter_route_contexts([route])

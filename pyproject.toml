@@ -3,7 +3,7 @@ dev = ["actionlint-py>=1.7.12.24"]
 backend = ["chainlit"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 
 [[tool.mypy.overrides]]
 module = [

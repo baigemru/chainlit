@@ -35,61 +35,35 @@ Private APIs relied on
 - ``loop._stopping`` — set when something calls ``loop.stop()`` during the
   nested run; the run must then yield control rather than spin.
 - ``loop._ready`` — the scheduler's ready queue, padded as described above.
-- ``_asyncio._swap_current_task(loop, task)`` (Python 3.12+) — sets the loop's
-  current task and returns the previous one.
-- ``asyncio.tasks._current_tasks`` (Python 3.10-3.11, where
-  ``_swap_current_task`` does not exist) — the mapping the C accelerator reads
-  current-task state from on those versions.
+- ``_asyncio._swap_current_task(loop, task)`` — sets the loop's current task
+  and returns the previous one.
 
-The version split is not cosmetic: Python 3.14 moved current-task tracking off
-``_current_tasks`` and into the thread state, so mutating that dict there is a
-silent no-op and the task never actually gets suspended.
+``_swap_current_task`` is what makes this version-independent across the
+supported range. The obvious alternative, mutating ``asyncio.tasks``'
+``_current_tasks`` dict, stopped working in 3.14: current-task tracking moved
+into the thread state, so writing to that dict is a silent no-op and the task
+never actually gets suspended -- which is what broke nest_asyncio there.
 ``test_reentrant_loop.py`` asserts each of these attributes exists on the
 running interpreter, so a future Python removing one fails loudly instead.
 """
 
 import asyncio
-import sys
-from typing import Any, Callable, Coroutine, Optional, TypeVar
+from _asyncio import _swap_current_task  # type: ignore[attr-defined]
+from typing import Any, Coroutine, Optional, TypeVar
 
 T_Retval = TypeVar("T_Retval")
 
-_SuspendCurrentTask = Callable[[asyncio.AbstractEventLoop], Optional[asyncio.Task]]
-_ResumeCurrentTask = Callable[[asyncio.AbstractEventLoop, Optional[asyncio.Task]], None]
+
+def _suspend_current_task(loop: asyncio.AbstractEventLoop) -> Optional[asyncio.Task]:
+    """Clear the loop's current task and return it."""
+    return _swap_current_task(loop, None)
 
 
-def _make_suspension_pair() -> tuple[_SuspendCurrentTask, _ResumeCurrentTask]:
-    """Pick how to suspend and restore the loop's current task on this Python."""
-    if sys.version_info >= (3, 12):
-        from _asyncio import _swap_current_task
-
-        def suspend(loop: asyncio.AbstractEventLoop) -> Optional[asyncio.Task]:
-            return _swap_current_task(loop, None)
-
-        def resume(
-            loop: asyncio.AbstractEventLoop, task: Optional[asyncio.Task]
-        ) -> None:
-            _swap_current_task(loop, task)
-
-        return suspend, resume
-
-    current_tasks = asyncio.tasks._current_tasks  # type: ignore[attr-defined]
-
-    def suspend_legacy(loop: asyncio.AbstractEventLoop) -> Optional[asyncio.Task]:
-        return current_tasks.pop(loop, None)
-
-    def resume_legacy(
-        loop: asyncio.AbstractEventLoop, task: Optional[asyncio.Task]
-    ) -> None:
-        if task is None:
-            current_tasks.pop(loop, None)
-        else:
-            current_tasks[loop] = task
-
-    return suspend_legacy, resume_legacy
-
-
-_suspend_current_task, _resume_current_task = _make_suspension_pair()
+def _resume_current_task(
+    loop: asyncio.AbstractEventLoop, task: Optional[asyncio.Task]
+) -> None:
+    """Put back what ``_suspend_current_task`` returned."""
+    _swap_current_task(loop, task)
 
 
 def _noop() -> None:

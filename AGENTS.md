@@ -16,7 +16,7 @@ Chainlit is a Python framework for building production-ready conversational AI a
 
 ## Prerequisites
 
-- Python: **3.13** (3.10+ is the framework's minimum, but development targets 3.13)
+- Python: **3.13** (3.13 is this fork's minimum; 3.14 is supported)
 - Node.js: **24+**
 - [uv](https://docs.astral.sh/uv/) — Python package manager
 - [pnpm 9](https://pnpm.io/) — Node.js package manager (Corepack)

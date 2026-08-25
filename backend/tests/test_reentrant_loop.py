@@ -10,7 +10,7 @@ misbehaving at runtime.
 
 import asyncio
 import collections
-import sys
+from _asyncio import _swap_current_task  # type: ignore[attr-defined]
 
 import anyio
 import pytest
@@ -150,7 +150,7 @@ async def test_nothing_in_asyncio_is_globally_patched():
 async def test_private_apis_relied_on_behave_as_the_module_assumes():
     """Contract test for the private APIs documented in the module docstring.
 
-    Asserts not just that the current-task store exists but that it is the one
+    Asserts not just that the swap helper exists but that it is what
     asyncio.current_task() actually consults -- Python 3.14 kept
     asyncio.tasks._current_tasks while moving the real store into the thread
     state, and that silent divergence is what broke nest_asyncio.
@@ -168,19 +168,13 @@ async def test_private_apis_relied_on_behave_as_the_module_assumes():
 
     task = asyncio.current_task()
 
-    if sys.version_info >= (3, 12):
-        from _asyncio import _swap_current_task
-
-        running_loop = asyncio.get_running_loop()
-        previous = _swap_current_task(running_loop, None)
-        try:
-            assert previous is task
-            assert asyncio.current_task() is None
-        finally:
-            _swap_current_task(running_loop, previous)
-    else:
-        assert isinstance(asyncio.tasks._current_tasks, dict)
-        assert asyncio.tasks._current_tasks[asyncio.get_running_loop()] is task
+    running_loop = asyncio.get_running_loop()
+    previous = _swap_current_task(running_loop, None)
+    try:
+        assert previous is task
+        assert asyncio.current_task() is None
+    finally:
+        _swap_current_task(running_loop, previous)
 
     assert asyncio.current_task() is task
 

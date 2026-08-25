@@ -509,7 +509,7 @@ class AskUserMessage(AskMessageBase):
         chat_context.add(cast("Message", self))
 
         res = cast(
-            Union[None, StepDict],
+            Union[StepDict, None],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
         )
 
@@ -591,7 +591,7 @@ class AskFileMessage(AskMessageBase):
         chat_context.add(cast("Message", self))
 
         res = cast(
-            Union[None, List[FileDict]],
+            Union[List[FileDict], None],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
         )
 

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import chainlit as cl
 from chainlit.auth import create_jwt
+from chainlit.callbacks import _holds_catch_all
 from chainlit.config import config
 from chainlit.server import app
 from chainlit.user import User
@@ -41,11 +42,20 @@ class TestServerRoute:
         async def custom_position(request: Request):
             return {}
 
-        paths = [
-            route.path for route in app.router.routes if isinstance(route, APIRoute)
+        routes = app.router.routes
+        positions = [
+            index
+            for index, route in enumerate(routes)
+            if isinstance(route, APIRoute) and route.path == "/custom-position"
         ]
-        assert "/custom-position" in paths
-        assert paths.index("/custom-position") < paths.index("/{full_path:path}")
+        assert len(positions) == 1
+        # The catch-all is a plain APIRoute here on FastAPI below 0.141 and
+        # lives inside an included-router wrapper from 0.141 on; either way the
+        # custom route has to come first.
+        catch_all = next(
+            index for index, route in enumerate(routes) if _holds_catch_all(route)
+        )
+        assert positions[0] < catch_all
 
     def test_reregistration_replaces_route(
         self, test_client: TestClient, cleanup_routes

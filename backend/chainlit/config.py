@@ -449,8 +449,8 @@ class CodeSettings(BaseModel):
     module: Any = None
 
     # App life cycle callbacks
-    on_app_startup: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
-    on_app_shutdown: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
+    on_app_startup: Optional[Callable[[], Union[Awaitable[None], None]]] = None
+    on_app_shutdown: Optional[Callable[[], Union[Awaitable[None], None]]] = None
 
     # Session life cycle callbacks
     on_logout: Optional[Callable[["Request", "Response"], Any]] = None

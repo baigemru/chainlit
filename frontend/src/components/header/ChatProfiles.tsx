@@ -36,7 +36,8 @@ interface Props {
 export default function ChatProfiles({ navigate }: Props) {
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
-  const { chatProfile, setChatProfile } = useChatSession();
+  const { chatProfile, setChatProfile, switchChatProfile, hotSwapChatProfile } =
+    useChatSession();
   const { firstInteraction } = useChatMessages();
   const { clear } = useChatInteract();
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
@@ -75,6 +76,14 @@ export default function ChatProfiles({ navigate }: Props) {
   };
 
   const handleConfirm = (profile: string) => {
+    // Hot swap: same session, same thread, transcript kept — so none of the
+    // teardown below applies. The atom is left to chat_profile_changed.
+    // Falls back to the legacy path when the socket is dead.
+    if (hotSwapChatProfile && switchChatProfile(profile)) {
+      setNewChatProfile(null);
+      setOpenDialog(false);
+      return;
+    }
     setChatProfile(profile);
     setNewChatProfile(null);
     setAttachments([]);
@@ -94,7 +103,9 @@ export default function ChatProfiles({ navigate }: Props) {
         value={chatProfile || ''}
         onValueChange={(value) => {
           setNewChatProfile(value);
-          if (firstInteraction) {
+          // The warning dialog exists because the legacy path destroys the
+          // chat; a hot swap keeps it, so there is nothing to warn about.
+          if (firstInteraction && !hotSwapChatProfile) {
             setOpenDialog(true);
           } else {
             handleConfirm(value);

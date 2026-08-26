@@ -498,6 +498,15 @@ const useChatSession = () => {
       socket.on('chat_profile_changed', (data) => {
         if (!data?.chatProfile) return;
         setChatProfile(data.chatProfile);
+        // sync=true is the post-reconnect resync ("adopt this value"), so
+        // nothing else changed. sync=false is a real switch, and the server
+        // cleared session.chat_settings in the same step — mirror it, or the
+        // settings modal keeps offering the previous profile's form and
+        // values, which no longer exist server-side.
+        if (data.sync === false) {
+          setChatSettingsInputs([]);
+          resetChatSettingsValue();
+        }
       });
 
       socket.on('ask_timeout', () => {

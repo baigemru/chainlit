@@ -36,8 +36,17 @@ interface Props {
 export default function ChatProfiles({ navigate }: Props) {
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
-  const { chatProfile, setChatProfile, switchChatProfile, hotSwapChatProfile } =
-    useChatSession();
+  const {
+    chatProfile,
+    setChatProfile,
+    switchChatProfile,
+    hotSwapChatProfile,
+    session
+  } = useChatSession();
+  // Whether a swap can actually happen right now. The warning dialog and the
+  // teardown must agree on this: deciding the dialog by the flag but the
+  // teardown by socket liveness meant a blip silently destroyed the chat.
+  const canHotSwap = !!hotSwapChatProfile && !!session?.socket?.connected;
   const { firstInteraction } = useChatMessages();
   const { clear } = useChatInteract();
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
@@ -52,10 +61,14 @@ export default function ChatProfiles({ navigate }: Props) {
 
   // Handle case when no profile is selected
   useEffect(() => {
-    if (!chatProfile) {
+    // On the hot-swap path the server is the authority and announces the
+    // profile with chat_profile_changed on every connect. Writing the atom
+    // locally here would be the client/server divergence the design rules
+    // out — and, since the atom drives the config refetch, a loop.
+    if (!chatProfile && !hotSwapChatProfile) {
       setChatProfile(config.chatProfiles[0].name);
     }
-  }, [chatProfile, config.chatProfiles, setChatProfile]);
+  }, [chatProfile, config.chatProfiles, setChatProfile, hotSwapChatProfile]);
 
   // Handle case when selected profile becomes invalid
   useEffect(() => {
@@ -63,11 +76,11 @@ export default function ChatProfiles({ navigate }: Props) {
       const profileExists = config.chatProfiles.some(
         (profile) => profile.name === chatProfile
       );
-      if (!profileExists) {
+      if (!profileExists && !hotSwapChatProfile) {
         setChatProfile(config.chatProfiles[0].name);
       }
     }
-  }, [chatProfile, config.chatProfiles, setChatProfile]);
+  }, [chatProfile, config.chatProfiles, setChatProfile, hotSwapChatProfile]);
 
   const handleClose = () => {
     setOpenDialog(false);
@@ -79,7 +92,7 @@ export default function ChatProfiles({ navigate }: Props) {
     // Hot swap: same session, same thread, transcript kept — so none of the
     // teardown below applies. The atom is left to chat_profile_changed.
     // Falls back to the legacy path when the socket is dead.
-    if (hotSwapChatProfile && switchChatProfile(profile)) {
+    if (canHotSwap && switchChatProfile(profile)) {
       setNewChatProfile(null);
       setOpenDialog(false);
       return;
@@ -105,7 +118,7 @@ export default function ChatProfiles({ navigate }: Props) {
           setNewChatProfile(value);
           // The warning dialog exists because the legacy path destroys the
           // chat; a hot swap keeps it, so there is nothing to warn about.
-          if (firstInteraction && !hotSwapChatProfile) {
+          if (firstInteraction && !canHotSwap) {
             setOpenDialog(true);
           } else {
             handleConfirm(value);

@@ -374,6 +374,7 @@ class TestThreadReadyTaskSlot:
             thread_id="thread-live",
             current_task=None,
             thread_ready_task=hook_task,
+            profile_start_task=None,
         )
         ws_sessions_id["fake-live"] = fake
         try:
@@ -390,12 +391,18 @@ class TestThreadReadyTaskSlot:
         hook_task = asyncio.create_task(asyncio.sleep(30))
         try:
             session = SimpleNamespace(
-                pending_ask=None, current_task=None, thread_ready_task=hook_task
+                pending_ask=None,
+                current_task=None,
+                thread_ready_task=hook_task,
+                profile_start_task=None,
             )
             assert _session_has_live_work(session) is True
 
             done_session = SimpleNamespace(
-                pending_ask=None, current_task=None, thread_ready_task=None
+                pending_ask=None,
+                current_task=None,
+                thread_ready_task=None,
+                profile_start_task=None,
             )
             assert _session_has_live_work(done_session) is False
         finally:
@@ -615,6 +622,7 @@ class TestReconnectResync:
         mock_config.code.on_chat_start = None
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
+        mock_config.code.on_profile_start = None
         return mock_config
 
     @pytest.mark.asyncio

@@ -83,6 +83,7 @@ from .callbacks import (
     on_mcp_connect,
     on_mcp_disconnect,
     on_message,
+    on_profile_start,
     on_settings_edit,
     on_settings_update,
     on_shared_thread_view,
@@ -207,6 +208,7 @@ __all__ = [
     "on_mcp_connect",
     "on_mcp_disconnect",
     "on_message",
+    "on_profile_start",
     "on_settings_edit",
     "on_settings_update",
     "on_shared_thread_view",
@@ -223,9 +225,31 @@ __all__ = [
     "set_starters",
     "sleep",
     "step",
+    "switch_chat_profile",
     "user_session",
 ]
 
 
 def __dir__():
     return __all__
+
+
+async def switch_chat_profile(name: str, payload: Any = None) -> bool:
+    """Switch this session's chat profile in place.
+
+    Same session, same thread, transcript kept; the app's
+    ``@cl.on_profile_start`` hook runs instead of ``on_chat_start``.
+    Callable from ``on_message``, ``on_chat_start`` and action callbacks —
+    the context is already established there.
+
+    Requires the ``hot_swap_chat_profile`` feature flag. Returns False when
+    the flag is off, the session is not a websocket session, or the name is
+    empty or not among this user's profiles.
+    """
+    from chainlit.session import WebsocketSession
+    from chainlit.socket import perform_profile_switch
+
+    session = context.session
+    if not isinstance(session, WebsocketSession):
+        return False
+    return await perform_profile_switch(session, name, payload=payload, source="server")

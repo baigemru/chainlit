@@ -363,3 +363,22 @@ class Feedback:
 class UpdateFeedbackRequest(BaseModel):
     feedback: Feedback
     sessionId: str
+
+
+@dataclass
+class ProfileStartInfo:
+    """Argument of the ``@cl.on_profile_start`` hook.
+
+    ``payload`` travels as a hook argument, not through
+    ``user_session["transit_message"]``: that key belongs entirely to the
+    legacy ``set_chat_profile`` hand-off and the two must not be mixed.
+
+    ``source`` tells a manual switch in the selector (``"client"``) from a
+    programmatic one made by the app (``"server"``) — an app needs this to
+    avoid re-asking what a HITL confirmation already settled.
+    """
+
+    profile: str
+    previous: Optional[str]
+    payload: Any = None
+    source: str = "client"

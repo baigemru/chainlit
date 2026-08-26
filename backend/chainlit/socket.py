@@ -14,7 +14,7 @@ from chainlit.auth import (
 )
 from chainlit.chat_context import chat_context
 from chainlit.config import ChainlitConfig, config
-from chainlit.context import init_ws_context
+from chainlit.context import context, init_ws_context
 from chainlit.data import get_data_layer
 from chainlit.emitter import _make_legacy_ask_ack
 from chainlit.logger import logger
@@ -27,6 +27,7 @@ from chainlit.types import (
     InputAudioChunk,
     InputAudioChunkPayload,
     MessagePayload,
+    ProfileStartInfo,
 )
 from chainlit.user import PersistedUser, User
 from chainlit.user_session import user_sessions
@@ -85,6 +86,135 @@ def restore_existing_session(
 async def persist_user_session(thread_id: str, metadata: Dict):
     if data_layer := get_data_layer():
         await data_layer.update_thread(thread_id=thread_id, metadata=metadata)
+
+
+async def _resolve_profile_names(session: WebsocketSession) -> Optional[list]:
+    """Profile names this session's user is allowed to switch to."""
+    if not config.code.set_chat_profiles:
+        return None
+    profiles = await config.code.set_chat_profiles(session.user, session.language)
+    return [p.name for p in profiles or []]
+
+
+async def perform_profile_switch(
+    session: WebsocketSession,
+    name: str,
+    payload: Any = None,
+    source: str = "client",
+) -> bool:
+    """Switch the chat profile in place — same session, same thread.
+
+    The single implementation behind both entry points (the server-side
+    ``cl.switch_chat_profile`` and the ``switch_chat_profile`` socket
+    event). Step order is load-bearing; see the task doc.
+
+    Returns False when the feature is off, the name is empty or the name is
+    not among the profiles this user may use — nothing is mutated and no
+    event is emitted, so the client atom (which only follows
+    ``chat_profile_changed``) can never diverge from the server.
+    """
+    if not config.features.hot_swap_chat_profile:
+        return False
+    if not name:
+        return False
+
+    async with session.profile_switch_lock:
+        # (1) Validation doubles as authorization: set_chat_profiles is
+        # per-user, so a client asking for a profile it may not see is
+        # refused here.
+        allowed = await _resolve_profile_names(session)
+        if allowed is not None and name not in allowed:
+            logger.warning("Unknown or forbidden chat profile: %s", name)
+            return False
+
+        previous = session.chat_profile
+
+        # (2) No-op: the selector may echo the current profile. Do not
+        # restart the hook on that.
+        if previous == name:
+            return True
+
+        caller = asyncio.current_task()
+
+        # (3) A previous hook instance would fight the new one over the
+        # single pending_ask slot. Guarded by identity: switching from
+        # inside the hook itself stays legal, and then the old instance is
+        # the caller and finishes "outside the slot".
+        prev_hook = session.profile_start_task
+        if prev_hook is not None and prev_hook is not caller and not prev_hook.done():
+            prev_hook.cancel()
+
+        # (4) A resume offer parked in the old profile's context is stale.
+        if (
+            session.thread_ready_task is not None
+            and not session.thread_ready_task.done()
+        ):
+            session.thread_ready_task.cancel()
+
+        # (4a) Same guard for current_task. It holds on_message when the app
+        # switches from inside one — cancelling the caller would kill the
+        # switch mid-await — but at cold start it holds on_chat_start, and a
+        # wizard left blocked on an ask would otherwise keep running under
+        # the profile the user just left. Precedent: stop (below) cancels
+        # this slot outright and calls it "deliberately coarse".
+        live = session.current_task
+        if live is not None and live is not caller and not live.done():
+            live.cancel()
+
+        # (5) Free the ask slot, exactly as stop does: send_ask_user refuses
+        # a second concurrent ask and returns None, so without this the
+        # hook's first question would silently no-op.
+        if session.pending_ask is not None:
+            session.pending_ask.cancel()
+            session.pending_ask = None
+            await context.emitter.clear("clear_ask")
+
+        # (6) The profile itself.
+        session.chat_profile = name
+        user_sessions.setdefault(session.id, {})["chat_profile"] = name
+
+        # (6a) The old profile's settings form must not be read by the new
+        # profile; to_persistable carries this into thread metadata.
+        session.chat_settings = {}
+
+        # (7) Reset before re-resolving: resolve_config returns the cached
+        # value otherwise, and the new profile's config_overrides would
+        # silently not apply.
+        session.config = config
+        await session.resolve_config()
+
+        # (8) Persist now, not on disconnect. Guarded like the disconnect
+        # handler: update_thread upserts, so persisting before the first
+        # interaction would create an empty thread row.
+        if session.thread_id and session.has_first_interaction:
+            await persist_user_session(session.thread_id, session.to_persistable())
+
+        # (9) Only now may the client move its atom.
+        await context.emitter.emit(
+            "chat_profile_changed",
+            {"chatProfile": name, "previous": previous, "sync": False},
+        )
+
+        # (10) The hook, in its own slot.
+        if config.code.on_profile_start:
+            info = ProfileStartInfo(
+                profile=name, previous=previous, payload=payload, source=source
+            )
+            session.profile_start_task = asyncio.create_task(
+                config.code.on_profile_start(info)
+            )
+
+        # (11) Level-triggered indicator resync, same self-healing shape as
+        # the connection_successful tail: a just-launched hook still counts
+        # 0 and its wrapper corrects this on the first tick.
+        pending = session.pending_ask
+        has_live_ask = pending is not None and pending.is_live
+        if session.task_counter > 0 and not has_live_ask:
+            await context.emitter.task_start()
+        else:
+            await context.emitter.task_end()
+
+        return True
 
 
 async def resume_thread(session: WebsocketSession):
@@ -161,13 +291,18 @@ def _session_has_live_work(session) -> bool:
 
     The F5 keep-alive check: a page load reusing the session id keeps the
     session only while something is actually running. Both task slots
-    count — ``current_task`` and the on_thread_ready hook's
-    ``thread_ready_task``.
+    count — ``current_task``, the on_thread_ready hook's
+    ``thread_ready_task`` and the on_profile_start hook's
+    ``profile_start_task``.
     """
     pending_ask = session.pending_ask
     if pending_ask is not None and pending_ask.is_live:
         return True
-    for task in (session.current_task, session.thread_ready_task):
+    for task in (
+        session.current_task,
+        session.thread_ready_task,
+        session.profile_start_task,
+    ):
         if task is not None and not task.done():
             return True
     return False
@@ -932,6 +1067,22 @@ async def connection_successful(sid):
                     await context.emitter.task_start()
                 else:
                     await context.emitter.task_end()
+
+                # Profile resync. The client atom is not persisted, so after
+                # F5 App.tsx falls back to the config default while the
+                # server kept the real one. sync=True marks this as "adopt
+                # this value", not "a switch happened": the client only
+                # updates its atom and runs nothing else. Clients that do
+                # not know the event ignore it.
+                if config.features.hot_swap_chat_profile:
+                    await context.emitter.emit(
+                        "chat_profile_changed",
+                        {
+                            "chatProfile": context.session.chat_profile,
+                            "previous": context.session.chat_profile,
+                            "sync": True,
+                        },
+                    )
             finally:
                 # Opened last, and unconditionally — even when a branch
                 # above (on_chat_resume included: there is no try/except
@@ -987,6 +1138,26 @@ async def disconnect(sid):
         asyncio.ensure_future(clear_on_timeout(sid))
 
 
+@sio.on("switch_chat_profile")  # pyright: ignore [reportOptionalCall]
+async def switch_chat_profile_event(sid, payload):
+    """Manual switch from the profile selector.
+
+    The flag is checked before init_ws_context so a disabled feature
+    mutates nothing (upstream PR #3015 mutates the context regardless).
+    Never blocks on the hook: perform_profile_switch launches it via
+    create_task, because a handler parked on a multi-hour ask would starve
+    this session's event loop — including the ask_reply that ask waits for.
+    """
+    if not config.features.hot_swap_chat_profile:
+        return
+    session = WebsocketSession.get(sid)
+    if not session:
+        return
+    name = (payload or {}).get("chatProfile") or ""
+    init_ws_context(session)
+    await perform_profile_switch(session, name, payload=None, source="client")
+
+
 @sio.on("stop")  # pyright: ignore [reportOptionalCall]
 async def stop(sid):
     if session := WebsocketSession.get(sid):
@@ -1009,6 +1180,11 @@ async def stop(sid):
         # meant. A cancelled hook re-offers on the next resume.
         if session.thread_ready_task:
             session.thread_ready_task.cancel()
+
+        # Same for the on_profile_start hook: without this the stop button
+        # leaves it running and its pending ask unquenched.
+        if session.profile_start_task:
+            session.profile_start_task.cancel()
 
         if config.code.on_stop:
             await config.code.on_stop()

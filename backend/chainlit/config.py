@@ -37,6 +37,7 @@ if TYPE_CHECKING:
         ChatProfile,
         Feedback,
         InputAudioChunk,
+        ProfileStartInfo,
         Starter,
         StarterCategory,
         ThreadDict,
@@ -46,7 +47,7 @@ else:
     # Pydantic needs to resolve forward annotations. Because all of these are used
     # within `typing.Callable`, alias to `Any` as Pydantic does not perform validation
     # of callable argument/return types anyway.
-    Request = Response = Action = Message = ChatProfile = InputAudioChunk = Starter = StarterCategory = ThreadDict = User = Feedback = Any  # fmt: off
+    Request = Response = Action = Message = ChatProfile = InputAudioChunk = ProfileStartInfo = Starter = StarterCategory = ThreadDict = User = Feedback = Any  # fmt: off
 
 BACKEND_ROOT = os.path.dirname(__file__)
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(BACKEND_ROOT))
@@ -117,6 +118,10 @@ allow_thread_sharing = false
 
 # Enable favorite messages
 favorites = false
+
+# Switch chat profiles in place: same session, same thread, transcript kept.
+# The app's @cl.on_profile_start hook runs instead of on_chat_start.
+hot_swap_chat_profile = false
 
 [features.slack]
 # Add emoji reaction when message is received (requires reactions:write OAuth scope)
@@ -366,6 +371,7 @@ class FeaturesSettings(BaseModel):
     edit_message: bool = True
     allow_thread_sharing: bool = False
     favorites: bool = False
+    hot_swap_chat_profile: bool = False
 
 
 class HeaderLink(BaseModel):
@@ -459,6 +465,7 @@ class CodeSettings(BaseModel):
     on_chat_end: Optional[Callable[[], Any]] = None
     on_chat_resume: Optional[Callable[["ThreadDict"], Any]] = None
     on_thread_ready: Optional[Callable[["ThreadDict"], Any]] = None
+    on_profile_start: Optional[Callable[["ProfileStartInfo"], Any]] = None
     on_message: Optional[Callable[["Message"], Any]] = None
     on_feedback: Optional[Callable[["Feedback"], Any]] = None
     on_slack_reaction_added: Optional[Callable[[Dict[str, Any]], Any]] = None

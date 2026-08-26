@@ -26,7 +26,7 @@ from chainlit.chat_context import chat_context
 from chainlit.config import ChainlitConfig, config, config as global_config
 from chainlit.context import context, init_ws_context
 from chainlit.data import get_data_layer
-from chainlit.emitter import _make_legacy_ask_ack
+from chainlit.emitter import _make_legacy_ask_ack, resync_task_indicator
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
 from chainlit.persist_barrier import create_persist_task, wait_for_persist
@@ -271,15 +271,8 @@ async def perform_profile_switch(
                     config.code.on_profile_start(info)
                 )
 
-            # (11) Level-triggered indicator resync, same self-healing shape
-            # as the connection_successful tail: a just-launched hook still
-            # counts 0 and its wrapper corrects this on the first tick.
-            pending = session.pending_ask
-            has_live_ask = pending is not None and pending.is_live
-            if session.task_counter > 0 and not has_live_ask:
-                await context.emitter.task_start()
-            else:
-                await context.emitter.task_end()
+            # (11) Level-triggered indicator resync.
+            await resync_task_indicator(session, context.emitter)
 
         return True
 
@@ -1145,20 +1138,9 @@ async def connection_successful(sid):
                     # long-lived hook almost immediately.
                     context.session.thread_ready_task = task
 
-                # Level-triggered indicator resync — the final word after
-                # the raw task_end at the top of this handler. With a live
-                # restored ask the composer is in ask mode and owns the
-                # client state. A just-launched hook still counts 0 here
-                # (create_task has not ticked; its with_task wrapper
-                # acquires on the first tick and edge-emits task_start), so
-                # the resync emits task_end first and the wrapper corrects
-                # it — self-healing, do not "fix".
-                pending = context.session.pending_ask
-                has_live_ask = pending is not None and pending.is_live
-                if context.session.task_counter > 0 and not has_live_ask:
-                    await context.emitter.task_start()
-                else:
-                    await context.emitter.task_end()
+                # The final word after the raw task_end at the top of this
+                # handler.
+                await resync_task_indicator(context.session, context.emitter)
 
             finally:
                 # Opened last, and unconditionally — even when a branch

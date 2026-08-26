@@ -35,6 +35,37 @@ from chainlit.user import PersistedUser
 from chainlit.utils import utc_now
 
 
+async def resync_task_indicator(
+    session, emitter, *, emit_end_when_idle: bool = True
+) -> None:
+    """Re-emit the task indicator from the counter's current truth.
+
+    Level-triggered, for the three moments the client forces its own
+    loadingState and an edge emit can no longer be trusted: the reconnect
+    handshake, an in-place profile switch, and the way out of an ask. A
+    live ask owns the client state instead — the composer is in ask mode —
+    so it keeps the indicator dark whatever the counter says.
+
+    A hook launched moments earlier still counts 0 here (create_task has
+    not ticked; its with_task wrapper acquires on the first tick and
+    edge-emits task_start), so this emits task_end and the wrapper
+    corrects it. Self-healing, do not "fix".
+
+    `emit_end_when_idle=False` on the ask-exit path: send_ask_user already
+    emitted the raw pause and must not emit a second task_end.
+
+    Takes the emitter explicitly instead of living on it, so each caller
+    passes the one bound to its own context — and so tests driving a
+    mocked emitter still observe task_start/task_end.
+    """
+    pending = session.pending_ask
+    has_live_ask = pending is not None and pending.is_live
+    if session.task_counter > 0 and not has_live_ask:
+        await emitter.task_start()
+    elif emit_end_when_idle:
+        await emitter.task_end()
+
+
 def _strict_ask_slot(session) -> bool:
     """Whether a busy ask slot must raise instead of returning None.
 
@@ -581,10 +612,7 @@ class ChainlitEmitter(BaseChainlitEmitter):
             # ask (stop freed the slot, on_stop installed a new one) owns
             # the client state instead — same guard as the reconnect
             # resync.
-            successor = session.pending_ask
-            has_live_successor = successor is not None and successor.is_live
-            if session.task_counter > 0 and not has_live_successor:
-                await self.task_start()
+            await resync_task_indicator(session, self, emit_end_when_idle=False)
 
     async def send_call_fn(
         self, name: str, args: Dict[str, Any], timeout=300, raise_on_timeout=False

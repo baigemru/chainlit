@@ -357,10 +357,13 @@ def _session_has_live_work(session) -> bool:
     """Whether the session still has a live ask or a live task.
 
     The F5 keep-alive check: a page load reusing the session id keeps the
-    session only while something is actually running. Both task slots
+    session only while something is actually running. All three task slots
     count — ``current_task``, the on_thread_ready hook's
     ``thread_ready_task`` and the on_profile_start hook's
-    ``profile_start_task``.
+    ``profile_start_task`` — and so do ask_reply conversions still parked
+    on the handshake gate: dropping the session cancels them, and
+    ``delete()`` calls that the one path where rescued user input is
+    genuinely lost.
     """
     pending_ask = session.pending_ask
     if pending_ask is not None and pending_ask.is_live:
@@ -371,6 +374,9 @@ def _session_has_live_work(session) -> bool:
         session.profile_start_task,
     ):
         if task is not None and not task.done():
+            return True
+    for task in getattr(session, "deferred_ask_reply_tasks", None) or []:
+        if not task.done():
             return True
     return False
 

@@ -309,3 +309,44 @@ class TestStrictAskSlot:
             )
 
         assert mock_websocket_session.pending_ask is pending
+
+
+class TestParkedConversionCountsAsLiveWork:
+    """An ask_reply conversion waiting on the handshake gate is live work.
+
+    Dropping the session on a page load cancels it, and `delete()` calls
+    that the one path where rescued user input is genuinely lost.
+    """
+
+    @pytest.mark.asyncio
+    async def test_parked_conversion_keeps_the_session(self):
+        from chainlit.socket import _session_has_live_work
+
+        parked = asyncio.create_task(asyncio.sleep(30))
+        try:
+            session = SimpleNamespace(
+                pending_ask=None,
+                current_task=None,
+                thread_ready_task=None,
+                profile_start_task=None,
+                deferred_ask_reply_tasks=[parked],
+            )
+            assert _session_has_live_work(session) is True
+        finally:
+            parked.cancel()
+
+    @pytest.mark.asyncio
+    async def test_finished_conversion_does_not_keep_the_session(self):
+        from chainlit.socket import _session_has_live_work
+
+        done = asyncio.create_task(asyncio.sleep(0))
+        await done
+
+        session = SimpleNamespace(
+            pending_ask=None,
+            current_task=None,
+            thread_ready_task=None,
+            profile_start_task=None,
+            deferred_ask_reply_tasks=[done],
+        )
+        assert _session_has_live_work(session) is False

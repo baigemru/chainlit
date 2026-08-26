@@ -595,11 +595,7 @@ class ChainlitDataLayer(BaseDataLayer):
         if metadata is None:
             metadata = {}
 
-        thread_name = truncate(
-            name
-            if name is not None
-            else (metadata.get("name") if metadata and "name" in metadata else None)
-        )
+        thread_name = truncate(name)
 
         existing = await self.execute_query(
             'SELECT "metadata" FROM "Thread" WHERE id = $1',
@@ -609,6 +605,15 @@ class ChainlitDataLayer(BaseDataLayer):
         thread_exists = isinstance(existing, list) and existing
         if thread_exists and not has_updates:
             return
+
+        # The metadata["name"] fallback names a thread on creation only.
+        # Applying it to an existing thread lets any later metadata write
+        # rename it behind the user's back — user_session travels in that
+        # metadata, so an app key called "name" is enough. Harmless while
+        # this ran once per disconnect; a chat profile switch persists on
+        # every switch.
+        if name is None and not thread_exists and metadata and "name" in metadata:
+            thread_name = truncate(metadata.get("name"))
 
         base = {}
         if thread_exists:

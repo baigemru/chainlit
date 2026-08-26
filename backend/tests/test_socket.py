@@ -587,6 +587,7 @@ class TestConnectionSuccessfulIdempotency:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=mock_context),
@@ -623,6 +624,7 @@ class TestConnectionSuccessfulIdempotency:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=mock_context),
@@ -655,6 +657,7 @@ class TestConnectionSuccessfulIdempotency:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=mock_context),
@@ -707,6 +710,7 @@ class TestSendParentThread:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         return (
             patch("chainlit.socket.init_ws_context", return_value=context),
             patch("chainlit.socket.config", mock_config),
@@ -887,6 +891,7 @@ class TestAskSurvivesReconnect:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         return mock_config
 
     @pytest.mark.asyncio
@@ -1079,6 +1084,7 @@ class TestAskRestoreEdgeCases:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         return mock_config
 
     @pytest.mark.asyncio
@@ -1189,6 +1195,7 @@ class TestAskRestoreEdgeCases:
         mock_config.code.on_chat_resume = AsyncMock()
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         thread = {"id": "thread-1", "steps": []}
 
         with (
@@ -1770,6 +1777,7 @@ class TestResumeSnapshotSkipsReplay:
         mock_config.code.on_chat_resume = AsyncMock()
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=context),
@@ -1803,6 +1811,7 @@ class TestResumeSnapshotSkipsReplay:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=context),
@@ -1869,6 +1878,7 @@ class TestResumeDeleteFlag:
         mock_config.code.on_chat_resume = on_chat_resume
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         return mock_config
 
     async def _run_resume(self, thread, session, context, data_layer):
@@ -2400,6 +2410,7 @@ class TestSupersedeAbandonedAskSessions:
         mock_config.code.on_chat_resume = on_chat_resume
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         return mock_config
 
     async def _run_resume(self, thread, session, context, data_layer):
@@ -3143,6 +3154,7 @@ class TestOrphanAskReplyConversion:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=context),
@@ -3172,6 +3184,7 @@ class TestOrphanAskReplyConversion:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=context),
@@ -3200,6 +3213,7 @@ class TestOrphanAskReplyConversion:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
 
         with (
             patch("chainlit.socket.init_ws_context", return_value=context),

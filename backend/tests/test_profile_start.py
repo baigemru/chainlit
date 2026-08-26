@@ -53,9 +53,15 @@ def switch_env(mock_session_factory, monkeypatch):
     ctx.session = session
     monkeypatch.setattr("chainlit.socket.context", ctx)
 
+    # The procedure re-checks the registry after every await, so a session
+    # that is not registered reads as evicted.
+    from chainlit.session import ws_sessions_id
+
+    ws_sessions_id[session.id] = session
     user_sessions[session.id] = {}
     yield session, emitter
     user_sessions.pop(session.id, None)
+    ws_sessions_id.pop(session.id, None)
 
 
 class TestFeatureGate:
@@ -139,12 +145,19 @@ class TestBasicSwitch:
         persist = AsyncMock()
         monkeypatch.setattr("chainlit.socket.persist_user_session", persist)
 
+        session.to_persistable = Mock(
+            side_effect=lambda: {"chat_profile": session.chat_profile}
+        )
+
         await perform_profile_switch(session, "B")
         persist.assert_not_called()
 
         session.has_first_interaction = True
         await perform_profile_switch(session, "A")
         persist.assert_awaited_once()
+        # The snapshot must be of the NEW profile: persisting before step 6
+        # would write the old one.
+        assert persist.await_args.args == (session.thread_id, {"chat_profile": "A"})
 
 
 class TestAskSlot:
@@ -306,14 +319,165 @@ class TestSlotReaders:
         session.profile_start_task = task
         assert _session_has_live_work(session) is True
 
-    def test_resume_policy_checks_the_new_slot(self):
-        from chainlit import resume_policy
+    def test_resume_policy_checks_the_new_slot(self, switch_env):
+        """A second-tab resume must not delete steps under a live hook."""
+        from chainlit.resume_policy import thread_has_live_task
 
-        src = resume_policy.thread_has_live_task.__doc__ or ""
-        assert "profile_start_task" in src
+        session, _ = switch_env
+        session.thread_id = "t-live"
+        session.current_task = None
+        session.thread_ready_task = None
+        task = Mock()
+        task.done.return_value = False
+        session.profile_start_task = task
+
+        assert thread_has_live_task("t-live") is True
+        task.done.return_value = True
+        assert thread_has_live_task("t-live") is False
 
 
 def test_session_declares_slot_and_lock():
     """Mock(spec=WebsocketSession) builds its spec from dir(): the class-level
     declaration is what makes the slot fakeable in every other test."""
     assert "profile_start_task" in dir(WebsocketSession)
+    assert "profile_switch_lock" in dir(WebsocketSession)
+
+
+class TestSurvivingMutants:
+    """Regressions for mutations that the first cut of this file let live."""
+
+    async def test_step7_resets_config_before_resolving(self, switch_env):
+        """П9: without the reset, resolve_config returns the cached value and
+        the new profile's config_overrides silently do not apply."""
+        session, _ = switch_env
+        seen = []
+        session.config = object()  # a resolved, profile-specific config
+        session.resolve_config = AsyncMock(
+            side_effect=lambda: seen.append(session.config)
+        )
+
+        await perform_profile_switch(session, "B")
+
+        assert seen == [config], "resolve_config must see the global config"
+
+    async def test_emit_lands_before_the_hook_starts(self, switch_env, monkeypatch):
+        """Step 9 before step 10: anything rewriting client state must land
+        before the hook can emit anything of its own."""
+        session, emitter = switch_env
+        order = []
+        emitter.emit = AsyncMock(side_effect=lambda *a, **k: order.append("emit"))
+
+        async def hook(info):
+            order.append("hook")
+
+        monkeypatch.setattr(config.code, "on_profile_start", hook)
+
+        await perform_profile_switch(session, "B")
+        await session.profile_start_task
+
+        assert order[0] == "emit"
+
+    async def test_indicator_resync_runs(self, switch_env):
+        """П16: step 11 is the level-triggered word on the indicator."""
+        session, emitter = switch_env
+        session.task_counter = 2
+        session.pending_ask = None
+
+        await perform_profile_switch(session, "B")
+        emitter.task_start.assert_awaited()
+
+        session.task_counter = 0
+        await perform_profile_switch(session, "A")
+        emitter.task_end.assert_awaited()
+
+    async def test_source_server_reaches_the_hook(self, switch_env, monkeypatch):
+        """П2: cl.switch_chat_profile must be distinguishable from a click."""
+        session, _ = switch_env
+        seen = []
+        monkeypatch.setattr(
+            config.code, "on_profile_start", lambda info: _collect(seen, info)
+        )
+
+        await perform_profile_switch(session, "B", source="server")
+        await session.profile_start_task
+
+        assert seen[0].source == "server"
+
+    async def test_decorator_wraps_with_task_physics(self, monkeypatch):
+        """with_task=True is what gives the hook the on_chat_start physics:
+        the indicator counter, the swallowed CancelledError and the
+        ErrorMessage on anything else.
+
+        Structural on purpose — the wrapper reaches for the real ambient
+        context, which this file's fixture does not provide. П3 and the e2e
+        app cover the runtime behaviour.
+        """
+        import inspect
+
+        import chainlit as cl
+
+        src = inspect.getsource(cl.on_profile_start)
+        assert "wrap_user_function(func, with_task=True)" in src
+
+
+async def _collect(sink, info):
+    sink.append(info)
+
+
+class TestStopCancelsHook:
+    async def test_stop_cancels_the_profile_hook(self, switch_env, monkeypatch):
+        """П10 — reader one of four. The stop button must not leave the hook
+        running with its question unquenched."""
+        from unittest.mock import patch
+
+        from chainlit.socket import stop
+
+        session, emitter = switch_env
+        task = Mock()
+        task.done.return_value = False
+        session.profile_start_task = task
+        session.current_task = None
+        session.thread_ready_task = None
+        session.pending_ask = None
+
+        ctx = Mock()
+        ctx.emitter = emitter
+        ctx.session = session
+        mock_config = Mock()
+        mock_config.code.on_stop = None
+
+        with (
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=ctx),
+            patch("chainlit.socket.config", mock_config),
+            patch("chainlit.socket.Message") as mock_message,
+        ):
+            mock_message.return_value.send = AsyncMock()
+            await stop("sid-1")
+
+        task.cancel.assert_called_once()
+
+
+class TestDeleteCancelsHook:
+    async def test_session_delete_cancels_the_hook(
+        self, mock_websocket_session, tmp_path
+    ):
+        """Reader four: a surviving hook would be a zombie writing into the
+        thread after its session is gone."""
+        session = mock_websocket_session
+        session.files_dir = tmp_path / "files"
+        session.files_dir.mkdir()
+        session.thread_ready_task = None
+        session.pending_ask = None
+        session.socket_id = "sid-del"
+        session.id = "sess-del"
+        session.deferred_ask_reply_tasks = []
+        session.mcp_sessions = {}
+        session.parked_conversions = []
+        task = Mock()
+        task.done.return_value = False
+        session.profile_start_task = task
+
+        await WebsocketSession.delete(session)
+
+        task.cancel.assert_called_once()

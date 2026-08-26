@@ -432,11 +432,16 @@ class TestThreadReadyLaunch:
         mock_context.emitter = AsyncMock()
         return mock_context
 
-    def _config(self, on_chat_resume, on_thread_ready):
+    def _config(self, on_chat_resume, on_thread_ready, on_profile_start=None):
         mock_config = Mock()
         mock_config.code.on_chat_start = None
         mock_config.code.on_chat_resume = on_chat_resume
         mock_config.code.on_thread_ready = on_thread_ready
+        # A bare Mock auto-creates truthy attributes, so both of these must be
+        # set explicitly or the resume path fires the profile hook and the
+        # extra resync emit.
+        mock_config.code.on_profile_start = on_profile_start
+        mock_config.features.hot_swap_chat_profile = False
         return mock_config
 
     @pytest.mark.asyncio
@@ -623,6 +628,7 @@ class TestReconnectResync:
         mock_config.code.on_chat_resume = None
         mock_config.code.on_thread_ready = None
         mock_config.code.on_profile_start = None
+        mock_config.features.hot_swap_chat_profile = False
         return mock_config
 
     @pytest.mark.asyncio

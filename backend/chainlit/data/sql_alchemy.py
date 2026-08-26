@@ -266,11 +266,17 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         base = {k: v for k, v in base.items() if k not in to_delete}
         metadata = {**base, **incoming}
 
-        name_value = name
-        if name_value is None and metadata:
-            name_value = metadata.get("name")
-
         is_new_thread = not thread_exists
+
+        # The metadata["name"] fallback names a thread on creation only.
+        # Applying it to an existing thread lets any later metadata write
+        # rename it behind the user's back — user_session travels in that
+        # metadata, so an app key called "name" is enough. Harmless while
+        # this ran once per disconnect; a chat profile switch persists on
+        # every switch.
+        name_value = name
+        if name_value is None and metadata and is_new_thread:
+            name_value = metadata.get("name")
         created_at_value = await self.get_current_timestamp() if is_new_thread else None
 
         data = {

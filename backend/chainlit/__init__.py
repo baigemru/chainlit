@@ -246,10 +246,16 @@ async def switch_chat_profile(name: str, payload: Any = None) -> bool:
     the flag is off, the session is not a websocket session, or the name is
     empty or not among this user's profiles.
     """
+    from chainlit.context import ChainlitContextException
     from chainlit.session import WebsocketSession
     from chainlit.socket import perform_profile_switch
 
-    session = context.session
+    # §3.3 promises False, not an exception, so a call from background code
+    # with no context must not raise.
+    try:
+        session = context.session
+    except ChainlitContextException:
+        return False
     if not isinstance(session, WebsocketSession):
         return False
     return await perform_profile_switch(session, name, payload=payload, source="server")

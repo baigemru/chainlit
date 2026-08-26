@@ -344,6 +344,12 @@ class WebsocketSession(BaseSession):
 
     profile_start_task: Optional[asyncio.Task] = None
 
+    # Declared with a default so it shows up in dir(): Mock(spec=...) builds
+    # its spec from there, and the switch procedure reads this attribute
+    # directly rather than through getattr. Real instances replace it in
+    # __init__ — a Lock must never be shared across sessions.
+    profile_switch_lock: Optional[asyncio.Lock] = None
+
     mcp_sessions: dict[str, McpSession]
 
     def __init__(

@@ -15,6 +15,13 @@ async def main():
     # far above any CI hiccup. 20s still leaves room for a slow-CI reload.
     action_timeout = 20 if res["output"] == "timeout" else 120
 
+    if res["output"] == "dropped":
+        # Window for the dropped-emits scenario: the test kills the
+        # transport during this sleep, so the action/ask emits below land
+        # in a dead socket and are silently dropped — the prod repro for
+        # the unconditional button re-emit on reconnect.
+        await cl.sleep(5)
+
     action_res = await cl.AskActionMessage(
         content="Pick an action!",
         timeout=action_timeout,

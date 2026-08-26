@@ -1635,16 +1635,24 @@ async def _deliver_to_pending_text_ask(session, payload) -> bool:
         return False
 
     # The client echoed this message locally WITHOUT a parentId (that is
-    # added only on the replyMessage path), and send_ask_user emits nothing
-    # of its own — so stamp the parent and re-send the step, the way the
-    # orphan conversion does. Clients upsert by id.
+    # added only on the replyMessage path), so stamp the parent before
+    # handing it over.
     step_dict = cast(
         StepDict, {**step_dict, "parentId": pending.step_dict.get("parentId")}
     )
-    await init_ws_context(session).emitter.send_step(step_dict)
 
+    # Resolve FIRST, emit after: no await may sit between the done() check
+    # above and set_result. stop(), a profile switch and the ask's own
+    # timeout all cancel this future, and set_result on a cancelled one
+    # raises InvalidStateError out of the handler — losing the message on
+    # both paths at once. Same order as the ask_reply handler.
     session.last_resolved_ask_step_id = pending.spec.step_id
     pending.future.set_result(step_dict)
+
+    # send_ask_user emits nothing of its own, so the stamped step has to be
+    # re-sent or the client keeps its parentless local echo. Clients upsert
+    # by id, and a failure here must not unanswer the ask.
+    await init_ws_context(session).emitter.send_step(step_dict)
     logger.info(
         "client_message delivered to the pending ask of step %s", pending.spec.step_id
     )

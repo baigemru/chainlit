@@ -350,3 +350,55 @@ class TestParkedConversionCountsAsLiveWork:
             deferred_ask_reply_tasks=[done],
         )
         assert _session_has_live_work(session) is False
+
+
+class TestResolveBeforeEmit:
+    """No await may sit between the done() check and set_result."""
+
+    @pytest.mark.asyncio
+    async def test_a_failing_send_step_still_answers_the_ask(
+        self, mock_session_factory
+    ):
+        """The emit is a courtesy re-send; it must not unanswer the ask."""
+        pending = _text_ask()
+        session = mock_session_factory(pending_ask=pending)
+        context = _context(session)
+        context.emitter.send_step = AsyncMock(side_effect=RuntimeError("dead socket"))
+
+        with (
+            patch.object(WebsocketSession, "require", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()) as process,
+            pytest.raises(RuntimeError),
+        ):
+            await client_message("sid-1", {"message": _text_step()})
+
+        assert pending.future.done()
+        process.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_during_the_emit_does_not_explode(
+        self, mock_session_factory
+    ):
+        """stop()/a profile switch cancel the future; set_result already ran.
+
+        With the emit before set_result this raised InvalidStateError out of
+        the handler and lost the message on both paths.
+        """
+        pending = _text_ask()
+        session = mock_session_factory(pending_ask=pending)
+        context = _context(session)
+
+        async def cancel_mid_emit(_step):
+            pending.cancel()
+
+        context.emitter.send_step = AsyncMock(side_effect=cancel_mid_emit)
+
+        with (
+            patch.object(WebsocketSession, "require", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.process_message", new=AsyncMock()),
+        ):
+            await client_message("sid-1", {"message": _text_step()})
+
+        assert pending.future.done()

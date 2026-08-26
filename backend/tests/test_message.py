@@ -16,6 +16,7 @@ from chainlit.message import (
     Message,
     MessageBase,
 )
+from chainlit.types import AskSlotBusyError
 
 
 @contextmanager
@@ -1193,3 +1194,76 @@ class TestMessageResumePolicy:
 
             persisted = mock_data_layer.create_step.call_args[0][0]
             assert persisted["metadata"] == {"resume_policy": "delete"}
+
+
+class TestAskSlotBusyTeardown:
+    """A refused ask must still clean up what it already sent.
+
+    The refusal returns before send_ask_user's own try/finally, so every
+    teardown below the call is skipped unless the send methods repeat it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_ask_action_removes_its_buttons(self):
+        """Otherwise the buttons stay clickable, wired to nothing."""
+        with mock_chainlit_context() as ctx:
+            action = AsyncMock(spec=Action)
+            action.id = "action_123"
+            msg = AskActionMessage(content="Choose", actions=[action])
+            ctx.emitter.send_ask_user = AsyncMock(
+                side_effect=AskSlotBusyError("blocking-step")
+            )
+
+            with (
+                patch("chainlit.message.get_data_layer", return_value=None),
+                patch("chainlit.message.config") as mock_config,
+                patch("chainlit.message.chat_context"),
+            ):
+                mock_config.code.author_rename = None
+
+                with pytest.raises(AskSlotBusyError):
+                    await msg.send()
+
+            action.remove.assert_awaited_once()
+            assert msg.wait_for_answer is False
+            # Not a timeout: the question text must stay as it was.
+            assert msg.content == "Choose"
+
+    @pytest.mark.asyncio
+    async def test_ask_user_clears_wait_for_answer(self):
+        with mock_chainlit_context() as ctx:
+            msg = AskUserMessage(content="Your name?")
+            ctx.emitter.send_ask_user = AsyncMock(
+                side_effect=AskSlotBusyError("blocking-step")
+            )
+
+            with (
+                patch("chainlit.message.get_data_layer", return_value=None),
+                patch("chainlit.message.config") as mock_config,
+                patch("chainlit.message.chat_context"),
+            ):
+                mock_config.code.author_rename = None
+
+                with pytest.raises(AskSlotBusyError):
+                    await msg.send()
+
+            assert msg.wait_for_answer is False
+
+    @pytest.mark.asyncio
+    async def test_ask_file_clears_wait_for_answer(self):
+        with mock_chainlit_context() as ctx:
+            msg = AskFileMessage(content="Upload", accept=["text/plain"])
+            ctx.emitter.send_ask_user = AsyncMock(
+                side_effect=AskSlotBusyError("blocking-step")
+            )
+
+            with (
+                patch("chainlit.message.get_data_layer", return_value=None),
+                patch("chainlit.message.config") as mock_config,
+            ):
+                mock_config.code.author_rename = None
+
+                with pytest.raises(AskSlotBusyError):
+                    await msg.send()
+
+            assert msg.wait_for_answer is False

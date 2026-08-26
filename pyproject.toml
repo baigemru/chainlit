@@ -3,7 +3,7 @@ dev = ["actionlint-py>=1.7.12.24"]
 backend = ["chainlit"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 
 [[tool.mypy.overrides]]
 module = [
@@ -13,9 +13,11 @@ module = [
     "langflow",
     "lazify",
     "plotly",
-    "nest_asyncio",
     "socketio.*",
     "syncer",
+    # No release installable on 3.14: the ones allowing pydantic >=2.12
+    # pull a pre-release azure-ai-agents, so it is absent from the tests extra.
+    "semantic_kernel.*",
     "azure.storage.filedatalake",
     "google-cloud-storage",
     "azure.storage.blob",
@@ -30,7 +32,7 @@ testpaths = ["backend/tests"]
 asyncio_mode = "auto"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -63,6 +65,17 @@ ignore = [
     "RUF006",
     "RUF012",
     "ISC001",
+    # Unquoting annotations breaks runtime introspection: names imported only
+    # under TYPE_CHECKING resolve fine for mypy but raise NameError when
+    # something evaluates the annotation (Mock(spec=...), inspect.signature).
+    "UP037",
+    # Restyling public types buys nothing and changes what consumers see:
+    # UP042 would turn Theme into a StrEnum, changing str(Theme.light) from
+    # "Theme.light" to "light"; UP046/UP047 would move public generics to PEP
+    # 695 parameter lists.
+    "UP042",
+    "UP046",
+    "UP047",
 ]
 
 [tool.ruff.lint.isort]

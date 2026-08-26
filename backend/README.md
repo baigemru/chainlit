@@ -87,7 +87,6 @@ async def main(message: cl.Message):
         None.
     """
 
-
     # Call the tool
     tool_res = await tool()
 

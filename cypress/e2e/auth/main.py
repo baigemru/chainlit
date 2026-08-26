@@ -32,10 +32,19 @@ async def custom_token_auth() -> Response:
     return response
 
 
-catch_all_route = None
-for route in app.routes:
-    if route.path == "/{full_path:path}":
-        catch_all_route = route
+def _holds_catch_all(route) -> bool:
+    """The SPA catch-all itself, or — from FastAPI 0.137 on, where an included
+    router stays a single object instead of being copied out — whatever holds
+    it."""
+    from fastapi.routing import iter_route_contexts
+
+    return any(
+        context.path == "/{full_path:path}" for context in iter_route_contexts([route])
+    )
+
+
+# Push it behind the routes declared above so they win over the UI.
+catch_all_route = next((route for route in app.routes if _holds_catch_all(route)), None)
 
 if catch_all_route:
     app.routes.remove(catch_all_route)

@@ -153,7 +153,7 @@ class MessageBase(ABC):
         # the default interval if the value is not a finite number.
         try:
             interval = float(self.wait_interval)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             interval = 5.0
         if not math.isfinite(interval):
             interval = 5.0
@@ -509,7 +509,7 @@ class AskUserMessage(AskMessageBase):
         chat_context.add(cast("Message", self))
 
         res = cast(
-            Union[None, StepDict],
+            Union[StepDict, None],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
         )
 
@@ -591,7 +591,7 @@ class AskFileMessage(AskMessageBase):
         chat_context.add(cast("Message", self))
 
         res = cast(
-            Union[None, List[FileDict]],
+            Union[List[FileDict], None],
             await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
         )
 

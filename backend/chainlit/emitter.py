@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
@@ -473,7 +474,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
             ]
             try:
                 user_res = await asyncio.wait_for(future, spec.timeout)
-            except asyncio.TimeoutError:
+            # builtins-qualified on purpose: this module imports socketio's
+            # own TimeoutError, which is not a subclass of the builtin one
+            # that asyncio.wait_for raises.
+            except builtins.TimeoutError:
                 # On py3.12+ wait_for can time out in the same tick the
                 # future was resolved — prefer the answer over the timeout.
                 if future.done() and not future.cancelled():

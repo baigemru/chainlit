@@ -34,7 +34,7 @@ def step_metadata(step_dict: Mapping[str, Any]) -> Dict[str, Any]:
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return {}
     return metadata if isinstance(metadata, dict) else {}
 

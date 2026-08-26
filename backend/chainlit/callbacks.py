@@ -2,6 +2,7 @@ import inspect
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload
 
 from fastapi import Request, Response
+from fastapi.routing import iter_route_contexts
 from mcp import ClientSession
 from starlette.datastructures import Headers
 
@@ -16,6 +17,23 @@ from chainlit.step import Step, step
 from chainlit.types import ChatProfile, Starter, StarterCategory, ThreadDict
 from chainlit.user import User
 from chainlit.utils import wrap_user_function
+
+_CATCH_ALL_SUFFIX = "/{full_path:path}"
+
+
+def _holds_catch_all(route: Any) -> bool:
+    """Whether ``route`` is the SPA catch-all, or the object that holds it.
+
+    Since FastAPI 0.137 an included router stays a single object in
+    ``app.router.routes`` and the catch-all lives inside it, so that object is
+    what a custom route has to precede — anything after it is shadowed by the
+    SPA. ``iter_route_contexts`` (0.137.2) flattens one entry's subtree, which
+    is what makes the enclosing object findable.
+    """
+    return any(
+        (context.path or "").endswith(_CATCH_ALL_SUFFIX)
+        for context in iter_route_contexts([route])
+    )
 
 
 def server_route(
@@ -70,12 +88,7 @@ def server_route(
 
         new_route = APIRoute(route_path, func, methods=methods_, **route_kwargs)
         catch_all_index = next(
-            (
-                index
-                for index, route in enumerate(routes)
-                if isinstance(route, APIRoute)
-                and route.path.endswith("/{full_path:path}")
-            ),
+            (index for index, route in enumerate(routes) if _holds_catch_all(route)),
             len(routes),
         )
         routes.insert(catch_all_index, new_route)
@@ -84,14 +97,14 @@ def server_route(
     return decorator
 
 
-def on_app_startup(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable:
+def on_app_startup(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
     """
     Hook to run code when the Chainlit application starts.
     Useful for initializing resources, loading models, setting up database connections, etc.
     The function can be synchronous or asynchronous.
 
     Args:
-        func (Callable[[], Union[None, Awaitable[None]]]): The startup hook to execute. Takes no arguments.
+        func (Callable[[], Union[Awaitable[None], None]]): The startup hook to execute. Takes no arguments.
 
     Example:
         @cl.on_app_startup
@@ -100,20 +113,20 @@ def on_app_startup(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable
             # Initialize resources here
 
     Returns:
-        Callable[[], Union[None, Awaitable[None]]]: The decorated startup hook.
+        Callable[[], Union[Awaitable[None], None]]: The decorated startup hook.
     """
     config.code.on_app_startup = wrap_user_function(func, with_task=False)
     return func
 
 
-def on_app_shutdown(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable:
+def on_app_shutdown(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
     """
     Hook to run code when the Chainlit application shuts down.
     Useful for cleaning up resources, closing connections, saving state, etc.
     The function can be synchronous or asynchronous.
 
     Args:
-        func (Callable[[], Union[None, Awaitable[None]]]): The shutdown hook to execute. Takes no arguments.
+        func (Callable[[], Union[Awaitable[None], None]]): The shutdown hook to execute. Takes no arguments.
 
     Example:
         @cl.on_app_shutdown
@@ -122,7 +135,7 @@ def on_app_shutdown(func: Callable[[], Union[None, Awaitable[None]]]) -> Callabl
             # Clean up resources here
 
     Returns:
-        Callable[[], Union[None, Awaitable[None]]]: The decorated shutdown hook.
+        Callable[[], Union[Awaitable[None], None]]: The decorated shutdown hook.
     """
     config.code.on_app_shutdown = wrap_user_function(func, with_task=False)
     return func

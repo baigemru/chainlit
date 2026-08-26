@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Union
 
 from azure.storage.blob import BlobSasPermissions, ContentSettings, generate_blob_sas
@@ -32,7 +32,7 @@ class AzureBlobStorageClient(BaseStorageClient):
             raise Exception("Not using Azure Storage")
 
         sas_permissions = BlobSasPermissions(read=True)
-        start_time = datetime.now(tz=timezone.utc)
+        start_time = datetime.now(tz=UTC)
         expiry_time = start_time + timedelta(seconds=storage_expiry_time)
 
         sas_token = generate_blob_sas(

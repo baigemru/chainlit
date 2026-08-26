@@ -1,6 +1,6 @@
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import click
@@ -39,9 +39,9 @@ class TestUtcNow:
 
     def test_utc_now_is_current_time(self):
         """Test that utc_now returns approximately current time."""
-        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        before = datetime.now(UTC).replace(tzinfo=None)
         result = utc_now()
-        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        after = datetime.now(UTC).replace(tzinfo=None)
 
         # Parse the result (naive datetime)
         result_dt = datetime.fromisoformat(result[:-1])

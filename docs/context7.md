@@ -6,7 +6,7 @@ Pre-resolved library IDs for [Context7 MCP](https://context7.com). Use these whe
 
 | Library/Framework | Context7 Library ID      | Notes                               |
 | ----------------- | ------------------------ | ----------------------------------- |
-| Python 3.13       | /websites/python_3_13    | Standard library, language features |
+| Python 3.14       | /websites/python_3_14    | Standard library, language features |
 | TypeScript        | /websites/typescriptlang | Type system, compiler options       |
 
 ## Backend

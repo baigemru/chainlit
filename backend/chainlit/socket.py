@@ -1,11 +1,10 @@
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, Literal, Optional, Tuple, TypedDict, Union
+from typing import Any, Dict, Literal, NotRequired, Optional, Tuple, TypedDict, Union
 from urllib.parse import unquote
 
 from starlette.requests import cookie_parser
-from typing_extensions import NotRequired, TypeAlias
 
 import chainlit.transit as transit
 from chainlit.auth import (
@@ -32,7 +31,7 @@ from chainlit.types import (
 from chainlit.user import PersistedUser, User
 from chainlit.user_session import user_sessions
 
-WSGIEnvironment: TypeAlias = dict[str, Any]
+type WSGIEnvironment = dict[str, Any]
 
 
 class WebSocketSessionAuth(TypedDict):
@@ -259,7 +258,7 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         unquote(url_encoded_chat_profile) if url_encoded_chat_profile else None
     )
 
-    WebsocketSession(
+    session = WebsocketSession(
         id=session_id,
         socket_id=sid,
         emit=emit_fn,
@@ -273,6 +272,12 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         environ=environ,
         emit_ask=emit_ask_fn,
     )
+
+    # Resolve chat-profile config overrides asynchronously. Awaited here,
+    # in the async connect handler, instead of the old
+    # run_until_complete-inside-the-running-loop in get_config() — that
+    # re-entry only ever worked through nest_asyncio's patch.
+    await session.resolve_config()
 
     return True
 
@@ -1031,7 +1036,7 @@ def _is_convertible_text_reply(value) -> bool:
     try:
         if uuid.UUID(str(value.get("id"))).version != 4:
             return False
-    except (ValueError, TypeError, AttributeError):
+    except ValueError, TypeError, AttributeError:
         return False
     return True
 

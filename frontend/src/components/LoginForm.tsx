@@ -117,6 +117,7 @@ export function LoginForm({
       {errorState && (
         <Alert variant="error">
           {t([
+            `auth.login.errors.${errorState}`,
             `auth.login.errors.${errorState.toLowerCase()}`,
             `auth.login.errors.default`
           ])}

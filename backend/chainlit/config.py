@@ -2,6 +2,7 @@ import json
 import os
 import site
 import sys
+import tomllib
 from importlib import util
 from pathlib import Path
 from typing import (
@@ -16,7 +17,6 @@ from typing import (
     Union,
 )
 
-import tomli
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from starlette.datastructures import Headers
@@ -449,8 +449,8 @@ class CodeSettings(BaseModel):
     module: Any = None
 
     # App life cycle callbacks
-    on_app_startup: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
-    on_app_shutdown: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
+    on_app_startup: Optional[Callable[[], Union[Awaitable[None], None]]] = None
+    on_app_shutdown: Optional[Callable[[], Union[Awaitable[None], None]]] = None
 
     # Session life cycle callbacks
     on_logout: Optional[Callable[["Request", "Response"], Any]] = None
@@ -688,7 +688,7 @@ def load_module(target: str, force_refresh: bool = False):
 
 def load_settings():
     with open(config_file, "rb") as f:
-        toml_dict = tomli.load(f)
+        toml_dict = tomllib.load(f)
         # Load project settings
         project_config = toml_dict.get("project", {})
         features_settings = toml_dict.get("features", {})

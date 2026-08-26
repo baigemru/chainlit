@@ -424,7 +424,9 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
 
     async def on_llm_new_token(
         self,
-        token: str,
+        # langchain-core widened this to accept content blocks; the body below
+        # already flattens a list into a string, so match the supertype.
+        token: Union[str, List[Union[str, Dict[str, Any]]]],
         *,
         chunk: Optional[Union[GenerationChunk, ChatGenerationChunk]] = None,
         run_id: "UUID",

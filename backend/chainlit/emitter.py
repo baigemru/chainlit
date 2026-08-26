@@ -21,6 +21,7 @@ from chainlit.types import (
     AskActionResponse,
     AskElementResponse,
     AskFileSpec,
+    AskSlotBusyError,
     AskSpec,
     CommandDict,
     FileDict,
@@ -32,6 +33,21 @@ from chainlit.types import (
 )
 from chainlit.user import PersistedUser
 from chainlit.utils import utc_now
+
+
+def _strict_ask_slot(session) -> bool:
+    """Whether a busy ask slot must raise instead of returning None.
+
+    Read through the session so a chat profile's config_overrides apply;
+    the module-level `config` would ignore them. Compared with `is True`
+    on purpose: `Mock(spec=WebsocketSession).get_config()` hands back a
+    truthy Mock, which would silently arm strict mode across the suite.
+    """
+    try:
+        cfg = session.get_config()
+    except Exception:
+        cfg = config
+    return getattr(getattr(cfg, "features", None), "strict_ask_slot", False) is True
 
 
 def _make_legacy_ask_ack(session, future: "asyncio.Future", step_id: str):
@@ -416,6 +432,13 @@ class ChainlitEmitter(BaseChainlitEmitter):
             # the UI and orphan its waiting coroutine — refuse instead. A
             # slot whose future is already resolved/cancelled only awaits
             # its owner's cleanup and does not block a new ask.
+            if _strict_ask_slot(session):
+                logger.error(
+                    "send_ask_user: an ask is already pending for session %s; "
+                    "raising AskSlotBusyError",
+                    session.id,
+                )
+                raise AskSlotBusyError(str(existing.spec.step_id))
             logger.error(
                 "send_ask_user: an ask is already pending for session %s; "
                 "returning None",

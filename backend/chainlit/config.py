@@ -372,6 +372,10 @@ class FeaturesSettings(BaseModel):
     allow_thread_sharing: bool = False
     favorites: bool = False
     hot_swap_chat_profile: bool = False
+    # Turn the "ask slot is busy" refusal into AskSlotBusyError instead of
+    # a None return. Off by default: None is also what a timeout and an
+    # empty answer produce, and existing apps branch on it.
+    strict_ask_slot: bool = False
 
 
 class HeaderLink(BaseModel):

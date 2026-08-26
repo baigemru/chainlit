@@ -1,7 +1,17 @@
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, Literal, NotRequired, Optional, Tuple, TypedDict, Union
+from typing import (
+    Any,
+    Dict,
+    Literal,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 from urllib.parse import unquote
 
 from starlette.requests import cookie_parser
@@ -23,6 +33,7 @@ from chainlit.persist_barrier import create_persist_task, wait_for_persist
 from chainlit.resume_policy import split_resume_delete
 from chainlit.server import sio
 from chainlit.session import ClientType, WebsocketSession
+from chainlit.step import StepDict
 from chainlit.types import (
     InputAudioChunk,
     InputAudioChunkPayload,
@@ -1566,10 +1577,81 @@ async def fetch_favorites(sid):
             await context.emitter.set_favorites(favorites)
 
 
+async def _deliver_to_pending_text_ask(session, payload) -> bool:
+    """Answer a live TEXT ask with an incoming message; True when it did.
+
+    The mirror of the orphaned-ask_reply rescue above. Ask mode lives only
+    in the client's `askUser` atom, and the composer picks the route from
+    it (`if (askUser) onReply else onSubmit`) — for a text ask it is not
+    even disabled. Every path that empties the atom while the server still
+    waits (an `ask` emit dropped in a dying socket, `clear_ask`, the window
+    after a page load before `restore_pending_ask`) sends the user's answer
+    here instead, where it used to start a parallel `on_message` and leave
+    the ask hanging for its full timeout — blocking every later ask of the
+    session, HITL confirmations included.
+
+    Deliberately narrow: only a text ask, and only a payload an ask reply
+    can carry. `future.done()` rather than `is_live` mirrors branch 1 of
+    the ask_reply handler — an expired ask still holding the slot must take
+    the answer, or the app gets both a timeout and a duplicate message.
+    """
+    pending = session.pending_ask
+    if pending is None or pending.future.done():
+        return False
+
+    if pending.spec.type != "text":
+        # The composer is disabled for file/action/element asks, but text
+        # still arrives from starters, custom elements and the copilot
+        # bridge, none of which look at the ask state. A text value cannot
+        # answer those specs, so it stays a regular message.
+        logger.warning(
+            "client_message arrived while a %s ask is pending for session %s; "
+            "handling it as a regular message",
+            pending.spec.type,
+            session.id,
+        )
+        return False
+
+    payload = payload or {}
+    step_dict = payload.get("message")
+
+    if payload.get("fileReferences"):
+        logger.info("Message with attachments during a text ask; not an answer")
+        return False
+    if isinstance(step_dict, dict) and (
+        step_dict.get("command") or step_dict.get("modes")
+    ):
+        # Only process_message reads these (Message.from_dict); delivered as
+        # an ask reply they would be silently dropped.
+        logger.info("Message with a command/modes during a text ask; not an answer")
+        return False
+    if not _is_convertible_text_reply(step_dict):
+        return False
+
+    # The client echoed this message locally WITHOUT a parentId (that is
+    # added only on the replyMessage path), and send_ask_user emits nothing
+    # of its own — so stamp the parent and re-send the step, the way the
+    # orphan conversion does. Clients upsert by id.
+    step_dict = cast(
+        StepDict, {**step_dict, "parentId": pending.step_dict.get("parentId")}
+    )
+    await init_ws_context(session).emitter.send_step(step_dict)
+
+    session.last_resolved_ask_step_id = pending.spec.step_id
+    pending.future.set_result(step_dict)
+    logger.info(
+        "client_message delivered to the pending ask of step %s", pending.spec.step_id
+    )
+    return True
+
+
 @sio.on("client_message")  # pyright: ignore [reportOptionalCall]
 async def message(sid, payload: MessagePayload):
     """Handle a message sent by the User."""
     session = WebsocketSession.require(sid)
+
+    if await _deliver_to_pending_text_ask(session, payload):
+        return
 
     task = asyncio.create_task(process_message(session, payload))
     session.current_task = task

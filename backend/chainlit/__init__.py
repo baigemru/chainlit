@@ -53,6 +53,7 @@ from chainlit.sidebar import ElementSidebar
 from chainlit.step import Step, step
 from chainlit.sync import make_async, run_sync
 from chainlit.types import (
+    AskSlotBusyError,
     ChatProfile,
     InputAudioChunk,
     OutputAudioChunk,
@@ -145,6 +146,7 @@ __all__ = [
     "AskActionMessage",
     "AskElementMessage",
     "AskFileMessage",
+    "AskSlotBusyError",
     "AskUserMessage",
     "AsyncLangchainCallbackHandler",
     "Audio",

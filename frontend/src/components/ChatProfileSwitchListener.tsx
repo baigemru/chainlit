@@ -31,12 +31,8 @@ import {
 interface SetChatProfilePayload {
   name: string;
   keepTranscript?: boolean;
-  /** @deprecated superseded by keepTranscript; read for older backends. */
-  startNew?: boolean;
   /** Set when the backend parked a transit message for the next session. */
   hasTransitMessage?: boolean;
-  /** @deprecated older backends deliver the message through the browser. */
-  firstMessage?: string | null;
 }
 
 export default function ChatProfileSwitchListener() {
@@ -60,23 +56,13 @@ export default function ChatProfileSwitchListener() {
   const switchRef = useRef<(payload: SetChatProfilePayload) => void>();
   switchRef.current = (payload) => {
     const { name, hasTransitMessage } = payload || {};
-    // Older backends only send startNew; keepTranscript is its inverse.
-    const keepTranscript =
-      payload?.keepTranscript ?? !(payload?.startNew ?? true);
+    const keepTranscript = !!payload?.keepTranscript;
 
     if (!config?.chatProfiles?.some((profile) => profile.name === name)) {
       console.warn(
         `set_chat_profile: unknown chat profile "${name}", ignoring.`
       );
       return;
-    }
-
-    if (payload?.firstMessage && !hasTransitMessage) {
-      // An older backend expects this frontend to impersonate the user with
-      // firstMessage; that delivery path is gone. The switch still happens.
-      console.warn(
-        'set_chat_profile: firstMessage is not supported anymore and will be dropped; upgrade the backend to transit_message.'
-      );
     }
 
     const alreadyActive = chatProfile === name;

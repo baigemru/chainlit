@@ -739,13 +739,14 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 interaction a record carrying only the parent-thread link
                 still remains.
 
-        Claiming a transit message creates and names the new thread right
+        Picking a transit message up creates and names the new thread right
         away (the value itself when it is a non-empty string, the profile
         name otherwise) — an `on_chat_start` that then renders nothing leaves
         a named empty thread in the history. There is no auto-answer into
         `AskUserMessage` anymore: read the transit value instead of asking.
-        If the frontend never claims the value (dead socket, copilot — which
-        does not support `set_chat_profile` at all), it expires after
+        If the switch never happens (dead socket, unknown profile name,
+        copilot — which does not support `set_chat_profile` at all), the
+        record is dropped by the next call on this session, or expires after
         `transit.TRANSIT_TTL_SECONDS`.
 
         The transcript kept by `keep_transcript` is client-side only: it
@@ -757,24 +758,46 @@ class ChainlitEmitter(BaseChainlitEmitter):
         interaction), its id rides along to the new session and is recorded
         as the new thread's `parentThreadId` by data layers that support it.
 
-        Call this at most once per handler. Every call re-parks the hand-off
-        record for the same successor, and the frontend tears the chat down
-        per switch event — with two calls, the first event's claim moves the
-        record aside while the second event decides which session actually
-        connects, so the transit message and parent link of the last call
-        can be lost.
+        Call this at most once per handler. Every call revokes the record
+        the previous one parked and mints a new successor id, while the
+        frontend tears the chat down per switch event — so with two calls
+        only the last delivered event's session id is the one that connects,
+        and an earlier call's message and parent link are gone.
         """
         owner = self.session.user.identifier if self.session.user else None
         # Only a thread that exists can be a parent: the row is created on
         # first interaction.
         parent = self.session.thread_id if self.session.has_first_interaction else None
-        transit.store(self.session.id, transit_message, owner, parent=parent)
+
+        # Each call mints a fresh key, so the one this session parked before
+        # has to go: otherwise records accumulate instead of overwriting the
+        # session's single slot, which would both defeat the
+        # MAX_TRANSIT_RECORDS backstop and turn "transit_message=None
+        # revokes" into "the revoked value is still delivered".
+        previous = getattr(self.session, "pending_transit_id", None)
+        if previous:
+            transit.discard(previous)
+
+        if transit_message is None and parent is None:
+            # Nothing to hand over: the revoke above is the whole effect.
+            self.session.pending_transit_id = None
+            next_session_id = None
+        else:
+            next_session_id = str(uuid.uuid4())
+            transit.store(next_session_id, transit_message, owner, parent=parent)
+            self.session.pending_transit_id = next_session_id
+
         await self.emit(
             "set_chat_profile",
             {
                 "name": name,
                 "keepTranscript": keep_transcript,
                 "hasTransitMessage": transit_message is not None,
+                # The id the record is parked under. The browser adopts it
+                # verbatim instead of minting its own and handing it back —
+                # that round trip used to ride a socket the very next line
+                # closes, and losing it stranded the hand-off.
+                "nextSessionId": next_session_id,
             },
         )
 

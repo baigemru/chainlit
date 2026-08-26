@@ -350,6 +350,12 @@ class WebsocketSession(BaseSession):
     # __init__ — a Lock must never be shared across sessions.
     profile_switch_lock: Optional[asyncio.Lock] = None
 
+    # Key of the transit record parked for this session's successor. Class
+    # level for the same Mock(spec=...) reason. Every set_chat_profile mints
+    # a fresh key, so the previous one has to be dropped or the session
+    # accumulates records instead of overwriting its single slot.
+    pending_transit_id: Optional[str] = None
+
     mcp_sessions: dict[str, McpSession]
 
     def __init__(

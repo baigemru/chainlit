@@ -546,31 +546,6 @@ async def send_parent_thread(context):
     )
 
 
-@sio.on("claim_transit_message")  # pyright: ignore [reportOptionalCall]
-async def claim_transit_message(sid, payload):
-    """Re-park this session's transit message for the session about to open."""
-    session = WebsocketSession.require(sid)
-
-    next_id = (payload or {}).get("sessionId")
-    if not isinstance(next_id, str):
-        return
-    try:
-        if uuid.UUID(next_id).version != 4:
-            return
-    except ValueError:
-        return
-    # A live session under that id means the client did not mint a fresh
-    # uuid — with auth disabled this would let one session plant a value
-    # into another existing one.
-    if WebsocketSession.get_by_id(next_id):
-        logger.warning(
-            "claim_transit_message: target session already exists, ignoring."
-        )
-        return
-
-    transit.reassign(session.id, next_id)
-
-
 async def supersede_abandoned_ask_sessions(current_session, thread_id) -> None:
     """Evict abandoned ask-parked sessions of this thread.
 

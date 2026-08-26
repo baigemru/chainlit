@@ -54,6 +54,7 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.thread_ready_task = kwargs.get("thread_ready_task", None)
         mock.profile_start_task = kwargs.get("profile_start_task", None)
         mock.profile_switch_lock = asyncio.Lock()
+        mock.pending_transit_id = kwargs.get("pending_transit_id", None)
         mock.resume_task_started = kwargs.get("resume_task_started", False)
         mock.task_counter = kwargs.get("task_counter", 0)
         mock.restored = kwargs.get("restored", False)

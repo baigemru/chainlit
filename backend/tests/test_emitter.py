@@ -236,11 +236,15 @@ async def test_set_chat_profile_defaults(
 
     mock_websocket_session.emit.assert_called_once_with(
         "set_chat_profile",
-        {"name": "GPT-4", "keepTranscript": False, "hasTransitMessage": False},
+        {
+            "name": "GPT-4",
+            "keepTranscript": False,
+            "hasTransitMessage": False,
+            # Nothing to hand over: no message, and no parent either — the
+            # thread row does not exist before the first interaction.
+            "nextSessionId": None,
+        },
     )
-    # Nothing was parked for the next session: no message, and no parent
-    # either — the thread row does not exist before the first interaction.
-    assert transit.pop("session-defaults", None) is transit.NO_TRANSIT
 
 
 async def test_set_chat_profile_with_options(
@@ -254,15 +258,18 @@ async def test_set_chat_profile_with_options(
         "Search", keep_transcript=True, transit_message="knife sharpener"
     )
 
-    mock_websocket_session.emit.assert_called_once_with(
-        "set_chat_profile",
-        {
-            "name": "Search",
-            "keepTranscript": True,
-            "hasTransitMessage": True,
-        },
-    )
-    record = transit.pop("session-options", None)
+    payload = mock_websocket_session.emit.call_args.args[1]
+    assert payload["name"] == "Search"
+    assert payload["keepTranscript"] is True
+    assert payload["hasTransitMessage"] is True
+
+    # Parked under the id the server minted for the successor, never under
+    # the id of the session that is going away.
+    next_id = payload["nextSessionId"]
+    assert next_id
+    assert next_id != "session-options"
+    assert transit.pop("session-options", None) is transit.NO_TRANSIT
+    record = transit.pop(next_id, None)
     assert record.value == "knife sharpener"
     assert record.parent is None
 
@@ -277,7 +284,8 @@ async def test_set_chat_profile_parks_parent_after_first_interaction(
 
     await emitter.set_chat_profile("Search", transit_message="knife sharpener")
 
-    record = transit.pop("session-parent", None)
+    next_id = mock_websocket_session.emit.call_args.args[1]["nextSessionId"]
+    record = transit.pop(next_id, None)
     assert record.value == "knife sharpener"
     assert record.parent == "thread-a"
 
@@ -293,11 +301,9 @@ async def test_set_chat_profile_parks_parent_only_record(
 
     await emitter.set_chat_profile("Search")
 
-    mock_websocket_session.emit.assert_called_once_with(
-        "set_chat_profile",
-        {"name": "Search", "keepTranscript": False, "hasTransitMessage": False},
-    )
-    record = transit.pop("session-parent-only", None)
+    payload = mock_websocket_session.emit.call_args.args[1]
+    assert payload["hasTransitMessage"] is False
+    record = transit.pop(payload["nextSessionId"], None)
     assert record.value is None
     assert record.parent == "thread-a"
 
@@ -310,9 +316,57 @@ async def test_set_chat_profile_none_clears_parked_transit(
     mock_websocket_session.has_first_interaction = False
 
     await emitter.set_chat_profile("Search", transit_message="first")
+    parked_id = mock_websocket_session.emit.call_args.args[1]["nextSessionId"]
+
     await emitter.set_chat_profile("Search")
 
-    assert transit.pop("session-clears", None) is transit.NO_TRANSIT
+    # The revoke has to reach the id the value was actually parked under —
+    # under the mint that is not the session id, so a check against the
+    # session id would pass no matter what.
+    assert transit.pop(parked_id, None) is transit.NO_TRANSIT
+    assert mock_websocket_session.emit.call_args.args[1]["nextSessionId"] is None
+
+
+async def test_set_chat_profile_keeps_one_record_per_session(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    """Each call mints a fresh key; the previous one must not pile up.
+
+    Otherwise a session switching in a loop fills the store and
+    MAX_TRANSIT_RECORDS starts rejecting other sessions' hand-offs.
+    """
+    mock_websocket_session.id = "session-loop"
+    mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = False
+
+    parked = []
+    for index in range(5):
+        await emitter.set_chat_profile("Search", transit_message=f"try {index}")
+        parked.append(mock_websocket_session.emit.call_args.args[1]["nextSessionId"])
+
+    assert len(set(parked)) == 5
+    for stale in parked[:-1]:
+        assert transit.pop(stale, None) is transit.NO_TRANSIT
+    assert transit.pop(parked[-1], None).value == "try 4"
+
+
+async def test_set_chat_profile_never_parks_under_the_leaving_session(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    """The record the old session could swallow when its socket flaps.
+
+    Parked under the session's own id, a reconnect of the old socket before
+    the switch landed re-entered connection_successful and let
+    apply_transit_message take the record — naming an empty thread after the
+    transit text.
+    """
+    mock_websocket_session.id = "session-flap"
+    mock_websocket_session.user = None
+    mock_websocket_session.has_first_interaction = False
+
+    await emitter.set_chat_profile("Search", transit_message="knife sharpener")
+
+    assert transit.pop("session-flap", None) is transit.NO_TRANSIT
 
 
 async def test_set_chat_profile_rejects_positional_flags(

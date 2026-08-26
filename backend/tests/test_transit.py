@@ -72,18 +72,22 @@ def test_parent_defaults_to_none():
     assert transit.pop("s1", None).parent is None
 
 
-def test_reassign_moves_record():
-    transit.store("old", "carried over", owner="user1", parent="thread-a")
-    transit.reassign("old", "new")
-    assert transit.pop("old", "user1") is transit.NO_TRANSIT
-    record = transit.pop("new", "user1")
-    assert record.value == "carried over"
-    assert record.parent == "thread-a"
+def test_discard_drops_the_record():
+    transit.store("mine", "carried over", owner="user1", parent="thread-a")
+    transit.discard("mine")
+    assert transit.pop("mine", "user1") is transit.NO_TRANSIT
 
 
-def test_reassign_missing_is_noop():
-    transit.reassign("old", "new")
-    assert transit.pop("new", None) is transit.NO_TRANSIT
+def test_discard_missing_is_noop():
+    transit.discard("mine")
+    assert transit.pop("mine", None) is transit.NO_TRANSIT
+
+
+def test_discard_leaves_other_records_alone():
+    transit.store("mine", "a", owner=None)
+    transit.store("theirs", "b", owner=None)
+    transit.discard("mine")
+    assert transit.pop("theirs", None).value == "b"
 
 
 def test_expired_record_is_gone(monkeypatch: pytest.MonkeyPatch):

@@ -23,6 +23,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           uv-args: --extra tests --extra custom-data
       - name: Run backend tests
-        run: uv run --no-project pytest --cov=chainlit/
+        # The step runs from the repo root, where the package source lives
+        # at backend/chainlit — the old --cov=chainlit/ pointed at a
+        # nonexistent path, so coverage silently measured nothing
+        # ("CoverageWarning: No data was collected").
+        run: uv run --no-project pytest --cov=backend/chainlit
       - name: Run frontend tests
         run: pnpm run test

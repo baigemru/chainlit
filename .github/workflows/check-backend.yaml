@@ -18,6 +18,11 @@ jobs:
             command: uv run --no-project scripts/format.py --check
           - name: 'Type checking: backend'
             command: uv run --no-project scripts/type_check.py
+          # The TypeScript view of the wire protocol is generated from the
+          # msgspec structs. If this fails, the client and the server disagree
+          # about the protocol and nobody would find out until runtime.
+          - name: 'Protocol types: up to date'
+            command: uv run --no-project --directory backend scripts/gen_protocol_types.py --check
     name: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v6

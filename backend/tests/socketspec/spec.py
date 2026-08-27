@@ -77,6 +77,24 @@ class Handover:
 
 
 @dataclass(frozen=True)
+class Bystander:
+    """Another session on the same conversation.
+
+    A conversation is not one socket. A second tab is one of these; so is
+    the session a previous connection walked away from, which the server has
+    no way to tell apart from a tab the user is about to come back to --
+    except by what it is still holding. What may be done to a resuming
+    thread depends entirely on that.
+    """
+
+    connected: bool = True
+    pending_ask: Optional[AskState] = None
+    running_task: bool = False
+    thread: Optional[str] = None
+    """Which conversation it belongs to. ``None`` means this one."""
+
+
+@dataclass(frozen=True)
 class Given:
     """The state of the conversation before the frames arrive."""
 
@@ -119,6 +137,9 @@ class Given:
 
     handover: Optional[Handover] = None
     """A record parked for this session by the one it succeeds."""
+
+    bystanders: Tuple[Bystander, ...] = ()
+    """Other sessions the server is holding when the frames arrive."""
 
     produced_between_connections: Tuple[Mapping[str, Any], ...] = ()
     """Steps the conversation adds after the first frame is handled.
@@ -230,6 +251,7 @@ class Driver(Protocol):
 
 __all__ = [
     "AskState",
+    "Bystander",
     "Driver",
     "Given",
     "Handover",

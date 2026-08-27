@@ -4,6 +4,7 @@ from typing import Tuple
 
 from ..spec import Scenario
 from .ask import ASK_SCENARIOS
+from .bystanders import BYSTANDER_SCENARIOS
 from .handshake import HANDSHAKE_SCENARIOS
 from .orphans import ORPHAN_SCENARIOS, PARENT_SCENARIOS
 from .resume_delete import RESUME_DELETE_SCENARIOS
@@ -13,6 +14,7 @@ from .transcript import TRANSCRIPT_SCENARIOS
 SCENARIOS: Tuple[Scenario, ...] = (
     ASK_SCENARIOS
     + HANDSHAKE_SCENARIOS
+    + BYSTANDER_SCENARIOS
     + TRANSCRIPT_SCENARIOS
     + ORPHAN_SCENARIOS
     + PARENT_SCENARIOS

@@ -235,6 +235,11 @@ def _session(factory: Callable[..., Mock], given: Given, ledger: Ledger) -> Mock
         last_resolved_ask_step_id=given.last_resolved_ask_step_id,
         chat_profile=given.chat_profile,
     )
+    # A session that just greeted the server is connected by definition --
+    # the flag is cleared when the socket is handed over, one step before
+    # this one. Left as a Mock attribute it reads truthy, which would make
+    # the session look abandoned to every check that asks.
+    session.socket_disconnected = False
     if given.resuming_thread:
         # The session's thread *is* the one it resumes: the live-ask and
         # live-task protections match candidates by thread id, and a session
@@ -312,14 +317,46 @@ def _interrupt(session: Mock, given: Given) -> Optional[Callable[[str], None]]:
     return interrupt
 
 
-def _registry(session: Mock) -> Dict[str, Mock]:
-    """The live-session registry, holding this scenario's session and no other.
+def _unfinished() -> Mock:
+    task = Mock()
+    task.done = Mock(return_value=False)
+    return task
 
-    Superseding walks it directly. Left unpatched, a session another test
-    forgot to close would make a scenario about eviction pass -- or fail --
-    for a reason no row states.
+
+def _registry(
+    session: Mock,
+    given: Given,
+    factory: Callable[..., Mock],
+    evicted: List[str],
+) -> Dict[str, Mock]:
+    """The live-session registry: this scenario's session and its bystanders.
+
+    Always replaced, never merged. Superseding and the live-work checks walk
+    this dict directly, so a session another test forgot to close would make
+    a scenario about eviction pass -- or fail -- for a reason no row states.
+
+    A bystander's ``delete`` removes it from the registry as it goes, because
+    the real one does: eviction only helps if the checks that run right after
+    it can already see the thread as idle, and a fake that merely recorded
+    the call would leave every such row green for the wrong reason.
     """
-    return {session.id: session}
+    registry: Dict[str, Mock] = {session.id: session}
+    for index, other in enumerate(given.bystanders):
+        bystander = factory(
+            id=f"bystander-{index}",
+            pending_ask=_pending_ask(other.pending_ask) if other.pending_ask else None,
+            current_task=_unfinished() if other.running_task else None,
+        )
+        bystander.thread_id = other.thread or session.thread_id
+        bystander.socket_disconnected = not other.connected
+
+        async def delete(target: Mock = bystander) -> None:
+            evicted.append(target.id)
+            registry.pop(target.id, None)
+
+        bystander.delete = Mock(side_effect=delete)
+        registry[bystander.id] = bystander
+    return registry
 
 
 class Storage:
@@ -546,6 +583,8 @@ def _report(
     sessions: Dict[str, Any],
     owner: Optional[str],
     storage: Optional[Storage],
+    registry: Dict[str, Mock],
+    evicted: List[str],
 ) -> Dict[str, Any]:
     """Protocol-level facts, read off wherever this implementation keeps them.
 
@@ -567,6 +606,8 @@ def _report(
         "handover_parked": transit.pop(session.id, owner) is not transit.NO_TRANSIT,
         "handover_delivered": (sessions.get(session.id) or {}).get("transit_message"),
     }
+    state["evicted"] = list(evicted)
+    state["live_sessions"] = sorted(registry)
     state["deleted_steps"] = list(storage.deleted_steps) if storage else []
     state["deleted_elements"] = list(storage.deleted_elements) if storage else []
     state.update(hooks.saw)
@@ -608,6 +649,8 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
     # whose world depends on test ordering is not a spec.
     sessions: Dict[str, Any] = {}
     hooks = Hooks(session, sessions, ledger)
+    evicted: List[str] = []
+    registry = _registry(session, scenario.given, session_factory, evicted)
     storage = _data_layer(scenario.given, owner)
     _park_handover(session, scenario.given, owner)
 
@@ -624,7 +667,7 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
             patch("chainlit.socket.chat_context", _transcript(scenario.given)),
             patch("chainlit.socket.user_sessions", sessions),
             patch("chainlit.socket.wait_for_persist", AsyncMock()),
-            patch("chainlit.session.ws_sessions_id", _registry(session)),
+            patch("chainlit.session.ws_sessions_id", registry),
             patch("chainlit.socket.get_data_layer", return_value=storage),
         ):
             for index, frame in enumerate(scenario.when):
@@ -648,7 +691,9 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
 
         return Result(
             ledger=ledger,
-            state=_report(session, pending, hooks, sessions, owner, storage),
+            state=_report(
+                session, pending, hooks, sessions, owner, storage, registry, evicted
+            ),
         )
     finally:
         transit.clear()

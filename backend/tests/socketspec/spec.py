@@ -77,6 +77,14 @@ class Given:
     transcript: Tuple[TranscriptStep, ...] = ()
     """The conversation the server already holds."""
 
+    stored_thread: Optional[Mapping[str, Any]] = None
+    """What persistence has for this thread, if persistence is configured.
+
+    ``None`` means there is no data layer at all -- the default. An empty
+    mapping means there is one and it has nothing for this thread, which is
+    the ``None`` a real data layer answers an unknown id with.
+    """
+
     during_restore: Optional[Literal["answer", "successor", "successor_dead"]] = None
     """Something that happens while the form is being rebuilt.
 

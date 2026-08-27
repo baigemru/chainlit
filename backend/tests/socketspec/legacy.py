@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Callable, Dict, Mapping, Optional
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from chainlit.session import PendingAsk, WebsocketSession
 from chainlit.socket import (
@@ -220,6 +220,20 @@ def _interrupt(session: Mock, given: Given) -> Optional[Callable[[str], None]]:
     return interrupt
 
 
+def _data_layer(given: Given) -> Optional[Mock]:
+    """Persistence holding exactly what the scenario says it holds.
+
+    Patched even when the answer is "there is none": the data layer is a
+    module-global another test may have installed, and a scenario that reaches
+    it by accident is asserting against someone else's fixture.
+    """
+    if given.stored_thread is None:
+        return None
+    layer = Mock()
+    layer.get_thread = AsyncMock(return_value=dict(given.stored_thread) or None)
+    return layer
+
+
 def _config() -> Mock:
     config = Mock()
     config.code.on_chat_start = None
@@ -312,10 +326,10 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
         patch.object(WebsocketSession, "get", return_value=session),
         patch("chainlit.socket.Message", side_effect=_message_factory(ledger)),
         patch("chainlit.socket.chat_context", _transcript(scenario.given)),
-        # Same reason as the transcript: the data layer is a module-global
-        # that another test may have left behind, and a scenario that reaches
-        # it by accident is asserting against someone else's fixture.
-        patch("chainlit.socket.get_data_layer", return_value=None),
+        patch(
+            "chainlit.socket.get_data_layer",
+            return_value=_data_layer(scenario.given),
+        ),
     ):
         for frame in scenario.when:
             handler = HANDLERS.get(frame.tag)

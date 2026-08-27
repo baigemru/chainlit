@@ -94,6 +94,11 @@ class Ledger:
     def tags(self) -> List[str]:
         return [frame.tag for frame in self.frames]
 
+    def count(self, expectation: Expect) -> int:
+        """How many frames match. For "exactly once", which subsequence
+        matching cannot say on its own."""
+        return sum(1 for frame in self.frames if expectation.matches(frame))
+
     def find_in_order(self, expected: Sequence[Expect]) -> Optional[Expect]:
         """Return the first expectation that is not satisfiable in order.
 

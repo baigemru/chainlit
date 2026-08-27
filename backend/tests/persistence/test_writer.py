@@ -26,9 +26,7 @@ from chainlit.persistence.writer import (
     Upload,
     WriterRegistry,
     coalesce,
-    drain_thread,
     merge_steps,
-    writers_for,
 )
 
 from .conftest import at, iso, new_id
@@ -52,9 +50,20 @@ def thread_id() -> str:
 
 
 @pytest.fixture
-async def writer(persistence: Persistence, thread_id: str):
+def registry() -> WriterRegistry:
+    """One registry per test.
+
+    There is no default one to fall into: a writer joins the registry it is
+    handed, and a test sharing a process-wide one with its neighbours would
+    be asserting about their writers as much as its own.
+    """
+    return WriterRegistry()
+
+
+@pytest.fixture
+async def writer(persistence: Persistence, registry: WriterRegistry, thread_id: str):
     """An open writer, started, and closed at the end of the test."""
-    instance = Recorder(persistence, thread_id).start()
+    instance = Recorder(persistence, thread_id, registry=registry).start()
     yield instance
     await instance.aclose(timeout=5.0)
 
@@ -116,10 +125,12 @@ async def test_ops_are_applied_in_issue_order(writer: Recorder, thread_id: str):
 
 
 async def test_gate_holds_writes_and_releases_them_in_order(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
     """Held writes come out in issue order, behind the prelude."""
-    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    writer = Recorder(
+        persistence, thread_id, hold_until_interaction=True, registry=registry
+    ).start()
     try:
         first = step(thread_id, name="first")
         writer.submit(SaveStep(first))
@@ -151,13 +162,17 @@ async def test_gate_holds_writes_and_releases_them_in_order(
         await writer.aclose(timeout=5.0)
 
 
-async def test_gate_shut_drain_does_not_stall(persistence: Persistence, thread_id: str):
+async def test_gate_shut_drain_does_not_stall(
+    persistence: Persistence, registry: WriterRegistry, thread_id: str
+):
     """A reader on a session that has not interacted yet must not wait.
 
     Held writes are not in flight — nothing is trying to write them — so
     treating them as pending would pin every reader to the full timeout.
     """
-    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    writer = Recorder(
+        persistence, thread_id, hold_until_interaction=True, registry=registry
+    ).start()
     try:
         writer.submit(SaveStep(step(thread_id)))
         loop = asyncio.get_running_loop()
@@ -172,10 +187,12 @@ async def test_gate_shut_drain_does_not_stall(persistence: Persistence, thread_i
 
 
 async def test_close_without_interaction_discards_held_writes(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
     """A conversation abandoned before it began leaves nothing behind."""
-    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    writer = Recorder(
+        persistence, thread_id, hold_until_interaction=True, registry=registry
+    ).start()
     writer.submit(SaveStep(step(thread_id)))
     await writer.aclose(timeout=5.0)
 
@@ -184,9 +201,11 @@ async def test_close_without_interaction_discards_held_writes(
 
 
 async def test_close_after_interaction_flushes(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
-    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    writer = Recorder(
+        persistence, thread_id, hold_until_interaction=True, registry=registry
+    ).start()
     writer.open_gate(PatchThread(thread_id))
     writer.submit(SaveStep(step(thread_id, name="kept")))
     await writer.aclose(timeout=5.0)
@@ -195,9 +214,9 @@ async def test_close_after_interaction_flushes(
 
 
 async def test_closed_writer_drops_further_submissions(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, registry=registry).start()
     await writer.aclose(timeout=5.0)
     writer.submit(SaveStep(step(thread_id, name="late")))
     await writer.drain(timeout=1.0)
@@ -425,29 +444,29 @@ async def test_drain_returns_while_the_session_keeps_writing(
 
 
 async def test_drain_thread_covers_every_writer_on_the_thread(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
     """Two tabs are two writers, and one read has to see both."""
-    left = Recorder(persistence, thread_id).start()
-    right = Recorder(persistence, thread_id).start()
+    left = Recorder(persistence, thread_id, registry=registry).start()
+    right = Recorder(persistence, thread_id, registry=registry).start()
     try:
-        assert len(writers_for(thread_id)) == 2
+        assert len(registry.writers_for(thread_id)) == 2
         first, second = new_id(), new_id()
         left.submit(SaveStep(step(thread_id, first, name="left")))
         right.submit(SaveStep(step(thread_id, second, name="right")))
 
-        await drain_thread(thread_id, timeout=10.0)
+        await registry.drain_thread(thread_id, timeout=10.0)
 
         assert await uow.steps.fetch(first) is not None
         assert await uow.steps.fetch(second) is not None
     finally:
         await left.aclose(timeout=5.0)
         await right.aclose(timeout=5.0)
-        assert writers_for(thread_id) == ()
+        assert registry.writers_for(thread_id) == ()
 
 
 async def test_drain_thread_covers_a_writer_that_is_still_flushing(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
     """A closing writer stays visible until its flush is over.
 
@@ -456,13 +475,13 @@ async def test_drain_thread_covers_a_writer_that_is_still_flushing(
     "nothing pending" during exactly the window where the writes are being
     committed.
     """
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, registry=registry).start()
     kept = step(thread_id, name="kept")
     writer.submit(SaveStep(kept))
 
     closing = asyncio.create_task(writer.aclose(timeout=5.0))
     await asyncio.sleep(0)
-    await drain_thread(thread_id, timeout=5.0)
+    await registry.drain_thread(thread_id, timeout=5.0)
     assert await uow.steps.fetch(kept.id) is not None
     await closing
 
@@ -567,10 +586,10 @@ async def test_only_the_elements_own_row_waits_for_its_upload(
 
 
 async def test_close_flushes_what_was_issued_behind_a_hung_upload(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
     """ "Flush what was issued, then stop" -- including behind a stalled upload."""
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, registry=registry).start()
     kept = step(thread_id, name="kept")
     writer.submit(SaveStep(kept))
 
@@ -610,7 +629,7 @@ async def test_uploads_run_concurrently(writer: Recorder, thread_id: str):
 
 
 async def test_an_abandoned_session_does_not_upload_its_held_blobs(
-    persistence: Persistence, thread_id: str
+    persistence: Persistence, registry: WriterRegistry, thread_id: str
 ):
     """A conversation whose rows are discarded must not leave a blob behind.
 
@@ -618,7 +637,9 @@ async def test_an_abandoned_session_does_not_upload_its_held_blobs(
     coroutine, so nothing was uploaded either. Holding the callable rather
     than a coroutine already in flight is what preserves that.
     """
-    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    writer = Recorder(
+        persistence, thread_id, hold_until_interaction=True, registry=registry
+    ).start()
     uploaded = asyncio.Event()
 
     async def upload() -> None:
@@ -646,10 +667,10 @@ async def test_a_closed_writer_does_not_start_the_upload_it_drops(
 
 
 async def test_close_cancels_an_upload_still_in_flight(
-    persistence: Persistence, thread_id: str
+    persistence: Persistence, registry: WriterRegistry, thread_id: str
 ):
     """No task is left running with nobody to retrieve its exception."""
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, registry=registry).start()
     parent = step(thread_id, name="carrier")
     writer.submit(SaveStep(parent))
 
@@ -667,9 +688,11 @@ async def test_close_cancels_an_upload_still_in_flight(
 
 
 async def test_gate_open_starts_the_uploads_it_was_holding(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
-    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    writer = Recorder(
+        persistence, thread_id, hold_until_interaction=True, registry=registry
+    ).start()
     try:
         parent = step(thread_id, name="carrier")
         writer.submit(SaveStep(parent))
@@ -753,14 +776,14 @@ async def test_the_writer_survives_a_failed_batch(
 
 
 async def test_an_upload_landing_during_the_final_drain_still_writes_its_row(
-    persistence: Persistence, thread_id: str, uow: UnitOfWork
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, uow: UnitOfWork
 ):
     """Closing to submissions before flushing would drop the flush's own work.
 
     The upload is still in flight when ``aclose`` is called; its row is
     enqueued from inside the drain that ``aclose`` is waiting on.
     """
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, registry=registry).start()
     parent = step(thread_id, name="carrier")
     writer.submit(SaveStep(parent))
     attachment = element(thread_id, for_id=parent.id)

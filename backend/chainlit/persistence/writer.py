@@ -255,13 +255,13 @@ class SessionWriter:
         persistence: Persistence,
         thread_id: str,
         *,
+        registry: "WriterRegistry",
         hold_until_interaction: bool = False,
         batch_limit: int = BATCH_LIMIT,
-        registry: Optional["WriterRegistry"] = None,
     ) -> None:
         self.persistence = persistence
         self.thread_id = thread_id
-        self.registry = registry if registry is not None else default_registry
+        self.registry = registry
         self._queue: "asyncio.Queue[Union[Op, _Fence]]" = asyncio.Queue()
         self._held: List[Union[Op, _HeldUpload]] = []
         self._gate_open = not hold_until_interaction
@@ -662,23 +662,3 @@ class WriterRegistry:
             *(writer.aclose(timeout=timeout) for writer in writers),
             return_exceptions=True,
         )
-
-
-default_registry = WriterRegistry()
-"""The registry a writer joins when it is not given one.
-
-Present so the writer is usable before the application exists. Once it does,
-hand every writer the application's own -- two apps in one process must not
-share a registry, and neither must two tests.
-"""
-
-
-def writers_for(thread_id: str) -> Tuple[SessionWriter, ...]:
-    return default_registry.writers_for(thread_id)
-
-
-async def drain_thread(
-    thread_id: Optional[str], timeout: float = DRAIN_TIMEOUT
-) -> None:
-    """Wait for every writer on this thread in the default registry."""
-    await default_registry.drain_thread(thread_id, timeout)

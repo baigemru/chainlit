@@ -1,11 +1,14 @@
 """The service surface the rest of the rebuild talks to."""
 
+import pytest
+from advanced_alchemy.exceptions import IntegrityError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from chainlit.persistence import (
     ElementRecord,
     FeedbackRecord,
+    InvalidIdError,
     Persistence,
     StepRecord,
     ThreadPatch,
@@ -270,3 +273,45 @@ async def test_a_standalone_unit_of_work_rolls_back_on_failure(
 
     async with persistence.uow() as unit:
         assert await unit.threads.fetch(thread_id) is None
+
+
+async def test_a_broken_reference_arrives_as_a_repository_error(
+    uow: UnitOfWork,
+) -> None:
+    """Not as a raw SQLAlchemy error, which nothing downstream can classify.
+
+    Every rule in this package is a Core statement rather than a repository
+    call, and ``session.execute`` is outside the repository -- which is where
+    advanced_alchemy's error translation lives. Without it this surfaces as a
+    bare ``sqlalchemy.exc.IntegrityError``, Litestar's handler for
+    advanced_alchemy errors never fires, and a request that named a thread
+    that does not exist answers 500 instead of 409.
+
+    ``IntegrityError``, not the ``ForeignKeyError`` subclass: which of the two
+    a broken reference lands on is decided by matching the driver's message,
+    so it differs by dialect. The handler branches on the base, and so does
+    this.
+    """
+    with pytest.raises(IntegrityError):
+        await uow.elements.save(
+            ElementRecord(
+                id=new_id(),
+                name="attachment",
+                type="file",
+                thread_id=new_id(),
+            )
+        )
+
+
+async def test_a_malformed_id_is_a_typed_error_not_a_bare_value_error(
+    uow: UnitOfWork,
+) -> None:
+    """``uuid.UUID`` raises ``ValueError``, and nothing downstream can read one.
+
+    A route never gets here -- it annotates the id as ``UUID`` and the router
+    refuses the request first. The paths with no route (a websocket frame, the
+    writer) do, and there the difference is between a 400 anyone can answer
+    and a 500 nobody can explain.
+    """
+    with pytest.raises(InvalidIdError):
+        await uow.threads.fetch("not-a-uuid")

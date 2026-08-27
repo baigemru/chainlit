@@ -60,6 +60,7 @@ from chainlit.persistence.repositories import (
 from chainlit.persistence.services import (
     ElementService,
     FeedbackService,
+    InvalidIdError,
     StepService,
     ThreadService,
     UserService,
@@ -73,8 +74,6 @@ from chainlit.persistence.writer import (
     SaveStep,
     SessionWriter,
     WriterRegistry,
-    default_registry,
-    drain_thread,
 )
 
 __all__ = [
@@ -92,6 +91,7 @@ __all__ = [
     "FeedbackRepository",
     "FeedbackService",
     "ISOTimestamp",
+    "InvalidIdError",
     "Op",
     "PageCursor",
     "PageInfoRecord",
@@ -119,8 +119,6 @@ __all__ = [
     "UserService",
     "WriterRegistry",
     "alembic_config",
-    "default_registry",
-    "drain_thread",
     "sqlalchemy_config",
     "upgrade_database",
 ]

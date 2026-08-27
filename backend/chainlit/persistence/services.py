@@ -22,10 +22,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, cast
 
+from advanced_alchemy.exceptions import wrap_sqlalchemy_exception
 from advanced_alchemy.service import SQLAlchemyAsyncRepositoryService
 from msgspec import UNSET, Struct
 from msgspec.structs import fields
-from sqlalchemy import CursorResult, Row, RowMapping, delete, select
+from sqlalchemy import CursorResult, Result, Row, RowMapping, delete, select
+from sqlalchemy.sql import Executable
 
 from chainlit.persistence import statements
 from chainlit.persistence.models import (
@@ -69,11 +71,31 @@ UUID_COLUMNS = frozenset(
 TIMESTAMP_COLUMNS = frozenset({"createdAt", "updatedAt", "start", "end"})
 
 
+class InvalidIdError(ValueError):
+    """An id that is not a uuid reached the persistence package.
+
+    A ``ValueError`` subclass, so the read paths that already fail closed on
+    a malformed id (the history cursor, the user filter) keep working
+    unchanged -- and a distinct type, so nothing else has to guess whether a
+    bare ``ValueError`` out of a service was a bad id or a bug.
+
+    On an HTTP route this should never fire: the route annotates the id as
+    ``UUID`` and Litestar refuses the request before the handler runs, which
+    is the difference between validating at the signature and validating
+    inside the handler. It exists for the paths that have no route -- a
+    websocket frame, the writer, a background task -- where the id arrives as
+    text and the alternative is a 500.
+    """
+
+
 def to_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
     """Parse an id coming off the wire."""
     if value is None:
         return None
-    return uuid.UUID(value)
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError) as error:
+        raise InvalidIdError(f"not a valid id: {value!r}") from error
 
 
 def from_uuid(value: Optional[uuid.UUID]) -> Optional[str]:
@@ -119,14 +141,39 @@ def _column_values(record: Struct, skip: Sequence[str] = ()) -> Dict[str, Any]:
     return values
 
 
-class UserService(SQLAlchemyAsyncRepositoryService[User, UserRepository]):
-    """Users, keyed on their identifier."""
+class ChainlitService:
+    """What the five services share: the dialect, and how a statement runs.
 
-    repository_type = UserRepository
+    Almost every rule in this package is a Core statement rather than a
+    repository call, which is deliberate -- the rules have to run inside the
+    database. But ``session.execute`` sits *outside* the repository, and
+    advanced_alchemy's error translation lives inside it: only repository
+    methods apply ``wrap_sqlalchemy_exception``. Executing through here puts
+    it back, so a foreign key violation on ``steps."threadId"`` arrives as
+    advanced_alchemy's ``ForeignKeyError`` rather than a raw SQLAlchemy
+    error -- which is the only form Litestar's ``exception_to_http_response``
+    can turn into a 409 instead of a 500.
+    """
+
+    # Bound by SQLAlchemyAsyncRepositoryService.__init__; annotated, never
+    # assigned, so nothing here shadows it.
+    repository: Any
 
     @property
     def dialect(self) -> str:
         return self.repository.session.get_bind().dialect.name
+
+    async def execute(self, statement: Executable) -> Result[Any]:
+        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+            return await self.repository.session.execute(statement)
+
+
+class UserService(
+    ChainlitService, SQLAlchemyAsyncRepositoryService[User, UserRepository]
+):
+    """Users, keyed on their identifier."""
+
+    repository_type = UserRepository
 
     async def get_by_identifier(self, identifier: str) -> Optional[UserRecord]:
         row = await self.repository.get_one_or_none(identifier=identifier)
@@ -147,7 +194,7 @@ class UserService(SQLAlchemyAsyncRepositoryService[User, UserRepository]):
             created_at=now(),
             dialect_name=self.dialect,
         )
-        result = await self.repository.session.execute(statement)
+        result = await self.execute(statement)
         return self.row_to_record(result.one())
 
     def to_record(self, model: User) -> UserRecord:
@@ -168,14 +215,12 @@ class UserService(SQLAlchemyAsyncRepositoryService[User, UserRepository]):
         )
 
 
-class StepService(SQLAlchemyAsyncRepositoryService[Step, StepRepository]):
+class StepService(
+    ChainlitService, SQLAlchemyAsyncRepositoryService[Step, StepRepository]
+):
     """Steps, written by a conditional upsert."""
 
     repository_type = StepRepository
-
-    @property
-    def dialect(self) -> str:
-        return self.repository.session.get_bind().dialect.name
 
     async def save(self, record: StepRecord) -> None:
         """Write the columns the caller provided, and only those.
@@ -188,50 +233,40 @@ class StepService(SQLAlchemyAsyncRepositoryService[Step, StepRepository]):
         the row, and without the guard PostgreSQL rejects the whole write.
         """
         values = _column_values(record, skip=("feedback",))
-        session = self.repository.session
-        await session.execute(
+        await self.execute(
             statements.ensure_thread(values["threadId"], now(), self.dialect)
         )
-        await session.execute(statements.upsert_step(values, self.dialect))
+        await self.execute(statements.upsert_step(values, self.dialect))
 
     async def fetch(self, step_id: str) -> Optional[StepRecord]:
         identifier = to_uuid(step_id)
         assert identifier is not None
-        result = await self.repository.session.execute(
-            statements.step_query(identifier)
-        )
+        result = await self.execute(statements.step_query(identifier))
         row = result.one_or_none()
         return None if row is None else row_to_step(row)
 
     async def remove(self, step_id: str) -> None:
         """Remove a step and everything hanging off it."""
         identifier = to_uuid(step_id)
-        session = self.repository.session
-        await session.execute(
-            delete(FEEDBACKS).where(FEEDBACKS.c["forId"] == identifier)
-        )
-        await session.execute(delete(ELEMENTS).where(ELEMENTS.c["forId"] == identifier))
-        await session.execute(delete(STEPS).where(STEPS.c["id"] == identifier))
+        await self.execute(delete(FEEDBACKS).where(FEEDBACKS.c["forId"] == identifier))
+        await self.execute(delete(ELEMENTS).where(ELEMENTS.c["forId"] == identifier))
+        await self.execute(delete(STEPS).where(STEPS.c["id"] == identifier))
 
 
-class ElementService(SQLAlchemyAsyncRepositoryService[Element, ElementRepository]):
+class ElementService(
+    ChainlitService, SQLAlchemyAsyncRepositoryService[Element, ElementRepository]
+):
     """Elements attached to steps."""
 
     repository_type = ElementRepository
 
-    @property
-    def dialect(self) -> str:
-        return self.repository.session.get_bind().dialect.name
-
     async def save(self, record: ElementRecord) -> None:
         values = _column_values(record)
-        await self.repository.session.execute(
-            statements.upsert_element(values, self.dialect)
-        )
+        await self.execute(statements.upsert_element(values, self.dialect))
 
     async def fetch(self, thread_id: str, element_id: str) -> Optional[ElementRecord]:
         table = ELEMENTS
-        result = await self.repository.session.execute(
+        result = await self.execute(
             select(*table.c).where(
                 table.c["id"] == to_uuid(element_id),
                 table.c["threadId"] == to_uuid(thread_id),
@@ -245,17 +280,15 @@ class ElementService(SQLAlchemyAsyncRepositoryService[Element, ElementRepository
         statement = delete(table).where(table.c["id"] == to_uuid(element_id))
         if thread_id is not None:
             statement = statement.where(table.c["threadId"] == to_uuid(thread_id))
-        await self.repository.session.execute(statement)
+        await self.execute(statement)
 
 
-class FeedbackService(SQLAlchemyAsyncRepositoryService[Feedback, FeedbackRepository]):
+class FeedbackService(
+    ChainlitService, SQLAlchemyAsyncRepositoryService[Feedback, FeedbackRepository]
+):
     """Thumbs up/down on a step."""
 
     repository_type = FeedbackRepository
-
-    @property
-    def dialect(self) -> str:
-        return self.repository.session.get_bind().dialect.name
 
     async def save(self, record: FeedbackRecord) -> str:
         feedback_id = record.id or str(uuid.uuid4())
@@ -266,14 +299,12 @@ class FeedbackService(SQLAlchemyAsyncRepositoryService[Feedback, FeedbackReposit
             "value": record.value,
             "comment": record.comment,
         }
-        await self.repository.session.execute(
-            statements.upsert_feedback(values, self.dialect)
-        )
+        await self.execute(statements.upsert_feedback(values, self.dialect))
         return feedback_id
 
     async def remove(self, feedback_id: str) -> bool:
         table = FEEDBACKS
-        result = await self.repository.session.execute(
+        result = await self.execute(
             delete(table).where(table.c["id"] == to_uuid(feedback_id))
         )
         # execute() is typed as Result; a DML statement always yields a
@@ -281,18 +312,16 @@ class FeedbackService(SQLAlchemyAsyncRepositoryService[Feedback, FeedbackReposit
         return bool(cast("CursorResult[Any]", result).rowcount)
 
 
-class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
+class ThreadService(
+    ChainlitService, SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]
+):
     """Threads: the history page, and the row every step hangs off."""
 
     repository_type = ThreadRepository
 
-    @property
-    def dialect(self) -> str:
-        return self.repository.session.get_bind().dialect.name
-
     async def fetch(self, thread_id: str) -> Optional[ThreadRecord]:
         table = THREADS
-        result = await self.repository.session.execute(
+        result = await self.execute(
             select(*table.c).where(table.c["id"] == to_uuid(thread_id))
         )
         row = result.one_or_none()
@@ -300,7 +329,7 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
 
     async def get_author(self, thread_id: str) -> Optional[str]:
         table = THREADS
-        result = await self.repository.session.execute(
+        result = await self.execute(
             select(table.c["userIdentifier"]).where(table.c["id"] == to_uuid(thread_id))
         )
         return result.scalar_one_or_none()
@@ -314,7 +343,6 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
         identifier = to_uuid(thread_id)
         assert identifier is not None
         moment = now()
-        session = self.repository.session
 
         values = _column_values(patch, skip=("metadata",))
         insert_values: Dict[str, Any] = {
@@ -326,14 +354,14 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
         assignments: Dict[str, Any] = {"updatedAt": moment, **values}
 
         statement = statements.insert_for(self.dialect)(THREADS).values(**insert_values)
-        await session.execute(
+        await self.execute(
             statement.on_conflict_do_update(
                 index_elements=[THREADS.c["id"]], set_=assignments
             )
         )
 
         if patch.metadata is not UNSET:
-            await session.execute(
+            await self.execute(
                 statements.merge_thread_metadata(
                     thread_id=identifier,
                     patch=patch.metadata,
@@ -353,13 +381,12 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
             return None
         identifier = to_uuid(thread_id)
         assert identifier is not None
-        session = self.repository.session
 
         step_rows = (
-            await session.execute(statements.thread_steps_query([identifier]))
+            await self.execute(statements.thread_steps_query([identifier]))
         ).all()
         element_rows = (
-            await session.execute(statements.thread_elements_query([identifier]))
+            await self.execute(statements.thread_elements_query([identifier]))
         ).all()
 
         return ThreadDetail(
@@ -378,9 +405,7 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
 
     async def page(self, query: ThreadQuery) -> ThreadPage:
         """One keyset page of the history, newest activity first."""
-        rows = (
-            await self.repository.session.execute(statements.thread_page_query(query))
-        ).all()
+        rows = (await self.execute(statements.thread_page_query(query))).all()
 
         # The clamped size, not query.first: the statement was built with the
         # same clamp, so trimming to the raw value would throw away rows the
@@ -408,19 +433,14 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
         different tool and cannot be assumed to cascade.
         """
         identifier = to_uuid(thread_id)
-        session = self.repository.session
         step_ids = select(STEPS.c["id"]).where(STEPS.c["threadId"] == identifier)
-        await session.execute(
-            delete(FEEDBACKS).where(FEEDBACKS.c["forId"].in_(step_ids))
-        )
-        await session.execute(
+        await self.execute(delete(FEEDBACKS).where(FEEDBACKS.c["forId"].in_(step_ids)))
+        await self.execute(
             delete(FEEDBACKS).where(FEEDBACKS.c["threadId"] == identifier)
         )
-        await session.execute(
-            delete(ELEMENTS).where(ELEMENTS.c["threadId"] == identifier)
-        )
-        await session.execute(delete(STEPS).where(STEPS.c["threadId"] == identifier))
-        await session.execute(delete(THREADS).where(THREADS.c["id"] == identifier))
+        await self.execute(delete(ELEMENTS).where(ELEMENTS.c["threadId"] == identifier))
+        await self.execute(delete(STEPS).where(STEPS.c["threadId"] == identifier))
+        await self.execute(delete(THREADS).where(THREADS.c["id"] == identifier))
 
 
 def row_to_thread(row: Row[Any]) -> ThreadRecord:

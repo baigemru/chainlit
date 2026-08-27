@@ -23,10 +23,10 @@ and waits for that one object, so it means "everything issued before I was
 called has landed" — not "the queue is empty", which an actively-streaming
 session never is.
 
-*Serialise blob uploads.* An element's upload starts at submit time and runs
-concurrently with everything else; only the element's own row waits for it.
-The barrier therefore costs the *slowest* upload, not the sum of them, while
-the row still lands in issue order and never before its object exists.
+*Let a blob upload hold the queue.* An upload runs as its own task and
+enqueues the element's row when it succeeds, so an unreachable bucket can
+delay that one row and nothing else. The ordered queue is for database
+writes; an upload is not one.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import (
     Any,
     Awaitable,
+    Callable,
     Dict,
     List,
     Optional,
@@ -51,6 +52,7 @@ from msgspec import UNSET
 
 from chainlit.logger import logger
 from chainlit.persistence.config import Persistence, UnitOfWork
+from chainlit.persistence.models import iso_datetime, iso_text
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
 from chainlit.persistence.statements import PLACEHOLDER_STEP_TYPE
 
@@ -60,9 +62,11 @@ BATCH_LIMIT = 256
 # What a reader is willing to wait for. Matches the barrier this replaces.
 DRAIN_TIMEOUT = 10.0
 
-# An upload that never finishes must not pin the writer forever; past this the
-# element is dropped, exactly as a raising upload is.
-UPLOAD_TIMEOUT = 60.0
+# The upload half of an element, run as its own task. It returns the record to
+# write — the storage backend is what decides the row's ``url`` and
+# ``objectKey``, so the record handed to ``submit_element`` is a starting
+# point, not the final one. Returning None writes the submitted record as-is.
+Upload = Callable[[], Awaitable[Optional[ElementRecord]]]
 
 
 @dataclass(slots=True)
@@ -79,15 +83,7 @@ class DeleteStep:
 
 @dataclass(slots=True)
 class SaveElement:
-    """Write an element row, optionally gated on its blob upload.
-
-    ``upload`` is a task already in flight. The row is written once it
-    succeeds and skipped entirely if it does not — the invariant the legacy
-    ``create_element`` got from doing both in one coroutine.
-    """
-
     record: ElementRecord
-    upload: Optional["asyncio.Task[Any]"] = None
 
 
 @dataclass(slots=True)
@@ -107,6 +103,21 @@ class PatchThread:
 Op = Union[SaveStep, DeleteStep, SaveElement, DeleteElement, PatchThread]
 
 
+@dataclass(slots=True)
+class _HeldUpload:
+    """An element whose upload has not been started because the gate is shut.
+
+    The *callable* is held rather than a coroutine, so a session abandoned
+    before its first interaction uploads nothing at all — matching
+    ``queue_until_user_message``, which queued the arguments and never built
+    the coroutine either. A started upload would leave an orphan object in the
+    bucket that no row will ever point at.
+    """
+
+    record: ElementRecord
+    upload: Upload
+
+
 class _Fence:
     """A marker that resolves once everything queued before it has run."""
 
@@ -120,6 +131,17 @@ class _Fence:
             self.future.set_result(None)
 
 
+def _stored_form(value: str) -> str:
+    """The text the database would hold for this timestamp.
+
+    ``_column_values`` parses the wire string and the column type re-renders
+    it as UTC, so ``2026-08-27T10:00:00+02:00`` is stored as
+    ``2026-08-27T08:00:00.000000Z``. Comparing the wire strings instead would
+    order them by codepoint, which is a different answer.
+    """
+    return iso_text(iso_datetime(value)) or value
+
+
 def merge_steps(earlier: StepRecord, later: StepRecord) -> StepRecord:
     """Fold two writes of one step into the write they are equivalent to.
 
@@ -127,8 +149,10 @@ def merge_steps(earlier: StepRecord, later: StepRecord) -> StepRecord:
     straight through are folded the same way the database folds them, so
     coalescing can never change what ends up stored.
 
-    * ``start`` keeps the earlier of the two. The column is TEXT holding
-      fixed-width ISO, so ``min`` here and ``LEAST`` there compare identically.
+    * ``start`` keeps the earlier of the two, compared in the form the column
+      actually holds. An explicit ``None`` says nothing, because ``LEAST``
+      skips NULLs on both dialects — so a later write that clears ``start``
+      does not clear it there either.
     * ``type`` refuses a placeholder over a settled type.
     * everything else is last-write-wins, and a field left ``UNSET`` says
       nothing at all — which is the whole reason the record type can serve
@@ -141,8 +165,10 @@ def merge_steps(earlier: StepRecord, later: StepRecord) -> StepRecord:
             continue
         if info.name == "start":
             prior = earlier.start
+            if value is None:
+                continue
             if isinstance(prior, str) and isinstance(value, str):
-                value = min(prior, value)
+                value = min(prior, value, key=_stored_form)
         elif info.name == "type":
             if value == PLACEHOLDER_STEP_TYPE and earlier.type != PLACEHOLDER_STEP_TYPE:
                 continue
@@ -172,8 +198,8 @@ def coalesce(ops: Sequence[Op]) -> List[Op]:
 
     A delete is a barrier: writes after it describe a row that has to be
     created again, and merging across it would resurrect the deleted state.
-    Elements are never merged — an element carries an upload task, and two of
-    them are two different objects that both have to land.
+    Elements are never merged — an element is a distinct object, and two of
+    them both have to land.
     """
     result: List[Op] = []
     steps: Dict[str, int] = {}
@@ -208,10 +234,12 @@ def coalesce(ops: Sequence[Op]) -> List[Op]:
 class SessionWriter:
     """The ordered writer for one session's thread.
 
-    Ops issued before the first user interaction are *held*, not queued: they
-    are released in issue order when the gate opens, behind whatever prelude
-    the caller passes. A session that closes without ever interacting drops
-    them, which is what happens today when the session's queues die with it.
+    ``hold_until_interaction`` is the gate: while it is shut, ops accumulate
+    in one ordered list and are released, in issue order, behind whatever
+    prelude ``open_gate`` is given. A session that closes without ever
+    interacting *discards* them, which is what happens today when the
+    session's queues die with it — so the discarding mode is opt-in, and a
+    plain ``SessionWriter(...)`` writes what it is given.
     """
 
     def __init__(
@@ -219,18 +247,19 @@ class SessionWriter:
         persistence: Persistence,
         thread_id: str,
         *,
-        gate_open: bool = False,
+        hold_until_interaction: bool = False,
         batch_limit: int = BATCH_LIMIT,
-        upload_timeout: float = UPLOAD_TIMEOUT,
     ) -> None:
         self.persistence = persistence
         self.thread_id = thread_id
         self._queue: "asyncio.Queue[Union[Op, _Fence]]" = asyncio.Queue()
-        self._held: List[Op] = []
-        self._gate_open = gate_open
+        self._held: List[Union[Op, _HeldUpload]] = []
+        self._gate_open = not hold_until_interaction
         self._batch_limit = batch_limit
-        self._upload_timeout = upload_timeout
+        self._uploads: Set["asyncio.Task[None]"] = set()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._task: Optional["asyncio.Task[None]"] = None
+        self._closing = False
         self._closed = False
 
     # ------------------------------------------------------------------ state
@@ -240,14 +269,15 @@ class SessionWriter:
         return self._gate_open
 
     @property
-    def held(self) -> Sequence[Op]:
-        """The ops waiting for the gate, in issue order. For tests."""
+    def held(self) -> Tuple[Union[Op, _HeldUpload], ...]:
+        """What is waiting for the gate, in issue order. For tests."""
         return tuple(self._held)
 
     # ---------------------------------------------------------------- lifetime
 
     def start(self) -> Self:
         if self._task is None:
+            self._loop = asyncio.get_running_loop()
             self._task = asyncio.create_task(self._consume())
             register(self)
         return self
@@ -257,31 +287,46 @@ class SessionWriter:
 
         A session that never reached its first interaction has nothing to
         flush: its held ops describe a conversation that was abandoned before
-        it began, and today they die with the session's queues.
+        it began, and today they die with the session's queues. Nothing was
+        uploaded for them either — the gate holds the upload, not a coroutine
+        already in flight.
+
+        The writer leaves the registry only once the flush is over. Dropping
+        out of it first would make ``drain_thread`` report "nothing pending"
+        during the exact window where the writes are still being committed.
+
+        It stops accepting writes only then, too. An upload finishing *during*
+        the final drain still has a row to enqueue, and closing to submissions
+        first would drop exactly the write this method is here to flush.
         """
-        if self._closed:
+        if self._closing:
             return
-        self._closed = True
-        unregister(self)
+        self._closing = True
 
-        if self._gate_open:
-            await self.drain(timeout=timeout)
-        elif self._held:
-            logger.debug(
-                "Session writer for thread %s closed before the first "
-                "interaction; discarding %d held write(s).",
-                self.thread_id,
-                len(self._held),
-            )
-        self._held.clear()
-
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+        try:
+            if self._gate_open:
+                await self.drain(timeout=timeout)
+            elif self._held:
+                logger.debug(
+                    "Session writer for thread %s closed before the first "
+                    "interaction; discarding %d held write(s).",
+                    self.thread_id,
+                    len(self._held),
+                )
+        finally:
+            self._closed = True
+            unregister(self)
+            self._held.clear()
+            for upload in tuple(self._uploads):
+                upload.cancel()
+            self._uploads.clear()
+            if self._task is not None:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                self._task = None
 
     async def __aenter__(self) -> Self:
         return self.start()
@@ -305,16 +350,71 @@ class SessionWriter:
         else:
             self._held.append(op)
 
-    def submit_element(
-        self, record: ElementRecord, upload: Optional[Awaitable[Any]] = None
-    ) -> None:
-        """Queue an element, starting its upload immediately.
+    def submit_threadsafe(self, op: Op) -> None:
+        """Queue one write from a thread that is not running the event loop.
 
-        The upload runs concurrently from this moment; the row keeps its place
-        in the queue and is written only once the object exists.
+        Integrations call back from their own threads — llama_index does, and
+        says so where it works around the current helper. The queue is not
+        thread-safe, so those callers have to hop the loop rather than touch
+        it directly.
         """
-        task = asyncio.ensure_future(upload) if upload is not None else None
-        self.submit(SaveElement(record, task))
+        loop = self._loop
+        if loop is None:
+            logger.warning(
+                "Dropping a %s submitted to an unstarted session writer for thread %s.",
+                type(op).__name__,
+                self.thread_id,
+            )
+            return
+        loop.call_soon_threadsafe(self.submit, op)
+
+    def submit_element(
+        self, record: ElementRecord, upload: Optional[Upload] = None
+    ) -> None:
+        """Queue an element, uploading its blob first if there is one.
+
+        The upload is a *callable*: nothing starts until the writer decides
+        the element is going to be written at all. It runs as its own task,
+        so an unreachable bucket delays this row and no other, and the row is
+        written from whatever record the upload returns — the storage backend
+        is what settles ``url`` and ``objectKey``.
+        """
+        if upload is None:
+            self.submit(SaveElement(record))
+            return
+        if self._closed:
+            logger.warning(
+                "Dropping an element issued after the session writer for "
+                "thread %s closed; its blob is not uploaded.",
+                self.thread_id,
+            )
+            return
+        if self._gate_open:
+            self._start_upload(record, upload)
+        else:
+            self._held.append(_HeldUpload(record, upload))
+
+    def _start_upload(self, record: ElementRecord, upload: Upload) -> None:
+        task = asyncio.ensure_future(self._upload_then_write(record, upload))
+        self._uploads.add(task)
+        task.add_done_callback(self._uploads.discard)
+
+    async def _upload_then_write(self, record: ElementRecord, upload: Upload) -> None:
+        try:
+            written = await upload()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # No row: an element whose blob is not in the bucket points at
+            # nothing. This is the invariant the legacy create_element got
+            # from doing the upload and the insert in one coroutine.
+            logger.warning(
+                "Upload for element %s failed; the element row is not written.",
+                record.id,
+                exc_info=True,
+            )
+            return
+        self.submit(SaveElement(written if written is not None else record))
 
     def open_gate(self, prelude: Optional[Op] = None) -> None:
         """Release the held writes, behind ``prelude`` if one is given.
@@ -330,14 +430,21 @@ class SessionWriter:
         self._gate_open = True
         if prelude is not None:
             self._queue.put_nowait(prelude)
-        for op in self._held:
-            self._queue.put_nowait(op)
-        self._held.clear()
+        held, self._held = self._held, []
+        for entry in held:
+            if isinstance(entry, _HeldUpload):
+                self._start_upload(entry.record, entry.upload)
+            else:
+                self._queue.put_nowait(entry)
 
     # ------------------------------------------------------------------ fence
 
     async def drain(self, timeout: float = DRAIN_TIMEOUT) -> None:
         """Wait until everything issued so far has been written.
+
+        Two steps, because an upload enqueues its row when it finishes: first
+        the uploads outstanding right now, then a fence behind the rows they
+        just queued. Both are covered by one deadline.
 
         Bounded and silent on failure: a reader that cannot get a clean
         barrier proceeds with a possibly-incomplete read, which is what it did
@@ -349,10 +456,26 @@ class SessionWriter:
         """
         if not self._gate_open or self._task is None or self._task.done():
             return
-        fence = asyncio.get_running_loop().create_future()
-        self._queue.put_nowait(_Fence(fence))
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         try:
-            await asyncio.wait_for(asyncio.shield(fence), timeout)
+            uploads = tuple(self._uploads)
+            if uploads:
+                _done, pending = await asyncio.wait(
+                    uploads, timeout=max(0.0, deadline - loop.time())
+                )
+                if pending:
+                    logger.warning(
+                        "Timed out waiting for %d upload(s) of thread %s; "
+                        "reading anyway.",
+                        len(pending),
+                        self.thread_id,
+                    )
+            fence = loop.create_future()
+            self._queue.put_nowait(_Fence(fence))
+            await asyncio.wait_for(
+                asyncio.shield(fence), max(0.0, deadline - loop.time())
+            )
         except TimeoutError:
             logger.warning(
                 "Timed out after %ss waiting for the pending writes of thread "
@@ -360,6 +483,8 @@ class SessionWriter:
                 timeout,
                 self.thread_id,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.warning(
                 "Failed waiting for the pending writes of thread %s",
@@ -398,7 +523,6 @@ class SessionWriter:
         fences = [item for item in batch if isinstance(item, _Fence)]
         try:
             ops = coalesce([item for item in batch if not isinstance(item, _Fence)])
-            ops = await self._settle_uploads(ops)
             if ops:
                 await self._write(ops)
         finally:
@@ -455,47 +579,6 @@ class SessionWriter:
             await uow.threads.patch(op.thread_id, op.patch)
         else:  # pragma: no cover - the union is closed
             raise TypeError(f"Unknown write op: {op!r}")
-
-    async def _settle_uploads(self, ops: Sequence[Op]) -> List[Op]:
-        """Wait for this batch's uploads, dropping the elements that failed.
-
-        The uploads have been running since submit, so this waits for the
-        slowest of them rather than for their sum, and it happens before the
-        transaction opens rather than inside it.
-        """
-        pending = [
-            op.upload
-            for op in ops
-            if isinstance(op, SaveElement) and op.upload is not None
-        ]
-        if not pending:
-            return list(ops)
-
-        await asyncio.wait(pending, timeout=self._upload_timeout)
-
-        kept: List[Op] = []
-        for op in ops:
-            if isinstance(op, SaveElement) and op.upload is not None:
-                if not op.upload.done():
-                    op.upload.cancel()
-                    logger.warning(
-                        "Upload for element %s timed out after %ss; the "
-                        "element row is not written.",
-                        op.record.id,
-                        self._upload_timeout,
-                    )
-                    continue
-                error = None if op.upload.cancelled() else op.upload.exception()
-                if op.upload.cancelled() or error is not None:
-                    logger.warning(
-                        "Upload for element %s failed (%r); the element row "
-                        "is not written.",
-                        op.record.id,
-                        error,
-                    )
-                    continue
-            kept.append(op)
-        return kept
 
 
 # --------------------------------------------------------------------- registry

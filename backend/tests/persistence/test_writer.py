@@ -23,6 +23,7 @@ from chainlit.persistence.writer import (
     SaveElement,
     SaveStep,
     SessionWriter,
+    Upload,
     coalesce,
     drain_thread,
     merge_steps,
@@ -52,7 +53,7 @@ def thread_id() -> str:
 @pytest.fixture
 async def writer(persistence: Persistence, thread_id: str):
     """An open writer, started, and closed at the end of the test."""
-    instance = Recorder(persistence, thread_id, gate_open=True).start()
+    instance = Recorder(persistence, thread_id).start()
     yield instance
     await instance.aclose(timeout=5.0)
 
@@ -117,7 +118,7 @@ async def test_gate_holds_writes_and_releases_them_in_order(
     persistence: Persistence, thread_id: str, uow: UnitOfWork
 ):
     """Held writes come out in issue order, behind the prelude."""
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
     try:
         first = step(thread_id, name="first")
         writer.submit(SaveStep(first))
@@ -155,7 +156,7 @@ async def test_gate_shut_drain_does_not_stall(persistence: Persistence, thread_i
     Held writes are not in flight — nothing is trying to write them — so
     treating them as pending would pin every reader to the full timeout.
     """
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
     try:
         writer.submit(SaveStep(step(thread_id)))
         loop = asyncio.get_running_loop()
@@ -173,7 +174,7 @@ async def test_close_without_interaction_discards_held_writes(
     persistence: Persistence, thread_id: str, uow: UnitOfWork
 ):
     """A conversation abandoned before it began leaves nothing behind."""
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
     writer.submit(SaveStep(step(thread_id)))
     await writer.aclose(timeout=5.0)
 
@@ -184,7 +185,7 @@ async def test_close_without_interaction_discards_held_writes(
 async def test_close_after_interaction_flushes(
     persistence: Persistence, thread_id: str, uow: UnitOfWork
 ):
-    writer = Recorder(persistence, thread_id).start()
+    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
     writer.open_gate(PatchThread(thread_id))
     writer.submit(SaveStep(step(thread_id, name="kept")))
     await writer.aclose(timeout=5.0)
@@ -195,7 +196,7 @@ async def test_close_after_interaction_flushes(
 async def test_closed_writer_drops_further_submissions(
     persistence: Persistence, thread_id: str, uow: UnitOfWork
 ):
-    writer = Recorder(persistence, thread_id, gate_open=True).start()
+    writer = Recorder(persistence, thread_id).start()
     await writer.aclose(timeout=5.0)
     writer.submit(SaveStep(step(thread_id, name="late")))
     await writer.drain(timeout=1.0)
@@ -315,6 +316,20 @@ def test_merge_keeps_the_earliest_start_and_refuses_a_placeholder_type():
         ),
         pytest.param(
             [
+                {"type": "assistant_message", "start": iso(at(hour=10))},
+                {"start": None, "output": "cleared"},
+            ],
+            id="start-cleared-by-a-later-write",
+        ),
+        pytest.param(
+            [
+                {"type": "assistant_message", "start": "2026-08-27T10:00:00+02:00"},
+                {"start": "2026-08-27T09:00:00Z"},
+            ],
+            id="start-with-an-offset",
+        ),
+        pytest.param(
+            [
                 {"type": "tool", "input": "q", "is_error": False},
                 {"is_error": True, "output": "boom"},
             ],
@@ -412,8 +427,8 @@ async def test_drain_thread_covers_every_writer_on_the_thread(
     persistence: Persistence, thread_id: str, uow: UnitOfWork
 ):
     """Two tabs are two writers, and one read has to see both."""
-    left = Recorder(persistence, thread_id, gate_open=True).start()
-    right = Recorder(persistence, thread_id, gate_open=True).start()
+    left = Recorder(persistence, thread_id).start()
+    right = Recorder(persistence, thread_id).start()
     try:
         assert len(writers_for(thread_id)) == 2
         first, second = new_id(), new_id()
@@ -430,6 +445,27 @@ async def test_drain_thread_covers_every_writer_on_the_thread(
         assert writers_for(thread_id) == ()
 
 
+async def test_drain_thread_covers_a_writer_that_is_still_flushing(
+    persistence: Persistence, thread_id: str, uow: UnitOfWork
+):
+    """A closing writer stays visible until its flush is over.
+
+    The barrier this replaces removed a task from its registry only in the
+    task's own done-callback. Leaving the registry first would tell a reader
+    "nothing pending" during exactly the window where the writes are being
+    committed.
+    """
+    writer = Recorder(persistence, thread_id).start()
+    kept = step(thread_id, name="kept")
+    writer.submit(SaveStep(kept))
+
+    closing = asyncio.create_task(writer.aclose(timeout=5.0))
+    await asyncio.sleep(0)
+    await drain_thread(thread_id, timeout=5.0)
+    assert await uow.steps.fetch(kept.id) is not None
+    await closing
+
+
 # --------------------------------------------------------------------- uploads
 
 
@@ -444,8 +480,9 @@ async def test_element_row_waits_for_its_upload(
 
     async def upload() -> None:
         await uploaded.wait()
+        return None
 
-    writer.submit_element(attachment, upload())
+    writer.submit_element(attachment, upload)
     await asyncio.sleep(0.05)
     assert await uow.elements.fetch(thread_id, attachment.id) is None
 
@@ -454,10 +491,39 @@ async def test_element_row_waits_for_its_upload(
     assert await uow.elements.fetch(thread_id, attachment.id) is not None
 
 
+async def test_the_row_is_written_from_what_the_upload_returns(
+    writer: Recorder, thread_id: str, uow: UnitOfWork
+):
+    """The storage backend settles ``url`` and ``objectKey``, not the caller.
+
+    The legacy layer wrote the upload's own answer into the row --
+    ``element_dict["url"] = uploaded_file.get("url")``. A record frozen at
+    submit time would store neither, and the attachment would be unreachable.
+    """
+    parent = step(thread_id, name="carrier")
+    writer.submit(SaveStep(parent))
+    attachment = element(thread_id, for_id=parent.id)
+
+    async def upload() -> ElementRecord:
+        return msgspec.structs.replace(
+            attachment,
+            url="https://bucket.example/threads/x/files/y",
+            object_key="threads/x/files/y",
+        )
+
+    writer.submit_element(attachment, upload)
+    await writer.drain(timeout=5.0)
+
+    stored = await uow.elements.fetch(thread_id, attachment.id)
+    assert stored is not None
+    assert stored.url == "https://bucket.example/threads/x/files/y"
+    assert stored.object_key == "threads/x/files/y"
+
+
 async def test_a_failed_upload_drops_the_row_and_nothing_else(
     writer: Recorder, thread_id: str, uow: UnitOfWork
 ):
-    """Upload failure means no row — the invariant of doing both in one call."""
+    """Upload failure means no row -- the invariant of doing both in one call."""
     parent = step(thread_id, name="carrier")
     writer.submit(SaveStep(parent))
     attachment = element(thread_id, for_id=parent.id)
@@ -465,7 +531,7 @@ async def test_a_failed_upload_drops_the_row_and_nothing_else(
     async def upload() -> None:
         raise OSError("bucket unreachable")
 
-    writer.submit_element(attachment, upload())
+    writer.submit_element(attachment, upload)
     survivor = step(thread_id, name="survivor")
     writer.submit(SaveStep(survivor))
     await writer.drain(timeout=5.0)
@@ -474,62 +540,173 @@ async def test_a_failed_upload_drops_the_row_and_nothing_else(
     assert await uow.steps.fetch(survivor.id) is not None
 
 
-async def test_uploads_start_at_submit_not_at_write(writer: Recorder, thread_id: str):
-    """The barrier costs the slowest upload, not the sum of them.
+async def test_only_the_elements_own_row_waits_for_its_upload(
+    writer: Recorder, thread_id: str, uow: UnitOfWork
+):
+    """An unreachable bucket delays one row, not the conversation.
 
-    The distinction only shows up while the consumer is already busy: these
-    two uploads are submitted behind one the writer is blocked on. Starting
-    them here means they overlap with it; starting them where the row is
-    written would serialise all three, and the barrier's cost would go from
-    the maximum to the sum.
+    The ordered queue is for database writes; an upload is not one. Holding a
+    batch on it would mean a user attaching a file while S3 is down stops
+    every step of the reply from being persisted -- and, if the socket closes
+    first, losing them.
     """
+    before = step(thread_id, name="before")
+    after = step(thread_id, name="after")
+    writer.submit(SaveStep(before))
+
+    async def hung() -> None:
+        await asyncio.sleep(3600)
+
+    writer.submit_element(element(thread_id, for_id=before.id), hung)
+    writer.submit(SaveStep(after))
+    await writer.drain(timeout=1.0)
+
+    assert await uow.steps.fetch(before.id) is not None
+    assert await uow.steps.fetch(after.id) is not None
+
+
+async def test_close_flushes_what_was_issued_behind_a_hung_upload(
+    persistence: Persistence, thread_id: str, uow: UnitOfWork
+):
+    """ "Flush what was issued, then stop" -- including behind a stalled upload."""
+    writer = Recorder(persistence, thread_id).start()
+    kept = step(thread_id, name="kept")
+    writer.submit(SaveStep(kept))
+
+    async def hung() -> None:
+        await asyncio.sleep(3600)
+
+    writer.submit_element(element(thread_id, for_id=kept.id), hung)
+    await writer.aclose(timeout=0.5)
+
+    assert await uow.steps.fetch(kept.id) is not None
+
+
+async def test_uploads_run_concurrently(writer: Recorder, thread_id: str):
+    """The barrier costs the slowest upload, not the sum of them."""
     parent = step(thread_id, name="carrier")
     writer.submit(SaveStep(parent))
     release = asyncio.Event()
     started = [asyncio.Event() for _ in range(3)]
 
-    async def upload(index: int) -> None:
-        started[index].set()
-        await release.wait()
+    def uploader(index: int) -> Upload:
+        async def upload() -> None:
+            started[index].set()
+            await release.wait()
 
-    writer.submit_element(element(thread_id, for_id=parent.id), upload(0))
-    await asyncio.wait_for(started[0].wait(), timeout=5.0)
+        return upload
 
-    for index in (1, 2):
-        writer.submit_element(element(thread_id, for_id=parent.id), upload(index))
+    for index in range(3):
+        writer.submit_element(element(thread_id, for_id=parent.id), uploader(index))
 
     try:
         await asyncio.wait_for(
-            asyncio.gather(started[1].wait(), started[2].wait()), timeout=2.0
+            asyncio.gather(*(event.wait() for event in started)), timeout=5.0
         )
     finally:
         release.set()
     await writer.drain(timeout=5.0)
 
 
-async def test_a_hung_upload_does_not_pin_the_writer(
+async def test_an_abandoned_session_does_not_upload_its_held_blobs(
+    persistence: Persistence, thread_id: str
+):
+    """A conversation whose rows are discarded must not leave a blob behind.
+
+    ``queue_until_user_message`` queued the arguments and never built the
+    coroutine, so nothing was uploaded either. Holding the callable rather
+    than a coroutine already in flight is what preserves that.
+    """
+    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
+    uploaded = asyncio.Event()
+
+    async def upload() -> None:
+        uploaded.set()
+
+    writer.submit_element(element(thread_id, for_id=new_id()), upload)
+    await writer.aclose(timeout=1.0)
+
+    assert not uploaded.is_set()
+
+
+async def test_a_closed_writer_does_not_start_the_upload_it_drops(
+    writer: Recorder, thread_id: str
+):
+    uploaded = asyncio.Event()
+
+    async def upload() -> None:
+        uploaded.set()
+
+    await writer.aclose(timeout=1.0)
+    writer.submit_element(element(thread_id, for_id=new_id()), upload)
+    await asyncio.sleep(0.05)
+
+    assert not uploaded.is_set()
+
+
+async def test_close_cancels_an_upload_still_in_flight(
+    persistence: Persistence, thread_id: str
+):
+    """No task is left running with nobody to retrieve its exception."""
+    writer = Recorder(persistence, thread_id).start()
+    parent = step(thread_id, name="carrier")
+    writer.submit(SaveStep(parent))
+
+    async def hung() -> None:
+        await asyncio.sleep(3600)
+
+    writer.submit_element(element(thread_id, for_id=parent.id), hung)
+    await asyncio.sleep(0.05)
+    in_flight = tuple(writer._uploads)
+    assert len(in_flight) == 1
+
+    await writer.aclose(timeout=0.2)
+    await asyncio.sleep(0)
+    assert in_flight[0].cancelled()
+
+
+async def test_gate_open_starts_the_uploads_it_was_holding(
     persistence: Persistence, thread_id: str, uow: UnitOfWork
 ):
-    parent = step(thread_id, name="carrier")
-    writer = Recorder(
-        persistence, thread_id, gate_open=True, upload_timeout=0.05
-    ).start()
+    writer = Recorder(persistence, thread_id, hold_until_interaction=True).start()
     try:
+        parent = step(thread_id, name="carrier")
         writer.submit(SaveStep(parent))
         attachment = element(thread_id, for_id=parent.id)
 
         async def upload() -> None:
-            await asyncio.sleep(3600)
+            return None
 
-        writer.submit_element(attachment, upload())
-        survivor = step(thread_id, name="survivor")
-        writer.submit(SaveStep(survivor))
+        writer.submit_element(attachment, upload)
+        writer.open_gate(PatchThread(thread_id))
         await writer.drain(timeout=5.0)
 
-        assert await uow.elements.fetch(thread_id, attachment.id) is None
-        assert await uow.steps.fetch(survivor.id) is not None
+        assert await uow.elements.fetch(thread_id, attachment.id) is not None
     finally:
         await writer.aclose(timeout=5.0)
+
+
+# ------------------------------------------------------------ thread safety
+
+
+async def test_submit_from_another_thread_reaches_the_queue(
+    writer: Recorder, thread_id: str, uow: UnitOfWork
+):
+    """Integrations call back from their own threads and say so.
+
+    ``asyncio.Queue`` is not thread-safe; a cross-thread ``put_nowait``
+    corrupts its waiter state rather than failing loudly.
+    """
+    import threading
+
+    record = step(thread_id, name="from another thread")
+    thread = threading.Thread(target=writer.submit_threadsafe, args=(SaveStep(record),))
+    thread.start()
+    thread.join()
+
+    await asyncio.sleep(0.05)
+    await writer.drain(timeout=5.0)
+    assert await uow.steps.fetch(record.id) is not None
 
 
 # ------------------------------------------------------------------ resilience
@@ -572,3 +749,25 @@ async def test_the_writer_survives_a_failed_batch(
     await writer.drain(timeout=5.0)
 
     assert await uow.steps.fetch(later.id) is not None
+
+
+async def test_an_upload_landing_during_the_final_drain_still_writes_its_row(
+    persistence: Persistence, thread_id: str, uow: UnitOfWork
+):
+    """Closing to submissions before flushing would drop the flush's own work.
+
+    The upload is still in flight when ``aclose`` is called; its row is
+    enqueued from inside the drain that ``aclose`` is waiting on.
+    """
+    writer = Recorder(persistence, thread_id).start()
+    parent = step(thread_id, name="carrier")
+    writer.submit(SaveStep(parent))
+    attachment = element(thread_id, for_id=parent.id)
+
+    async def upload() -> None:
+        await asyncio.sleep(0.05)
+
+    writer.submit_element(attachment, upload)
+    await writer.aclose(timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, attachment.id) is not None

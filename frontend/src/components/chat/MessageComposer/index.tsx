@@ -311,7 +311,7 @@ export default function MessageComposer({
               </Tooltip>
             </TooltipProvider>
           )}
-          <OpenParentThreadButton />
+          <OpenParentThreadButton disabled={disabled} />
           <McpButton disabled={disabled} />
           {modes.map((mode) => (
             <ModePicker

@@ -17,8 +17,15 @@ const useConfig = () => {
     ? `/project/settings?language=${language}${chatProfile ? `&chat_profile=${encodeURIComponent(chatProfile)}` : ''}`
     : null;
 
-  // Always fetch if we don't have config and we're authenticated
-  const shouldFetch = isAuthenticated && !config;
+  const hotSwap = !!config?.features?.hot_swap_chat_profile;
+
+  // SWR is keyed on the URL, which already carries the chat profile, so a
+  // profile change refetches on its own. Blanking the config below is only
+  // how the legacy path turns `shouldFetch` back on — on the hot-swap path
+  // that blank would unmount the whole app (App.tsx returns null without a
+  // config), flip chatProfileOk and re-run the connect effect, tearing down
+  // the very socket the swap exists to keep. So keep fetching instead.
+  const shouldFetch = isAuthenticated && (!config || hotSwap);
 
   const { data, error, isLoading } = useApi<IChainlitConfig>(
     shouldFetch ? apiUrl : null
@@ -29,13 +36,15 @@ const useConfig = () => {
     setConfig(data);
   }, [data, setConfig]);
 
-  // Clear config when chat profile changes to force re-fetch
+  // Clear config when chat profile changes to force re-fetch. Skipped on
+  // the hot-swap path, where the refetch is already driven by the SWR key
+  // and the old config stays on screen until the new one lands.
   useEffect(() => {
     if (prevChatProfileRef.current !== chatProfile) {
-      setConfig(undefined);
+      if (!hotSwap) setConfig(undefined);
       prevChatProfileRef.current = chatProfile;
     }
-  }, [chatProfile, setConfig]);
+  }, [chatProfile, setConfig, hotSwap]);
 
   return { config, error, isLoading, language };
 };

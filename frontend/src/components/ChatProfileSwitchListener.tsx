@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useSetRecoilState } from 'recoil';
-import { v4 as uuidv4 } from 'uuid';
 
 import {
   IStep,
@@ -31,12 +30,10 @@ import {
 interface SetChatProfilePayload {
   name: string;
   keepTranscript?: boolean;
-  /** @deprecated superseded by keepTranscript; read for older backends. */
-  startNew?: boolean;
   /** Set when the backend parked a transit message for the next session. */
   hasTransitMessage?: boolean;
-  /** @deprecated older backends deliver the message through the browser. */
-  firstMessage?: string | null;
+  /** Id the backend parked the hand-off record under; adopt it verbatim. */
+  nextSessionId?: string | null;
 }
 
 export default function ChatProfileSwitchListener() {
@@ -59,10 +56,8 @@ export default function ChatProfileSwitchListener() {
   // only re-registered when the socket itself changes.
   const switchRef = useRef<(payload: SetChatProfilePayload) => void>();
   switchRef.current = (payload) => {
-    const { name, hasTransitMessage } = payload || {};
-    // Older backends only send startNew; keepTranscript is its inverse.
-    const keepTranscript =
-      payload?.keepTranscript ?? !(payload?.startNew ?? true);
+    const { name, hasTransitMessage, nextSessionId } = payload || {};
+    const keepTranscript = !!payload?.keepTranscript;
 
     if (!config?.chatProfiles?.some((profile) => profile.name === name)) {
       console.warn(
@@ -71,39 +66,12 @@ export default function ChatProfileSwitchListener() {
       return;
     }
 
-    if (payload?.firstMessage && !hasTransitMessage) {
-      // An older backend expects this frontend to impersonate the user with
-      // firstMessage; that delivery path is gone. The switch still happens.
-      console.warn(
-        'set_chat_profile: firstMessage is not supported anymore and will be dropped; upgrade the backend to transit_message.'
-      );
-    }
-
     const alreadyActive = chatProfile === name;
 
     // Keeping the transcript is never a no-op: it draws a line and starts a
     // new thread, which is meaningful even within the same profile. So is a
     // parked transit message — leaving it unclaimed would strand it.
     if (alreadyActive && !keepTranscript && !hasTransitMessage) return;
-
-    // The backend parked a transit record under the emitting session's id —
-    // the transit message and/or the current thread's id, which the new
-    // thread stores as its parentThreadId. Re-key it to the session we are
-    // about to open; claim on EVERY switch, since the parent link rides
-    // along even without a message. Emitted synchronously inside this
-    // socket callback on purpose: socket.io only delivers events while
-    // connected, so a synchronous emit is guaranteed to hit the live socket
-    // (and its write buffer is flushed before the disconnect below closes
-    // the transport). Deferring this to an effect or timer would risk
-    // queueing it on a socket that never reconnects. It also runs after
-    // every early return above — claiming for a switch that is not going to
-    // happen would strand the record on a session id nobody will ever
-    // connect with (the no-op return leaves a parent-only record to expire
-    // by TTL, which is harmless).
-    const nextSessionId = uuidv4();
-    session?.socket.emit('claim_transit_message', {
-      sessionId: nextSessionId
-    });
 
     // Same path as a manual selection (ChatProfiles.handleConfirm), minus
     // the confirmation dialog: the server already made the decision.
@@ -141,10 +109,14 @@ export default function ChatProfileSwitchListener() {
       // The real teardown, so this path inherits whatever it grows upstream.
       clear();
 
-      // clear() resets the session id to a random one; overwrite it with the
-      // id the transit record was claimed for. Recoil applies these set
-      // calls in order, so the last write wins, and flushSync commits once.
-      setSessionId(nextSessionId);
+      // clear() resets the session id to a random one; overwrite it with
+      // the id the backend parked the hand-off record under. Recoil applies
+      // these set calls in order, so the last write wins, and flushSync
+      // commits once. Absent only when there was nothing to hand over — the
+      // random id from clear() is then exactly right.
+      if (nextSessionId) {
+        setSessionId(nextSessionId);
+      }
 
       if (keepTranscript && kept === undefined) {
         console.error(

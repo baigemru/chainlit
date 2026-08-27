@@ -40,6 +40,20 @@ InputWidgetType = Literal[
 ToastType = Literal["info", "success", "warning", "error"]
 
 
+class AskSlotBusyError(Exception):
+    """Raised by `send_ask_user` when the session's ask slot is taken.
+
+    Only under `features.strict_ask_slot`. Without it the refusal returns
+    `None`, which a caller cannot tell apart from a timeout or an empty
+    answer — the ambiguity that turns "another question is in flight" into
+    "the user declined".
+    """
+
+    def __init__(self, step_id: str) -> None:
+        self.step_id = step_id
+        super().__init__(f"An ask is already pending (step {step_id})")
+
+
 class ThreadDict(TypedDict):
     id: str
     createdAt: str
@@ -363,3 +377,22 @@ class Feedback:
 class UpdateFeedbackRequest(BaseModel):
     feedback: Feedback
     sessionId: str
+
+
+@dataclass
+class ProfileStartInfo:
+    """Argument of the ``@cl.on_profile_start`` hook.
+
+    ``payload`` travels as a hook argument, not through
+    ``user_session["transit_message"]``: that key belongs entirely to the
+    legacy ``set_chat_profile`` hand-off and the two must not be mixed.
+
+    ``source`` tells a manual switch in the selector (``"client"``) from a
+    programmatic one made by the app (``"server"``) — an app needs this to
+    avoid re-asking what a HITL confirmation already settled.
+    """
+
+    profile: str
+    previous: Optional[str]
+    payload: Any = None
+    source: str = "client"

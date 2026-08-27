@@ -14,7 +14,13 @@ from chainlit.mcp import McpConnection
 from chainlit.message import Message
 from chainlit.oauth_providers import get_configured_oauth_providers
 from chainlit.step import Step, step
-from chainlit.types import ChatProfile, Starter, StarterCategory, ThreadDict
+from chainlit.types import (
+    ChatProfile,
+    ProfileStartInfo,
+    Starter,
+    StarterCategory,
+    ThreadDict,
+)
 from chainlit.user import User
 from chainlit.utils import wrap_user_function
 
@@ -326,6 +332,35 @@ def on_thread_ready(func: Callable[[ThreadDict], Any]) -> Callable:
     """
 
     config.code.on_thread_ready = wrap_user_function(func, with_task=True)
+    return func
+
+
+def on_profile_start(func: Callable[[ProfileStartInfo], Any]) -> Callable:
+    """
+    Hook running as a background task on every chat profile switch.
+
+    Requires the `hot_swap_chat_profile` feature flag. Unlike on_chat_start
+    it fires on EVERY switch, not once per session, and unlike the legacy
+    `set_chat_profile` hand-off the session, the thread and the transcript
+    all survive — so blocking work belongs here: AskUserMessage,
+    AskActionMessage and AskFileMessage all work inside it.
+
+    Gets the on_chat_start physics via with_task=True: owns the task
+    indicator, is cancelled by the stop button, keeps the session alive
+    across page reloads. The switch procedure cancels a previous instance
+    before launching a new one, so at most one is live per session.
+
+    Registered without a step() wrapper for the same reason as
+    on_thread_ready: "on_profile_start" is not in CL_RUN_NAMES.
+
+    Args:
+        func (Callable[[ProfileStartInfo], Any]): The hook to execute.
+
+    Returns:
+        Callable[[ProfileStartInfo], Any]: The decorated hook.
+    """
+
+    config.code.on_profile_start = wrap_user_function(func, with_task=True)
     return func
 
 

@@ -342,6 +342,20 @@ class WebsocketSession(BaseSession):
 
     thread_ready_task: Optional[asyncio.Task] = None
 
+    profile_start_task: Optional[asyncio.Task] = None
+
+    # Declared with a default so it shows up in dir(): Mock(spec=...) builds
+    # its spec from there, and the switch procedure reads this attribute
+    # directly rather than through getattr. Real instances replace it in
+    # __init__ — a Lock must never be shared across sessions.
+    profile_switch_lock: Optional[asyncio.Lock] = None
+
+    # Key of the transit record parked for this session's successor. Class
+    # level for the same Mock(spec=...) reason. Every set_chat_profile mints
+    # a fresh key, so the previous one has to be dropped or the session
+    # accumulates records instead of overwriting its single slot.
+    pending_transit_id: Optional[str] = None
+
     mcp_sessions: dict[str, McpSession]
 
     def __init__(
@@ -404,6 +418,15 @@ class WebsocketSession(BaseSession):
         # stop, the F5 keep-alive check and thread_has_live_task. Read by
         # all three of those and cancelled in delete().
         self.thread_ready_task: Optional[asyncio.Task] = None
+        # Task running the app's on_profile_start hook. Its own slot for the
+        # same reason as thread_ready_task above, with one difference: this
+        # hook fires on EVERY profile switch, so it has no one-shot flag —
+        # the switch procedure cancels the previous instance instead.
+        self.profile_start_task: Optional[asyncio.Task] = None
+        # Serializes chat profile switches. Without it two quick switches
+        # (a click racing a programmatic call, or two clicks) each spawn a
+        # hook and the first loses its slot unobserved.
+        self.profile_switch_lock = asyncio.Lock()
         # One-shot launch flag for on_thread_ready, modeled on chat_started:
         # the resume branch re-enters on every reconnect and must not start
         # a second hook or overwrite the slot. Never reset.
@@ -561,6 +584,10 @@ class WebsocketSession(BaseSession):
         # tasks of merely disconnected users.
         if self.thread_ready_task is not None and not self.thread_ready_task.done():
             self.thread_ready_task.cancel()
+
+        # Same reasoning for the on_profile_start hook.
+        if self.profile_start_task is not None and not self.profile_start_task.done():
+            self.profile_start_task.cancel()
 
         # A conversion still parked on the handshake gate has nowhere left
         # to run — its handshake never finished. Logged, not silent: this is

@@ -21,6 +21,7 @@ from chainlit.types import (
     AskActionResponse,
     AskElementResponse,
     AskFileSpec,
+    AskSlotBusyError,
     AskSpec,
     CommandDict,
     FileDict,
@@ -32,6 +33,52 @@ from chainlit.types import (
 )
 from chainlit.user import PersistedUser
 from chainlit.utils import utc_now
+
+
+async def resync_task_indicator(
+    session, emitter, *, emit_end_when_idle: bool = True
+) -> None:
+    """Re-emit the task indicator from the counter's current truth.
+
+    Level-triggered, for the three moments the client forces its own
+    loadingState and an edge emit can no longer be trusted: the reconnect
+    handshake, an in-place profile switch, and the way out of an ask. A
+    live ask owns the client state instead — the composer is in ask mode —
+    so it keeps the indicator dark whatever the counter says.
+
+    A hook launched moments earlier still counts 0 here (create_task has
+    not ticked; its with_task wrapper acquires on the first tick and
+    edge-emits task_start), so this emits task_end and the wrapper
+    corrects it. Self-healing, do not "fix".
+
+    `emit_end_when_idle=False` on the ask-exit path: send_ask_user already
+    emitted the raw pause and must not emit a second task_end.
+
+    Takes the emitter explicitly instead of living on it, so each caller
+    passes the one bound to its own context — and so tests driving a
+    mocked emitter still observe task_start/task_end.
+    """
+    pending = session.pending_ask
+    has_live_ask = pending is not None and pending.is_live
+    if session.task_counter > 0 and not has_live_ask:
+        await emitter.task_start()
+    elif emit_end_when_idle:
+        await emitter.task_end()
+
+
+def _strict_ask_slot(session) -> bool:
+    """Whether a busy ask slot must raise instead of returning None.
+
+    Read through the session so a chat profile's config_overrides apply;
+    the module-level `config` would ignore them. Compared with `is True`
+    on purpose: `Mock(spec=WebsocketSession).get_config()` hands back a
+    truthy Mock, which would silently arm strict mode across the suite.
+    """
+    try:
+        cfg = session.get_config()
+    except Exception:
+        cfg = config
+    return getattr(getattr(cfg, "features", None), "strict_ask_slot", False) is True
 
 
 def _make_legacy_ask_ack(session, future: "asyncio.Future", step_id: str):
@@ -416,6 +463,13 @@ class ChainlitEmitter(BaseChainlitEmitter):
             # the UI and orphan its waiting coroutine — refuse instead. A
             # slot whose future is already resolved/cancelled only awaits
             # its owner's cleanup and does not block a new ask.
+            if _strict_ask_slot(session):
+                logger.error(
+                    "send_ask_user: an ask is already pending for session %s; "
+                    "raising AskSlotBusyError",
+                    session.id,
+                )
+                raise AskSlotBusyError(str(existing.spec.step_id))
             logger.error(
                 "send_ask_user: an ask is already pending for session %s; "
                 "returning None",
@@ -558,10 +612,7 @@ class ChainlitEmitter(BaseChainlitEmitter):
             # ask (stop freed the slot, on_stop installed a new one) owns
             # the client state instead — same guard as the reconnect
             # resync.
-            successor = session.pending_ask
-            has_live_successor = successor is not None and successor.is_live
-            if session.task_counter > 0 and not has_live_successor:
-                await self.task_start()
+            await resync_task_indicator(session, self, emit_end_when_idle=False)
 
     async def send_call_fn(
         self, name: str, args: Dict[str, Any], timeout=300, raise_on_timeout=False
@@ -688,13 +739,14 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 interaction a record carrying only the parent-thread link
                 still remains.
 
-        Claiming a transit message creates and names the new thread right
+        Picking a transit message up creates and names the new thread right
         away (the value itself when it is a non-empty string, the profile
         name otherwise) — an `on_chat_start` that then renders nothing leaves
         a named empty thread in the history. There is no auto-answer into
         `AskUserMessage` anymore: read the transit value instead of asking.
-        If the frontend never claims the value (dead socket, copilot — which
-        does not support `set_chat_profile` at all), it expires after
+        If the switch never happens (dead socket, unknown profile name,
+        copilot — which does not support `set_chat_profile` at all), the
+        record is dropped by the next call on this session, or expires after
         `transit.TRANSIT_TTL_SECONDS`.
 
         The transcript kept by `keep_transcript` is client-side only: it
@@ -706,24 +758,46 @@ class ChainlitEmitter(BaseChainlitEmitter):
         interaction), its id rides along to the new session and is recorded
         as the new thread's `parentThreadId` by data layers that support it.
 
-        Call this at most once per handler. Every call re-parks the hand-off
-        record for the same successor, and the frontend tears the chat down
-        per switch event — with two calls, the first event's claim moves the
-        record aside while the second event decides which session actually
-        connects, so the transit message and parent link of the last call
-        can be lost.
+        Call this at most once per handler. Every call revokes the record
+        the previous one parked and mints a new successor id, while the
+        frontend tears the chat down per switch event — so with two calls
+        only the last delivered event's session id is the one that connects,
+        and an earlier call's message and parent link are gone.
         """
         owner = self.session.user.identifier if self.session.user else None
         # Only a thread that exists can be a parent: the row is created on
         # first interaction.
         parent = self.session.thread_id if self.session.has_first_interaction else None
-        transit.store(self.session.id, transit_message, owner, parent=parent)
+
+        # Each call mints a fresh key, so the one this session parked before
+        # has to go: otherwise records accumulate instead of overwriting the
+        # session's single slot, which would both defeat the
+        # MAX_TRANSIT_RECORDS backstop and turn "transit_message=None
+        # revokes" into "the revoked value is still delivered".
+        previous = getattr(self.session, "pending_transit_id", None)
+        if previous:
+            transit.discard(previous)
+
+        if transit_message is None and parent is None:
+            # Nothing to hand over: the revoke above is the whole effect.
+            self.session.pending_transit_id = None
+            next_session_id = None
+        else:
+            next_session_id = str(uuid.uuid4())
+            transit.store(next_session_id, transit_message, owner, parent=parent)
+            self.session.pending_transit_id = next_session_id
+
         await self.emit(
             "set_chat_profile",
             {
                 "name": name,
                 "keepTranscript": keep_transcript,
                 "hasTransitMessage": transit_message is not None,
+                # The id the record is parked under. The browser adopts it
+                # verbatim instead of minting its own and handing it back —
+                # that round trip used to ride a socket the very next line
+                # closes, and losing it stranded the hand-off.
+                "nextSessionId": next_session_id,
             },
         )
 

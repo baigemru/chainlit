@@ -18,6 +18,7 @@ import {
   chatSettingsInputsState,
   chatSettingsValueState,
   commandsState,
+  configState,
   currentThreadIdState,
   elementState,
   favoriteMessagesState,
@@ -114,6 +115,16 @@ const useChatSession = () => {
   // stamped with the profile it is actually generated under.
   const chatProfileRef = useRef(chatProfile);
   chatProfileRef.current = chatProfile;
+  // Hot-swap flag, latched. It cannot be read straight from the config:
+  // useConfig blanks the config on every profile change to re-fetch it for
+  // the new profile, so during the switch itself the flag would read
+  // undefined, the dep below would fall back to chatProfile and the socket
+  // would reconnect — exactly what the feature exists to avoid. The flag is
+  // server-side and profile-independent, so latching it is correct.
+  const config = useRecoilValue(configState);
+  const hotSwapRef = useRef(false);
+  if (config?.features?.hot_swap_chat_profile) hotSwapRef.current = true;
+  const hotSwap = hotSwapRef.current;
   const idToResume = useRecoilValue(threadIdToResumeState);
   const setThreadResumeError = useSetRecoilState(resumeThreadErrorState);
   const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
@@ -174,7 +185,9 @@ const useChatSession = () => {
           sessionId,
           threadId: idToResume || '',
           userEnv: JSON.stringify(userEnv),
-          chatProfile: chatProfile ? encodeURIComponent(chatProfile) : '',
+          chatProfile: chatProfileRef.current
+            ? encodeURIComponent(chatProfileRef.current)
+            : '',
           // True only on the very first connect after a full page load: the
           // server restores the old session then only to rescue a live
           // pending ask; otherwise a reload means a fresh chat. Mutated to
@@ -478,6 +491,24 @@ const useChatSession = () => {
         setLoading(false);
       });
 
+      // The only writer of the profile atom on the hot-swap path. sync=true
+      // is the post-reconnect resync ("adopt this value"), sync=false a real
+      // switch; both land the same way here, the flag exists for clarity and
+      // for anything that later needs to tell them apart.
+      socket.on('chat_profile_changed', (data) => {
+        if (!data?.chatProfile) return;
+        setChatProfile(data.chatProfile);
+        // sync=true is the post-reconnect resync ("adopt this value"), so
+        // nothing else changed. sync=false is a real switch, and the server
+        // cleared session.chat_settings in the same step — mirror it, or the
+        // settings modal keeps offering the previous profile's form and
+        // values, which no longer exist server-side.
+        if (data.sync === false) {
+          setChatSettingsInputs([]);
+          resetChatSettingsValue();
+        }
+      });
+
       socket.on('ask_timeout', () => {
         pruneStaleAskActions();
         setAskUser(undefined);
@@ -637,7 +668,16 @@ const useChatSession = () => {
         }
       });
     },
-    [setSession, sessionId, idToResume, chatProfile, resetSessionId]
+    // Stable length: React forbids a dep array that changes size between
+    // renders, so the hot-swap case neutralizes the value instead of
+    // dropping the entry.
+    [
+      setSession,
+      sessionId,
+      idToResume,
+      hotSwap ? null : chatProfile,
+      resetSessionId
+    ]
   );
 
   const connect = useCallback(debounce(_connect, 200), [_connect]);
@@ -649,6 +689,19 @@ const useChatSession = () => {
     }
   }, [session]);
 
+  // Ask the server to switch in place. The atom is NOT updated
+  // optimistically: it follows chat_profile_changed only, so a refusal
+  // leaves nothing to roll back and the client can never show a profile the
+  // server is not running.
+  const switchChatProfile = useCallback(
+    (name: string) => {
+      if (!session?.socket?.connected) return false;
+      session.socket.emit('switch_chat_profile', { chatProfile: name });
+      return true;
+    },
+    [session]
+  );
+
   return {
     connect,
     disconnect,
@@ -656,7 +709,9 @@ const useChatSession = () => {
     sessionId,
     chatProfile,
     idToResume,
-    setChatProfile
+    setChatProfile,
+    switchChatProfile,
+    hotSwapChatProfile: hotSwap
   };
 };
 

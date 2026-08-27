@@ -1,10 +1,11 @@
 """In-memory store for transit messages handed from one session to the next.
 
 `emitter.set_chat_profile(transit_message=...)` parks a value here under the
-emitting session's id; the frontend claims it for the session it is about to
-open (`claim_transit_message`), and `connection_successful` moves it into
-`user_sessions` before `on_chat_start` runs. The value never travels through
-the browser.
+id it mints for the session that is about to open, and
+`connection_successful` moves it into `user_sessions` before
+`on_chat_start` runs. The value never travels through the browser; only the
+id does, so the record is never keyed to the session that is going away and
+cannot be swallowed by it when its socket flaps.
 
 Besides the message, a record carries the emitting session's thread id
 (`parent`) so the thread spawned by the switch can point back at the thread
@@ -74,12 +75,16 @@ def store(
     _records[session_id] = _Record(value, owner, time.monotonic(), parent)
 
 
-def reassign(old_id: str, new_id: str) -> None:
-    """Move a parked record to the session id that will actually connect."""
+def discard(session_id: str) -> None:
+    """Drop the record parked for `session_id`, if any.
+
+    Every park mints a fresh key, so without dropping the previous one a
+    session would accumulate records instead of overwriting its single slot
+    — breaking both the MAX_TRANSIT_RECORDS backstop and the documented
+    "passing None revokes what an earlier call parked" contract.
+    """
     _sweep()
-    record = _records.pop(old_id, None)
-    if record is not None:
-        _records[new_id] = record
+    _records.pop(session_id, None)
 
 
 def pop(session_id: str, owner: Optional[str]) -> Any:

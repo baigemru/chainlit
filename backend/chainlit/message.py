@@ -29,6 +29,7 @@ from chainlit.types import (
     AskElementSpec,
     AskFileResponse,
     AskFileSpec,
+    AskSlotBusyError,
     AskSpec,
     FileDict,
 )
@@ -508,10 +509,20 @@ class AskUserMessage(AskMessageBase):
         # the question above its answer, not below it.
         chat_context.add(cast("Message", self))
 
-        res = cast(
-            Union[StepDict, None],
-            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
-        )
+        try:
+            res = cast(
+                Union[StepDict, None],
+                await context.emitter.send_ask_user(
+                    step_dict, spec, self.raise_on_timeout
+                ),
+            )
+        except AskSlotBusyError:
+            # The refusal happens before send_ask_user's own try/finally, so
+            # every teardown below is skipped unless it runs here too. The
+            # question step is already created and persisted; a lingering
+            # wait_for_answer keeps it rendered as a live prompt.
+            self.wait_for_answer = False
+            raise
 
         self.wait_for_answer = False
 
@@ -590,10 +601,16 @@ class AskFileMessage(AskMessageBase):
         # the question above its answer, not below it.
         chat_context.add(cast("Message", self))
 
-        res = cast(
-            Union[List[FileDict], None],
-            await context.emitter.send_ask_user(step_dict, spec, self.raise_on_timeout),
-        )
+        try:
+            res = cast(
+                Union[List[FileDict], None],
+                await context.emitter.send_ask_user(
+                    step_dict, spec, self.raise_on_timeout
+                ),
+            )
+        except AskSlotBusyError:
+            self.wait_for_answer = False
+            raise
 
         self.wait_for_answer = False
 
@@ -667,17 +684,27 @@ class AskActionMessage(AskMessageBase):
             keys=action_keys,
         )
 
-        res = cast(
-            Union[AskActionResponse, None],
-            await context.emitter.send_ask_user(
-                step_dict,
-                spec,
-                self.raise_on_timeout,
-                # The client loses actions on refresh; they are re-emitted
-                # alongside the ask on reconnect.
-                restore_actions=[action.to_dict() for action in self.actions],
-            ),
-        )
+        try:
+            res = cast(
+                Union[AskActionResponse, None],
+                await context.emitter.send_ask_user(
+                    step_dict,
+                    spec,
+                    self.raise_on_timeout,
+                    # The client loses actions on refresh; they are re-emitted
+                    # alongside the ask on reconnect.
+                    restore_actions=[action.to_dict() for action in self.actions],
+                ),
+            )
+        except AskSlotBusyError:
+            # The buttons were already sent above. Without this the refusal
+            # would leave them clickable forever, wired to an ask that never
+            # existed. Content is left as the question: nothing timed out.
+            for action in self.actions:
+                await action.remove()
+            self.wait_for_answer = False
+            await self.update()
+            raise
 
         for action in self.actions:
             await action.remove()
@@ -739,19 +766,27 @@ class AskElementMessage(AskMessageBase):
             element_id=self.element.id,
         )
 
-        res = cast(
-            Union[AskElementResponse, None],
-            await context.emitter.send_ask_user(
-                step_dict,
-                spec,
-                self.raise_on_timeout,
-                # The client loses the element on refresh; it is re-emitted
-                # alongside the ask on reconnect. Passed as the live object
-                # and serialized at restore time, so updates made while the
-                # ask is pending are not rolled back.
-                restore_element=self.element,
-            ),
-        )
+        try:
+            res = cast(
+                Union[AskElementResponse, None],
+                await context.emitter.send_ask_user(
+                    step_dict,
+                    spec,
+                    self.raise_on_timeout,
+                    # The client loses the element on refresh; it is re-emitted
+                    # alongside the ask on reconnect. Passed as the live object
+                    # and serialized at restore time, so updates made while the
+                    # ask is pending are not rolled back.
+                    restore_element=self.element,
+                ),
+            )
+        except AskSlotBusyError:
+            # The element was already sent above; the refusal would orphan
+            # it in the UI. Content stays the question — nothing timed out.
+            await self.element.remove()
+            self.wait_for_answer = False
+            await self.update()
+            raise
 
         await self.element.remove()
 

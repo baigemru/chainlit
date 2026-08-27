@@ -48,7 +48,13 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.files = kwargs.get("files", {})
         mock.files_spec = kwargs.get("files_spec", {})
         mock.pending_ask = kwargs.get("pending_ask", None)
+        # Declared on the class, so Mock(spec=...) would hand out a truthy
+        # child Mock and quietly pass any "current_task untouched" assert.
+        mock.current_task = kwargs.get("current_task", None)
         mock.thread_ready_task = kwargs.get("thread_ready_task", None)
+        mock.profile_start_task = kwargs.get("profile_start_task", None)
+        mock.profile_switch_lock = asyncio.Lock()
+        mock.pending_transit_id = kwargs.get("pending_transit_id", None)
         mock.resume_task_started = kwargs.get("resume_task_started", False)
         mock.task_counter = kwargs.get("task_counter", 0)
         mock.restored = kwargs.get("restored", False)
@@ -125,6 +131,8 @@ def mock_websocket_session():
     session.files_spec = {}
     session.pending_ask = None
     session.thread_ready_task = None
+    session.profile_start_task = None
+    session.profile_switch_lock = asyncio.Lock()
     session.resume_task_started = False
     session.task_counter = 0
     session.has_first_interaction = True

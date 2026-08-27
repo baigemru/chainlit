@@ -32,7 +32,29 @@ describe('OAuth Auth Error UX (#1273)', () => {
 
   describe('login page renders friendly OAuth error message', () => {
     it('shows a specific message for oauthSignin error', () => {
-      cy.visit('/login?error=oauthSignin');
+      // The global beforeEach visits '/', and this app requires login, so
+      // AppWrapper assigns window.location.href = '/login' once /auth/config
+      // and /user have resolved — after cy.visit('/') already returned. Let
+      // that redirect land first: arriving late it would clobber the visit
+      // below and strip the query string the page reads the error from.
+      cy.location('pathname').should('eq', '/login');
+
+      // The message is translated, and the app picks the locale from
+      // navigator.language — on a non-English machine the assertion below
+      // would compare against a different translation.
+      cy.visit('/login?error=oauthSignin', {
+        onBeforeLoad(win) {
+          Object.defineProperty(win.navigator, 'language', {
+            value: 'en-US',
+            configurable: true
+          });
+          Object.defineProperty(win.navigator, 'languages', {
+            value: ['en-US'],
+            configurable: true
+          });
+        }
+      });
+      cy.location('search').should('eq', '?error=oauthSignin');
       cy.get('[role="alert"]').should(
         'contain',
         'Sign in failed. Please try again, or use a different sign-in method.'

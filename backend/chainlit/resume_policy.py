@@ -121,8 +121,9 @@ def split_resume_delete(
 def thread_has_live_task(thread_id: Optional[str]) -> bool:
     """Whether any session on this thread is currently running a task.
 
-    Checks both task slots: ``current_task`` and the on_thread_ready
-    hook's ``thread_ready_task`` — a second-tab resume must not delete
+    Checks all task slots: ``current_task``, the on_thread_ready hook's
+    ``thread_ready_task`` and the on_profile_start hook's
+    ``profile_start_task`` — a second-tab resume must not delete
     resume="delete" steps from under a running hook.
 
     Deliberately may include the resuming session itself — harmless: its
@@ -138,7 +139,7 @@ def thread_has_live_task(thread_id: Optional[str]) -> bool:
     for session in list(ws_sessions_id.values()):
         if getattr(session, "thread_id", None) != thread_id:
             continue
-        for slot in ("current_task", "thread_ready_task"):
+        for slot in ("current_task", "thread_ready_task", "profile_start_task"):
             task = getattr(session, slot, None)
             if task is not None and not task.done():
                 return True

@@ -66,13 +66,28 @@ class RecordingEmitter:
     Anything not named here is still callable -- it is recorded as an effect
     rather than a frame, so a helper this package does not know about shows up
     in the record instead of passing by silence.
+
+    ``interrupt`` is how a scenario says "this happens while the server is
+    mid-restore": it fires on the first frame sent, which is the gap the real
+    thing races in. A test that mutated the session before the handler ran
+    would be describing a different situation entirely.
     """
 
-    def __init__(self, ledger: Ledger) -> None:
+    def __init__(
+        self, ledger: Ledger, interrupt: Optional[Callable[[str], None]] = None
+    ) -> None:
         self._ledger = ledger
+        self._interrupt = interrupt
+
+    def _sent(self, tag: str) -> None:
+        if self._interrupt is not None:
+            interrupt, self._interrupt = self._interrupt, None
+            interrupt(tag)
 
     async def emit(self, event: str, payload: Any = None) -> None:
-        self._ledger.wire(*translate(event, payload))
+        tag, body = translate(event, payload)
+        self._ledger.wire(tag, body)
+        self._sent(tag)
 
     async def clear(self, event: str) -> None:
         self._ledger.wire(*translate(event))
@@ -172,6 +187,28 @@ def _transcript(given: Given) -> Mock:
     return context
 
 
+def _interrupt(session: Mock, given: Given) -> Optional[Callable[[str], None]]:
+    """Build the mid-restore interruption the scenario asks for, if any."""
+    if given.during_restore is None:
+        return None
+    pending: PendingAsk = session.pending_ask
+
+    def interrupt(_tag: str) -> None:
+        if given.during_restore == "answer":
+            if not pending.future.done():
+                pending.future.set_result("answered mid-restore")
+            return
+        successor = _pending_ask(
+            AskState(
+                step_id="successor-step",
+                remaining=None if given.during_restore == "successor_dead" else 60.0,
+            )
+        )
+        session.pending_ask = successor
+
+    return interrupt
+
+
 def _config() -> Mock:
     config = Mock()
     config.code.on_chat_start = None
@@ -255,7 +292,7 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
 
     context = Mock()
     context.session = session
-    context.emitter = RecordingEmitter(ledger)
+    context.emitter = RecordingEmitter(ledger, _interrupt(session, scenario.given))
 
     with (
         patch("chainlit.socket.init_ws_context", return_value=context),

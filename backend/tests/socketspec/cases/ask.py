@@ -27,6 +27,7 @@ def _reconnect(
     *,
     pending_ask: Optional[AskState] = None,
     fresh_page_load: bool = True,
+    during_restore: Optional[str] = None,
 ) -> Given:
     """A session handed back to a client that reconnected."""
     return Given(
@@ -34,6 +35,7 @@ def _reconnect(
         chat_started=True,
         fresh_page_load=fresh_page_load,
         pending_ask=pending_ask,
+        during_restore=during_restore,  # type: ignore[arg-type]
     )
 
 
@@ -129,6 +131,48 @@ ASK_SCENARIOS = (
         given=_reconnect(pending_ask=AskState()),
         when=(HELLO,),
         expect=(Expect("rpc.cancel"),),
+    ),
+    Scenario(
+        name="an answer arriving mid-restore takes the form down",
+        why=(
+            "Rebuilding the form is a sequence of awaits, and the reply is "
+            "free to land in any of them. Finishing the rebuild anyway would "
+            "put a form back on screen for a question that has been answered."
+        ),
+        given=_reconnect(
+            pending_ask=AskState(actions=(ACTION,)), during_restore="answer"
+        ),
+        when=(HELLO,),
+        expect=(Expect("action.add"), Expect("ask.end")),
+        forbid=("ask.start",),
+    ),
+    Scenario(
+        name="a successor ask that took the slot mid-restore is not wiped",
+        why=(
+            "This is the reason ask.end had to grow a stepId. The old "
+            "clear_ask addressed nothing, so ending the ask we were restoring "
+            "would take down the form of the ask that replaced it -- while "
+            "the server went on waiting for an answer nobody could give."
+        ),
+        given=_reconnect(
+            pending_ask=AskState(actions=(ACTION,)), during_restore="successor"
+        ),
+        when=(HELLO,),
+        expect=(Expect("action.add"),),
+        forbid=("ask.end",),
+    ),
+    Scenario(
+        name="a slot that changed hands to a dead ask is cleared",
+        why=(
+            "Nothing live is on screen to protect, and leaving the form up "
+            "would offer an answer to a waiter that is already gone."
+        ),
+        given=_reconnect(
+            pending_ask=AskState(actions=(ACTION,)), during_restore="successor_dead"
+        ),
+        when=(HELLO,),
+        expect=(Expect("action.add"), Expect("ask.end")),
+        forbid=("ask.start",),
     ),
     Scenario(
         name="a reply resolves the ask it names",

@@ -60,6 +60,24 @@ class Given:
     transcript: Tuple[Mapping[str, Any], ...] = ()
     """The conversation the server already holds, as step payloads."""
 
+    during_restore: Optional[Literal["answer", "successor", "successor_dead"]] = None
+    """Something that happens while the form is being rebuilt.
+
+    Rebuilding an ask is not atomic -- every frame it sends is an await, and
+    the client is free to answer, or the app to ask something else, in any of
+    those gaps. The three cases differ in what the server must do with the
+    form it was halfway through re-sending:
+
+    ``answer``
+        the reply lands; the form must come down, not go up.
+    ``successor``
+        another ask took the slot and has already sent its own form; ending
+        the ask now would wipe a form the server is still waiting on.
+    ``successor_dead``
+        the slot changed hands to something already finished; nothing live is
+        on screen, so the form comes down.
+    """
+
 
 @dataclass(frozen=True)
 class Incoming:

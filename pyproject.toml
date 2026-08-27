@@ -30,6 +30,13 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    # The rebuild is written in the API shape 3.0 keeps, so a deprecated
+    # Litestar construct is a defect where it is written rather than a chore
+    # for the version bump. Nothing else is escalated: the tree still carries
+    # the stack being replaced, and its warnings are not news.
+    "error::litestar.exceptions.base_exceptions.LitestarDeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py314"

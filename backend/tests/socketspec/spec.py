@@ -120,6 +120,22 @@ class Given:
     handover: Optional[Handover] = None
     """A record parked for this session by the one it succeeds."""
 
+    produced_between_connections: Tuple[Mapping[str, Any], ...] = ()
+    """Steps the conversation adds after the first frame is handled.
+
+    The only way the table can say "and then time passed". A scenario about
+    what a *reconnect* must not undo needs something to exist that the first
+    connection did not know about, and no arrangement of inbound frames can
+    express that on its own.
+    """
+
+    undeletable: Tuple[str, ...] = ()
+    """Ids the storage refuses to delete, however often it is asked.
+
+    A deletion that cannot be completed is not the same as one that was not
+    attempted, and the difference is the whole retry contract.
+    """
+
     stored_thread: Optional[Mapping[str, Any]] = None
     """What persistence has for this thread, if persistence is configured.
 

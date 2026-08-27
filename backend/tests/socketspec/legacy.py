@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple
 from unittest.mock import AsyncMock, Mock, patch
 
 import chainlit.transit as transit
@@ -235,6 +235,11 @@ def _session(factory: Callable[..., Mock], given: Given, ledger: Ledger) -> Mock
         last_resolved_ask_step_id=given.last_resolved_ask_step_id,
         chat_profile=given.chat_profile,
     )
+    if given.resuming_thread:
+        # The session's thread *is* the one it resumes: the live-ask and
+        # live-task protections match candidates by thread id, and a session
+        # filed under a different one would silently protect nothing.
+        session.thread_id = given.resuming_thread
     session.restored = given.restored
     session.chat_started = given.chat_started
     session.fresh_page_load = given.fresh_page_load
@@ -317,8 +322,78 @@ def _registry(session: Mock) -> Dict[str, Mock]:
     return {session.id: session}
 
 
-def _data_layer(given: Given) -> Optional[Mock]:
+class Storage:
     """Persistence holding exactly what the scenario says it holds.
+
+    Stateful, because the rows about the resume="delete" flag are about what
+    the *next* read sees. A fake that accepted a deletion and forgot it would
+    hand the deleted step straight back on the following handshake, and a row
+    claiming "deleted once, and gone" would be asserting against a storage
+    that never forgets.
+
+    ``undeletable`` is how a scenario says the storage refuses: the deletion
+    is attempted, recorded, and raises. Both halves matter -- the row about
+    retrying needs to see the attempt, and the row about keeping the step
+    needs the failure to be real.
+    """
+
+    def __init__(
+        self,
+        thread: Mapping[str, Any],
+        undeletable: Tuple[str, ...],
+        owner: Optional[str],
+    ) -> None:
+        self._present = bool(thread)
+        self._thread: Dict[str, Any] = dict(thread)
+        # The resuming user owns the thread unless the scenario says
+        # otherwise -- the table has no business knowing the fixture's
+        # identifier, and a mismatch would silently route every resume row
+        # into the "thread not found" branch.
+        self._thread.setdefault("userIdentifier", owner)
+        self._undeletable = set(undeletable)
+        self.deleted_steps: List[str] = []
+        self.deleted_elements: List[str] = []
+
+    async def get_thread(self, thread_id: Optional[str] = None) -> Optional[Dict]:
+        if not self._present:
+            return None
+        thread = dict(self._thread)
+        thread["steps"] = [dict(step) for step in self._thread.get("steps") or []]
+        thread["elements"] = [dict(el) for el in self._thread.get("elements") or []]
+        return thread
+
+    def append(self, steps: Tuple[Mapping[str, Any], ...]) -> None:
+        """The conversation carried on while nobody was connected."""
+        if steps:
+            self._thread["steps"] = list(self._thread.get("steps") or []) + [
+                dict(step) for step in steps
+            ]
+
+    async def delete_step(self, step_id: str) -> None:
+        self.deleted_steps.append(step_id)
+        if step_id in self._undeletable:
+            raise RuntimeError(f"storage refuses to delete step {step_id}")
+        self._thread["steps"] = [
+            step
+            for step in self._thread.get("steps") or []
+            if step.get("id") != step_id
+        ]
+
+    async def delete_element(
+        self, element_id: str, thread_id: Optional[str] = None
+    ) -> None:
+        self.deleted_elements.append(element_id)
+        if element_id in self._undeletable:
+            raise RuntimeError(f"storage refuses to delete element {element_id}")
+        self._thread["elements"] = [
+            el
+            for el in self._thread.get("elements") or []
+            if el.get("id") != element_id
+        ]
+
+
+def _data_layer(given: Given, owner: Optional[str]) -> Optional[Storage]:
+    """The storage this scenario runs against, or none at all.
 
     Patched even when the answer is "there is none": the data layer is a
     module-global another test may have installed, and a scenario that reaches
@@ -326,9 +401,7 @@ def _data_layer(given: Given) -> Optional[Mock]:
     """
     if given.stored_thread is None:
         return None
-    layer = Mock()
-    layer.get_thread = AsyncMock(return_value=dict(given.stored_thread) or None)
-    return layer
+    return Storage(given.stored_thread, given.undeletable, owner)
 
 
 # The application callbacks a scenario can say are registered. Several
@@ -472,6 +545,7 @@ def _report(
     hooks: Hooks,
     sessions: Dict[str, Any],
     owner: Optional[str],
+    storage: Optional[Storage],
 ) -> Dict[str, Any]:
     """Protocol-level facts, read off wherever this implementation keeps them.
 
@@ -493,6 +567,8 @@ def _report(
         "handover_parked": transit.pop(session.id, owner) is not transit.NO_TRANSIT,
         "handover_delivered": (sessions.get(session.id) or {}).get("transit_message"),
     }
+    state["deleted_steps"] = list(storage.deleted_steps) if storage else []
+    state["deleted_elements"] = list(storage.deleted_elements) if storage else []
     state.update(hooks.saw)
     if pending is not None and pending.future.done() and not pending.future.cancelled():
         state["ask_answer"] = pending.future.result()
@@ -532,6 +608,7 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
     # whose world depends on test ordering is not a spec.
     sessions: Dict[str, Any] = {}
     hooks = Hooks(session, sessions, ledger)
+    storage = _data_layer(scenario.given, owner)
     _park_handover(session, scenario.given, owner)
 
     context = Mock()
@@ -548,18 +625,17 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
             patch("chainlit.socket.user_sessions", sessions),
             patch("chainlit.socket.wait_for_persist", AsyncMock()),
             patch("chainlit.session.ws_sessions_id", _registry(session)),
-            patch(
-                "chainlit.socket.get_data_layer",
-                return_value=_data_layer(scenario.given),
-            ),
+            patch("chainlit.socket.get_data_layer", return_value=storage),
         ):
-            for frame in scenario.when:
+            for index, frame in enumerate(scenario.when):
                 handler = HANDLERS.get(frame.tag)
                 if handler is None:
                     raise KeyError(
                         f"The legacy driver has no handler for inbound {frame.tag!r}."
                     )
                 await handler(session, frame.payload)
+                if index == 0 and storage is not None:
+                    storage.append(scenario.given.produced_between_connections)
 
             # Rescuing an orphaned reply is a background task parked on the
             # handshake gate. A ledger read before it finishes would be missing
@@ -571,7 +647,8 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
             await _settle_hook_tasks(session)
 
         return Result(
-            ledger=ledger, state=_report(session, pending, hooks, sessions, owner)
+            ledger=ledger,
+            state=_report(session, pending, hooks, sessions, owner, storage),
         )
     finally:
         transit.clear()

@@ -1,0 +1,198 @@
+"""One instance of every message in both unions.
+
+The round-trip tests are only as exhaustive as this file, so
+``test_roundtrip.py`` asserts that its keys cover ``SERVER_TAGS`` and
+``CLIENT_TAGS`` exactly — a new message with no sample fails the suite.
+"""
+
+from __future__ import annotations
+
+from chainlit.protocol import client as c, server as s
+from chainlit.protocol.codec import ErrorCode
+from chainlit.protocol.payloads import (
+    Action,
+    AskElementReply,
+    AskFileSpec,
+    Command,
+    CustomElement,
+    Feedback,
+    FileRef,
+    InputWidgetSpec,
+    Mode,
+    ModeOption,
+    Step,
+    TextElement,
+    Thread,
+    Wait,
+)
+
+SAMPLE_STEP = Step(
+    id="4d8f0e5e-0b3a-4a1e-8a1f-1f0f3a2b9c11",
+    output="hello",
+    name="Assistant",
+    type="assistant_message",
+    thread_id="thread-1",
+    parent_id=None,
+    created_at="2026-08-27T10:00:00Z",
+    streaming=True,
+    show_input="python",
+    metadata={"favorite": True},
+    feedback=Feedback(value=1, for_id="4d8f", comment="good"),
+    wait=Wait(texts=["thinking", "still thinking"], interval_ms=3000, loop=True),
+)
+
+SAMPLE_ACTION = Action(
+    id="action-1",
+    name="confirm",
+    payload={"answer": "yes"},
+    label="Confirm",
+    tooltip="Go ahead",
+    icon="check",
+    for_id=SAMPLE_STEP.id,
+)
+
+SAMPLE_THREAD = Thread(
+    id="thread-1",
+    created_at="2026-08-27T09:00:00Z",
+    name="A chat",
+    user_identifier="someone@example.com",
+    parent_thread_id="thread-0",
+    tags=["profile:default"],
+    metadata={"chat_profile": "default"},
+    steps=[SAMPLE_STEP],
+    elements=[TextElement(id="el-1", name="notes", language="python")],
+)
+
+
+SERVER_SAMPLES: dict[str, s.ServerMsg] = {
+    "session.ready": s.SessionReady(
+        session_id="session-1",
+        thread_id="thread-1",
+        chat_profile="default",
+        restored=True,
+    ),
+    "error": s.Error(
+        code=ErrorCode.ASK_SLOT_BUSY.value,
+        message="An ask is already pending",
+        detail={"stepId": SAMPLE_STEP.id},
+    ),
+    "hb": s.Heartbeat(seq=7),
+    "reload": s.Reload(),
+    "step.upsert": s.StepUpsert(step=SAMPLE_STEP),
+    "step.update": s.StepUpdate(step=SAMPLE_STEP),
+    "step.delete": s.StepDelete(step_id=SAMPLE_STEP.id),
+    "step.stream.start": s.StepStreamStart(step=SAMPLE_STEP),
+    "step.stream.token": s.StepStreamToken(
+        id=SAMPLE_STEP.id, token="tok", is_sequence=True
+    ),
+    "element.upsert": s.ElementUpsert(
+        element=CustomElement(id="el-2", name="widget", props={"count": 3})
+    ),
+    "element.remove": s.ElementRemove(id="el-2"),
+    "action.add": s.ActionAdd(action=SAMPLE_ACTION),
+    "action.remove": s.ActionRemove(id=SAMPLE_ACTION.id),
+    "ask.start": s.AskStart(
+        spec=AskFileSpec(
+            step_id=SAMPLE_STEP.id,
+            timeout=120,
+            accept={"image/*": [".png", ".jpg"]},
+            max_files=3,
+            max_size_mb=10,
+        ),
+        step=SAMPLE_STEP,
+    ),
+    "ask.end": s.AskEnd(step_id=SAMPLE_STEP.id, reason="timeout"),
+    "task.indicator": s.TaskIndicator(running=True),
+    "thread.resume": s.ThreadResume(thread=SAMPLE_THREAD),
+    "thread.resume_error": s.ThreadResumeError(error="Thread not found."),
+    "thread.first_interaction": s.ThreadFirstInteraction(
+        interaction="resume", thread_id="thread-1"
+    ),
+    "thread.parent": s.ThreadParent(parent_thread_id="thread-0"),
+    "thread.open": s.ThreadOpen(thread_id="thread-0", keep_transcript=False),
+    "profile.changed": s.ProfileChanged(
+        chat_profile="fast", previous="default", sync=True
+    ),
+    "session.handoff": s.SessionHandoff(
+        chat_profile="fast",
+        next_session_id="session-2",
+        keep_transcript=True,
+        has_transit_message=True,
+    ),
+    "settings.set": s.SettingsSet(
+        inputs=[
+            InputWidgetSpec(
+                id="temperature",
+                label="Temperature",
+                type="slider",
+                initial=0.7,
+                min=0,
+                max=2,
+                step=0.1,
+            )
+        ]
+    ),
+    "commands.set": s.CommandsSet(
+        commands=[
+            Command(id="search", icon="search", description="Search", button=True)
+        ]
+    ),
+    "modes.set": s.ModesSet(
+        modes=[
+            Mode(
+                id="llm",
+                name="Model",
+                options=[ModeOption(id="gpt-5", name="GPT-5", default=True)],
+            )
+        ]
+    ),
+    "favorites.set": s.FavoritesSet(steps=[SAMPLE_STEP]),
+    "sidebar.set": s.SidebarSet(
+        title="Sources",
+        elements=[TextElement(id="el-3", name="src", language="markdown")],
+        key="sources-v1",
+    ),
+    "audio.connection": s.AudioConnection(state="on"),
+    "audio.out": s.AudioOut(track="voice", mime_type="pcm16", data=b"\x01\x02\x03"),
+    "audio.interrupt": s.AudioInterrupt(),
+    "rpc.call": s.RpcCall(call_id="call-1", name="openModal", args={"title": "Hi"}),
+    "rpc.cancel": s.RpcCancel(call_id="call-1", reason="timeout"),
+    "toast": s.Toast(message="Saved", type="success"),
+    "token.usage": s.TokenUsage(count=1234),
+    "window.message": s.WindowMessage(data={"kind": "ping"}),
+}
+
+
+CLIENT_SAMPLES: dict[str, c.ClientMsg] = {
+    "hello": c.Hello(
+        session_id="session-1",
+        client_type="copilot",
+        thread_id="thread-1",
+        chat_profile="default",
+        user_env={"OPENAI_API_KEY": "x"},
+        page_load=True,
+    ),
+    "hb.ack": c.HeartbeatAck(seq=7),
+    "session.clear": c.SessionClear(),
+    "stop": c.Stop(),
+    "message.send": c.MessageSend(
+        message=SAMPLE_STEP, file_references=[FileRef(id="file-1")]
+    ),
+    "message.edit": c.MessageEdit(message=SAMPLE_STEP),
+    "message.favorite": c.MessageFavorite(message_id=SAMPLE_STEP.id, favorite=True),
+    "favorites.fetch": c.FavoritesFetch(),
+    "ask.reply": c.AskReply(
+        step_id=SAMPLE_STEP.id,
+        value=AskElementReply(submitted=True, props={"choice": "b"}),
+    ),
+    "profile.switch": c.ProfileSwitch(chat_profile="fast"),
+    "settings.change": c.SettingsChange(settings={"temperature": 0.5}),
+    "settings.edit": c.SettingsEdit(settings={"temperature": 0.5}),
+    "audio.start": c.AudioStart(),
+    "audio.in": c.AudioIn(
+        data=b"\x10\x20\x30", mime_type="pcm16", is_start=True, elapsed_time=12.5
+    ),
+    "audio.end": c.AudioEnd(),
+    "rpc.result": c.RpcResult(call_id="call-1", result={"clicked": True}),
+    "window.message": c.WindowMessage(data=[1, 2, 3]),
+}

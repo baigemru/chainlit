@@ -1,0 +1,178 @@
+# `chainlit.protocol`
+
+The typed wire protocol for the Litestar rebuild: **52 socket.io event names
+with opaque dict payloads → two `msgspec` tagged unions**, 36 server tags and
+17 client tags, both discriminated on `t`.
+
+Pure data plus a codec. Nothing in this package imports another `chainlit`
+module, so it can be tested, reviewed and versioned on its own — and the
+client rewrite has exactly one directory to read.
+
+```
+payloads.py   Step, Wait, Element (union), Action, AskSpec (union),
+              AskReplyValue (union), Thread, Command, Mode,
+              InputWidgetSpec, Feedback
+server.py     ServerMsg  — 36 branches, tag_field="t"
+client.py     ClientMsg  — 17 branches, tag_field="t"
+codec.py      encode/decode, FrameKind, CloseCode, ErrorCode
+```
+
+Frames: **JSON** for everything except `audio.out` and `audio.in`, which go
+out as **msgpack** binary frames. JSON would base64 their `bytes`, inflating
+every audio chunk by a third for nothing.
+
+---
+
+## Server → client
+
+37 old events → 36 tags (four collapsed pairs, three new messages).
+
+| Old event              | New tag                                    | Note                                                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new_message`          | `step.upsert`                              |                                                                                                                                                                                                                                                                     |
+| `update_message`       | `step.update`                              | **Not** merged into `step.upsert`: an upsert creates the step when the id is unknown, an update addresses one that must already exist. Merging them would turn a late update into a new bubble at the bottom of the feed.                                           |
+| `delete_message`       | `step.delete`                              | Carries `stepId` only; the old event shipped the whole step dict to delete it.                                                                                                                                                                                      |
+| `stream_start`         | `step.stream.start`                        |                                                                                                                                                                                                                                                                     |
+| `stream_token`         | `step.stream.token`                        |                                                                                                                                                                                                                                                                     |
+| `element`              | `element.upsert`                           |                                                                                                                                                                                                                                                                     |
+| `remove_element`       | `element.remove`                           |                                                                                                                                                                                                                                                                     |
+| `action`               | `action.add`                               |                                                                                                                                                                                                                                                                     |
+| `remove_action`        | `action.remove`                            | Carries `id` only; the old event shipped the whole action dict.                                                                                                                                                                                                     |
+| `ask`                  | `ask.start`                                |                                                                                                                                                                                                                                                                     |
+| `ask_timeout`          | `ask.end` `{reason: "timeout"}`            | **Collapsed pair.**                                                                                                                                                                                                                                                 |
+| `clear_ask`            | `ask.end` `{reason}`                       | `reason ∈ answered \| timeout \| cancelled \| superseded \| stale`. Now **addressed** by `stepId` — see _Correlation_ below.                                                                                                                                        |
+| `task_start`           | `task.indicator` `{running: true}`         | **Collapsed pair.** One level-triggered boolean that was split over two names, forcing every resync in `emitter.py` to pick which of the two to emit.                                                                                                               |
+| `task_end`             | `task.indicator` `{running: false}`        |                                                                                                                                                                                                                                                                     |
+| `resume_thread`        | `thread.resume`                            |                                                                                                                                                                                                                                                                     |
+| `resume_thread_error`  | `thread.resume_error`                      |                                                                                                                                                                                                                                                                     |
+| `first_interaction`    | `thread.first_interaction`                 |                                                                                                                                                                                                                                                                     |
+| `parent_thread`        | `thread.parent`                            |                                                                                                                                                                                                                                                                     |
+| `open_thread`          | `thread.open`                              |                                                                                                                                                                                                                                                                     |
+| `chat_profile_changed` | `profile.changed`                          | In-place hot swap. Still the only writer of the client's profile atom.                                                                                                                                                                                              |
+| `set_chat_profile`     | `session.handoff`                          | **Renamed, not just retagged.** It tears the session down, mints a successor session id and parks a transit record — while sitting one letter away from the in-place `switch_chat_profile`.                                                                         |
+| `chat_settings`        | `settings.set`                             | Payload is now `{inputs: [...]}`, not a bare array.                                                                                                                                                                                                                 |
+| `set_commands`         | `commands.set`                             | Payload is now `{commands: [...]}`, not a bare array.                                                                                                                                                                                                               |
+| `set_modes`            | `modes.set`                                | Payload is now `{modes: [...]}`, not a bare array.                                                                                                                                                                                                                  |
+| `set_favorites`        | `favorites.set`                            | Payload is now `{steps: [...]}`, not a bare array.                                                                                                                                                                                                                  |
+| `set_sidebar_title`    | `sidebar.set` `{title}`                    | **Collapsed pair.** The client reconciled both into one `sideView` atom, each handler reading the other's half out of the previous state.                                                                                                                           |
+| `set_sidebar_elements` | `sidebar.set` `{elements, key}`            | `null` for a field means "leave it alone"; an empty `elements` list closes the sidebar.                                                                                                                                                                             |
+| `audio_connection`     | `audio.connection`                         | Payload is now `{state}`, not a bare `"on"`/`"off"` string.                                                                                                                                                                                                         |
+| `audio_chunk`          | `audio.out`                                | **Binary frame (msgpack).**                                                                                                                                                                                                                                         |
+| `audio_interrupt`      | `audio.interrupt`                          |                                                                                                                                                                                                                                                                     |
+| `call_fn`              | `rpc.call`                                 | Now carries an explicit `callId` — see _Correlation_.                                                                                                                                                                                                               |
+| `clear_call_fn`        | `rpc.cancel` `{callId, reason}`            | **Collapsed pair.**                                                                                                                                                                                                                                                 |
+| `call_fn_timeout`      | `rpc.cancel` `{callId, reason: "timeout"}` |                                                                                                                                                                                                                                                                     |
+| `toast`                | `toast`                                    |                                                                                                                                                                                                                                                                     |
+| `token_usage`          | `token.usage`                              | Payload is now `{count}`, not a bare integer.                                                                                                                                                                                                                       |
+| `window_message`       | `window.message`                           |                                                                                                                                                                                                                                                                     |
+| `reload`               | `reload`                                   |                                                                                                                                                                                                                                                                     |
+| —                      | `session.ready`                            | **New.** The handshake is complete. socket.io had no such message: the client emitted `connection_successful` and then guessed, which is why `switch_chat_profile` and the orphaned-`ask_reply` conversion both park on an internal `connection_inited` gate today. |
+| —                      | `error`                                    | **New.** A refusal the client can act on, carrying an `ErrorCode`. Today a failure is signalled by silence, by a socket.io refusal string, or by an `ErrorMessage` step in the transcript.                                                                          |
+| —                      | `hb`                                       | **New.** Liveness probe; the client answers `hb.ack`.                                                                                                                                                                                                               |
+
+## Client → server
+
+17 old events → 17 tags (one 2→1 collapse, one drop, two new messages).
+
+| Old event               | New tag            | Note                                                                                                                                                                                                                                                               |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `connect` (auth dict)   | `hello`            | **2 → 1.**                                                                                                                                                                                                                                                         |
+| `connection_successful` | `hello`            | The split is the source of the ordering hazard worked around all over `socket.py`: the client flushes its send buffer _before_ emitting `connection_successful`, so buffered events reach a half-initialised session. One first frame, one `session.ready` answer. |
+| `disconnect`            | _dropped_          | Transport-level: the websocket close frame replaces it. socket.io synthesises it as an event; a raw websocket does not need a name for it in the message vocabulary.                                                                                               |
+| `clear_session`         | `session.clear`    |                                                                                                                                                                                                                                                                    |
+| `switch_chat_profile`   | `profile.switch`   |                                                                                                                                                                                                                                                                    |
+| `stop`                  | `stop`             |                                                                                                                                                                                                                                                                    |
+| `ask_reply`             | `ask.reply`        | Still a plain message, never a request/response ack — it has to survive being buffered across a reconnect, which a socket.io ack (bound to the socket id) does not.                                                                                                |
+| `client_message`        | `message.send`     |                                                                                                                                                                                                                                                                    |
+| `edit_message`          | `message.edit`     |                                                                                                                                                                                                                                                                    |
+| `message_favorite`      | `message.favorite` | Payload is now `{messageId, favorite}`; the old event shipped the whole step and the server read `metadata.favorite` back out of it.                                                                                                                               |
+| `fetch_favorites`       | `favorites.fetch`  |                                                                                                                                                                                                                                                                    |
+| `window_message`        | `window.message`   |                                                                                                                                                                                                                                                                    |
+| `audio_start`           | `audio.start`      |                                                                                                                                                                                                                                                                    |
+| `audio_chunk`           | `audio.in`         | **Binary frame (msgpack).**                                                                                                                                                                                                                                        |
+| `audio_end`             | `audio.end`        |                                                                                                                                                                                                                                                                    |
+| `chat_settings_change`  | `settings.change`  | Payload is now `{settings: {...}}`, not a bare dict.                                                                                                                                                                                                               |
+| `chat_settings_edit`    | `settings.edit`    | Payload is now `{settings: {...}}`, not a bare dict.                                                                                                                                                                                                               |
+| —                       | `hb.ack`           | **New.** Answer to `hb`.                                                                                                                                                                                                                                           |
+| —                       | `rpc.result`       | **New as a message.** The result of `rpc.call`, which used to travel back inside a socket.io ack.                                                                                                                                                                  |
+
+---
+
+## Correlation
+
+Two message families used to be _unaddressed_, and both grew elaborate
+server-side choreography to compensate:
+
+- **`rpc.call` / `rpc.result` / `rpc.cancel` carry `callId`.** socket.io
+  correlated a `call_fn` reply through its own ack machinery, which is bound
+  to the socket id and therefore does not survive a reconnect — hence the
+  unconditional `clear_call_fn` at the top of `connection_successful`.
+- **`ask.end` carries `stepId`.** The entire "never emit `clear_ask` over a
+  live successor ask" dance in `socket.py` and `emitter.py` exists only
+  because `clear_ask` addressed nothing. An addressed end lets the client
+  drop a stale one itself.
+
+## Field-level renames
+
+All structs are `rename="camel"`, so the snake_case corners of today's wire
+move. The client rewrite needs this list as much as the tag map.
+
+| Old field          | New field        | Where                      |
+| ------------------ | ---------------- | -------------------------- |
+| `spec.step_id`     | `spec.stepId`    | `ask.start`                |
+| `spec.element_id`  | `spec.elementId` | `ask.start` (element spec) |
+| `spec.max_files`   | `spec.maxFiles`  | `ask.start` (file spec)    |
+| `spec.max_size_mb` | `spec.maxSizeMb` | `ask.start` (file spec)    |
+| `thread_id`        | `threadId`       | `thread.first_interaction` |
+
+Everything else was already camelCase (`forId`, `chainlitKey`, `parentId`,
+`isSequence`, `keepTranscript`, `nextSessionId`, `hasTransitMessage`,
+`parentThreadId`, `autoPlay`, `playerConfig`, `intervalMs`).
+
+## Shape changes worth flagging
+
+- **Bare payloads are wrapped.** `token_usage` sent a bare integer,
+  `audio_connection` a bare string, `set_sidebar_title` a bare string,
+  `chat_settings` / `set_commands` / `set_modes` / `set_favorites` bare
+  arrays, `resume_thread_error` a bare string. Every message is now a struct,
+  so any of them can gain a field without a version break.
+- **The `Element` union puts per-type fields on their own branch.** Today's
+  `ElementDict` is flat and `total=False`, so a `pdf` may carry `autoPlay`
+  and a `text` may carry `props`. Now `props` exists only on `custom`, `page`
+  only on `pdf`, `autoPlay` only on `audio`, `playerConfig` only on `video`,
+  `language` only on `text`, and `size` only on `image` and `video`.
+- **The element ask reply nests its props.** Today it is
+  `{**props, "submitted": True}` — arbitrary app keys spread over the top
+  level, where a prop named `type` or `id` can shadow a protocol field (the
+  `_is_convertible_text_reply` gate in `socket.py` exists partly to defend
+  against exactly that). It is now
+  `{kind: "element", submitted: bool, props: {...}}`.
+- **`AskReplyValue` is a tagged union** on `kind`, because msgspec permits at
+  most one struct type in an untagged union and a text reply, an action reply
+  and an element reply are all structs. The client stamps the tag.
+
+## Forward compatibility
+
+Unknown fields are **ignored**, not rejected. `@chainlit/react-client` ships
+on its own release cycle, so a newer peer must be able to add a field without
+breaking an older one. What a decoder _does_ reject is an unknown `t` tag, a
+field of the wrong type, and a missing required field — the failures that mean
+"this message is not what it claims to be" rather than "this message is newer
+than I am". `Hello.protocolVersion` is the escape hatch for a change that
+cannot be made additively.
+
+## Close codes
+
+| Code | Meaning                                                       |
+| ---- | ------------------------------------------------------------- |
+| 4400 | bad handshake — the first frame was not a well-formed `hello` |
+| 4401 | unauthenticated                                               |
+| 4403 | session forbidden — the session id belongs to another user    |
+| 4404 | thread forbidden — the thread is not readable by this user    |
+| 4408 | heartbeat timeout — no `hb.ack` within the deadline           |
+| 4409 | superseded — another connection took this session over        |
+| 4413 | frame too large                                               |
+| 4500 | internal                                                      |
+
+`ErrorCode` (on the `error` message) is separate: an error leaves the socket
+open. A failure that must also close it sends both.

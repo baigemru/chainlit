@@ -1,0 +1,168 @@
+"""Wire-shaped records exchanged with the persistence services.
+
+These msgspec Structs are the contract between the persistence package and
+its callers. ``rename="camel"`` keeps the JSON shape byte-identical to the
+``TypedDict``s the socket and REST layers already emit (``threadId``,
+``waitForAnswer``, ...), so nothing downstream has to change.
+
+Write-side records use ``msgspec.UNSET`` rather than ``None`` for fields the
+caller did not provide. "Absent" and "explicitly empty" are different
+instructions to the database: absent means "keep whatever is stored", empty
+means "store the empty value". Collapsing the two is what forced the legacy
+data layer into its ``COALESCE(NULLIF(...))`` guesswork.
+"""
+
+from typing import Any, Dict, List, Optional, Union
+
+from msgspec import UNSET, Struct, UnsetType
+
+
+class FeedbackRecord(
+    Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True
+):
+    """A thumbs up/down left on a step."""
+
+    for_id: str
+    value: int
+    id: Optional[str] = None
+    thread_id: Optional[str] = None
+    comment: Optional[str] = None
+
+
+class UserRecord(Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True):
+    """A persisted user, as returned to the auth layer."""
+
+    id: str
+    identifier: str
+    created_at: str
+    metadata: Dict[str, Any] = {}
+
+
+class ElementRecord(
+    Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True
+):
+    """An element attached to a step.
+
+    ``auto_play`` and ``player_config`` are part of the wire contract but were
+    missing from the deployed schema; migration 0002 adds their columns.
+    """
+
+    id: str
+    name: str
+    type: str
+    thread_id: Optional[str] = None
+    chainlit_key: Optional[str] = None
+    url: Optional[str] = None
+    object_key: Optional[str] = None
+    display: Optional[str] = None
+    size: Optional[str] = None
+    language: Optional[str] = None
+    page: Optional[int] = None
+    props: Optional[Dict[str, Any]] = None
+    auto_play: Optional[bool] = None
+    player_config: Optional[Dict[str, Any]] = None
+    for_id: Optional[str] = None
+    mime: Optional[str] = None
+
+
+class StepRecord(Struct, rename="camel", omit_defaults=True, kw_only=True):
+    """A step, on the way in as well as on the way out.
+
+    Every field but the three NOT NULL columns defaults to ``UNSET``: a
+    streaming update touches one column and must leave the rest alone, which
+    the upsert can only honour if it can tell "not provided" from "provided
+    as None".
+
+    ``id``, ``type`` and ``thread_id`` are required because the INSERT half
+    of that upsert cannot be built without them, and every caller has all
+    three — a step is created inside a thread and knows its own kind.
+    """
+
+    id: str
+    type: str
+    thread_id: str
+    name: Union[str, UnsetType, None] = UNSET
+    parent_id: Union[str, UnsetType, None] = UNSET
+    command: Union[str, UnsetType, None] = UNSET
+    modes: Union[Dict[str, str], UnsetType, None] = UNSET
+    streaming: Union[bool, UnsetType] = UNSET
+    wait_for_answer: Union[bool, UnsetType, None] = UNSET
+    is_error: Union[bool, UnsetType, None] = UNSET
+    metadata: Union[Dict[str, Any], UnsetType] = UNSET
+    tags: Union[List[str], UnsetType, None] = UNSET
+    input: Union[str, UnsetType, None] = UNSET
+    output: Union[str, UnsetType, None] = UNSET
+    created_at: Union[str, UnsetType, None] = UNSET
+    start: Union[str, UnsetType, None] = UNSET
+    end: Union[str, UnsetType, None] = UNSET
+    generation: Union[Dict[str, Any], UnsetType, None] = UNSET
+    show_input: Union[str, bool, UnsetType, None] = UNSET
+    default_open: Union[bool, UnsetType, None] = UNSET
+    auto_collapse: Union[bool, UnsetType, None] = UNSET
+    language: Union[str, UnsetType, None] = UNSET
+    indent: Union[int, UnsetType, None] = UNSET
+    feedback: Union[FeedbackRecord, UnsetType, None] = UNSET
+
+
+class ThreadRecord(Struct, rename="camel", omit_defaults=True, kw_only=True):
+    """A thread without its steps — what the history list renders."""
+
+    id: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    name: Optional[str] = None
+    user_id: Optional[str] = None
+    user_identifier: Optional[str] = None
+    tags: Optional[List[str]] = None
+    metadata: Dict[str, Any] = {}
+    parent_thread_id: Optional[str] = None
+
+
+class ThreadDetail(ThreadRecord, rename="camel", omit_defaults=True, kw_only=True):
+    """A thread with everything needed to resume it."""
+
+    steps: List[StepRecord] = []
+    elements: List[ElementRecord] = []
+
+
+class ThreadPatch(Struct, rename="camel", omit_defaults=True, kw_only=True):
+    """A partial thread write.
+
+    ``metadata`` is merged, not replaced: a key mapped to ``None`` deletes it,
+    every other key is written over the stored value. ``UNSET`` leaves the
+    stored metadata untouched.
+    """
+
+    name: Union[str, UnsetType, None] = UNSET
+    user_id: Union[str, UnsetType, None] = UNSET
+    user_identifier: Union[str, UnsetType, None] = UNSET
+    metadata: Union[Dict[str, Any], UnsetType] = UNSET
+    tags: Union[List[str], UnsetType, None] = UNSET
+    parent_thread_id: Union[str, UnsetType, None] = UNSET
+
+
+class ThreadQuery(Struct, rename="camel", omit_defaults=True, kw_only=True):
+    """One page request against the thread history."""
+
+    user_id: Optional[str] = None
+    search: Optional[str] = None
+    feedback: Optional[int] = None
+    first: int = 20
+    cursor: Optional[str] = None
+
+
+class PageInfoRecord(
+    Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True
+):
+    """Relay-style page info, unchanged from the legacy ``PageInfo``."""
+
+    has_next_page: bool
+    start_cursor: Optional[str] = None
+    end_cursor: Optional[str] = None
+
+
+class ThreadPage(Struct, rename="camel", omit_defaults=True, kw_only=True):
+    """One page of threads plus its cursors."""
+
+    page_info: PageInfoRecord
+    data: List[ThreadRecord] = []

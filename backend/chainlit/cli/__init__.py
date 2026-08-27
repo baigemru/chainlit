@@ -71,6 +71,10 @@ def cli():
 
 # Define the function to run Chainlit with provided options
 def run_chainlit(target: str):
+    # Marks this process as CLI-owned, which is what licenses the hard os._exit(0)
+    # in the lifespan teardown. Embedded hosts and test clients never set it.
+    os.environ["CHAINLIT_RUN_FROM_CLI"] = "1"
+
     host = os.environ.get("CHAINLIT_HOST", DEFAULT_HOST)
     port = int(os.environ.get("CHAINLIT_PORT", DEFAULT_PORT))
     root_path = os.environ.get("CHAINLIT_ROOT_PATH", DEFAULT_ROOT_PATH)

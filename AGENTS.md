@@ -2,9 +2,36 @@
 
 This file provides guidance to AI agents when working with code in this repository.
 
-## Backward Compatibility (CRITICAL)
+## Litestar rebuild in progress (CRITICAL — read first)
 
-All changes **MUST** be backward-compatible. If a refactor or breaking change is unavoidable, notify the user and stop — do not proceed without explicit approval. When approved, prefer adding a compatibility layer over keeping legacy code in place.
+This fork is being rebuilt from FastAPI/Starlette onto **Litestar 2.24**, with
+Advanced Alchemy for persistence and native WebSockets replacing socket.io. The
+work happens on `feat/litestar-rebuild`. Plan:
+https://claude.ai/code/artifact/dbf33481-64e4-469b-9c4d-44f124706bf5
+
+**The backward-compatibility rule below is suspended for this work**, by explicit
+decision of the repository owner. We are leaving upstream Chainlit. Do not add
+compatibility shims for `BaseDataLayer`, `mount_chainlit`, `server_route`,
+`cl.current_user`, `cl.run_sync` or the socket.io protocol — they are being
+deleted, not preserved.
+
+The governing rule for the rebuild: for every construct, ask whether it exists
+_because the backend was FastAPI_, or because Chainlit predates a better Litestar
+primitive. If yes — delete it, do not repackage it. Write in the 3.0-shaped API
+from line one (`NamedDependency`, `FromQuery[T]`, `InitPlugin`/`CLIPlugin`,
+imports from `advanced_alchemy.extensions.litestar`), so the eventual 3.0 bump is
+a version pin rather than a port.
+
+Target: zero `fastapi`, `pydantic`, `dataclasses_json`, `lazify`, `syncer` and
+`asyncer` imports in `backend/chainlit/`. `starlette` cannot leave the install
+(`mcp` pins it), so the import-hygiene test asserts on `fastapi`, not `starlette`.
+
+## Backward Compatibility (suspended — see above)
+
+Outside the Litestar rebuild, all changes **MUST** be backward-compatible. If a
+refactor or breaking change is unavoidable, notify the user and stop — do not
+proceed without explicit approval. When approved, prefer adding a compatibility
+layer over keeping legacy code in place.
 
 ## MCP-First Approach (CRITICAL)
 
@@ -12,7 +39,7 @@ When available, **ALWAYS** prefer MCP servers over manual alternatives. Use **Co
 
 ## Overview
 
-Chainlit is a Python framework for building production-ready conversational AI applications. It consists of a Python/FastAPI backend and a React frontend, with a pnpm monorepo for the JS packages.
+Chainlit is a Python framework for building production-ready conversational AI applications. It consists of a Python backend (migrating from FastAPI to **Litestar 2.24**) and a React frontend, with a pnpm monorepo for the JS packages. The PyPI distribution is `chainlit-litestar`; the import name is still `chainlit`.
 
 ## Prerequisites
 

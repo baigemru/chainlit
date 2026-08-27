@@ -192,8 +192,12 @@ async def lifespan(app: FastAPI):
         if FILES_DIRECTORY.is_dir():
             shutil.rmtree(FILES_DIRECTORY)
 
-        # Force exit the process to avoid potential AnyIO threads still running
-        os._exit(0)
+        # Force exit the process to avoid potential AnyIO threads still running.
+        # Only when the CLI owns the process: a test client (or an embedding host)
+        # runs this same lifespan, and _exit there would kill the pytest run --
+        # reporting success, because the exit status is 0.
+        if os.environ.get("CHAINLIT_RUN_FROM_CLI") == "1":
+            os._exit(0)
 
 
 def get_build_dir(local_target: str, packaged_target: str) -> str:
@@ -1878,7 +1882,18 @@ def validate_file_size(file: UploadFile, spec: Optional[AskFileSpec]):
         if not spec
         else spec.max_size_mb
     )
-    if file.size is not None and file.size > max_size_mb * 1024 * 1024:
+    max_bytes = max_size_mb * 1024 * 1024
+
+    # Do not trust an advertised size: Litestar's UploadFile carries no .size at
+    # all, so reading the attribute would silently turn this check into a no-op
+    # while the mime check keeps passing and the tests stay green.
+    size = getattr(file, "size", None)
+    if size is None:
+        position = file.file.tell()
+        size = file.file.seek(0, os.SEEK_END)
+        file.file.seek(position)
+
+    if size > max_bytes:
         raise ValueError("File size too large")
 
 

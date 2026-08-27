@@ -227,6 +227,7 @@ def _config() -> Mock:
     config.code.on_thread_ready = None
     config.code.on_profile_start = None
     config.code.on_stop = None
+    config.code.on_message = None
     config.features.hot_swap_chat_profile = False
     return config
 
@@ -323,6 +324,13 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
                     f"The legacy driver has no handler for inbound {frame.tag!r}."
                 )
             await handler(session, frame.payload)
+
+        # Rescuing an orphaned reply is a background task parked on the
+        # handshake gate. A ledger read before it finishes would be missing
+        # the frames the scenario is about.
+        parked = list(getattr(session, "deferred_ask_reply_tasks", ()) or ())
+        if parked:
+            await asyncio.gather(*parked, return_exceptions=True)
 
     return Result(ledger=ledger, state=_report(session, pending))
 

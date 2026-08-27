@@ -38,6 +38,8 @@ from chainlit.persistence.models import (
     Step,
     Thread,
     User,
+    iso_datetime,
+    iso_text,
 )
 from chainlit.persistence.records import (
     ElementRecord,
@@ -79,26 +81,10 @@ def from_uuid(value: Optional[uuid.UUID]) -> Optional[str]:
     return None if value is None else str(value)
 
 
-def to_datetime(value: Optional[str]) -> Optional[datetime]:
-    """Parse an ISO timestamp, tolerating the trailing Z this schema uses."""
-    if value is None:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except TypeError, ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
-def from_datetime(value: Optional[datetime]) -> Optional[str]:
-    """Render a timestamp the way the stored strings are written."""
-    if value is None:
-        return None
-    moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    return (
-        moment.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="microseconds")
-        + "Z"
-    )
+# The wire<->column timestamp format. Defined next to ``ISOTimestamp`` in
+# models, so a record, a stored value and a page cursor cannot drift apart.
+to_datetime = iso_datetime
+from_datetime = iso_text
 
 
 def now() -> datetime:
@@ -196,11 +182,17 @@ class StepService(SQLAlchemyAsyncRepositoryService[Step, StepRepository]):
 
         A streaming token touches ``output``; the step's ``start`` and its
         ``type`` were settled by an earlier write and must survive this one.
+
+        The thread is guaranteed first. ``steps."threadId"`` is a real foreign
+        key, steps routinely arrive before the thread patch that would create
+        the row, and without the guard PostgreSQL rejects the whole write.
         """
         values = _column_values(record, skip=("feedback",))
-        await self.repository.session.execute(
-            statements.upsert_step(values, self.dialect)
+        session = self.repository.session
+        await session.execute(
+            statements.ensure_thread(values["threadId"], now(), self.dialect)
         )
+        await session.execute(statements.upsert_step(values, self.dialect))
 
     async def fetch(self, step_id: str) -> Optional[StepRecord]:
         identifier = to_uuid(step_id)
@@ -390,9 +382,13 @@ class ThreadService(SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]):
             await self.repository.session.execute(statements.thread_page_query(query))
         ).all()
 
-        has_next_page = len(rows) > query.first
+        # The clamped size, not query.first: the statement was built with the
+        # same clamp, so trimming to the raw value would throw away rows the
+        # LIMIT deliberately fetched.
+        first = statements.page_size(query)
+        has_next_page = len(rows) > first
         if has_next_page:
-            rows = rows[: query.first]
+            rows = rows[:first]
 
         start_cursor, end_cursor = statements.cursors_for(rows)
         return ThreadPage(

@@ -1,11 +1,11 @@
 """The mapping must match the schema that is deployed, column for column."""
 
-from typing import Dict, Set
+from typing import Dict, Optional, Set
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from chainlit.persistence.models import Base
+from chainlit.persistence.models import SCHEMA_NAME, Base
 
 # Taken from the production database (PostgreSQL, schema `chainlit`), plus the
 # three columns migration 0002 adds. If a model column is not in this map, it
@@ -101,18 +101,31 @@ def test_models_live_in_the_chainlit_schema() -> None:
     assert {table.schema for table in Base.metadata.sorted_tables} == {"chainlit"}
 
 
+def migrated_schema(engine: AsyncEngine) -> Optional[str]:
+    """Where the migrations actually built the tables, for this dialect.
+
+    SQLite has no schemas and the ``chainlit`` one is folded into the default;
+    PostgreSQL has it for real and the inspector will not find a thing without
+    being told.
+    """
+    return None if engine.dialect.name == "sqlite" else SCHEMA_NAME
+
+
 async def test_migrated_database_matches_the_models(engine: AsyncEngine) -> None:
     """Drift in either direction — a model column the migrations never
     create, or a migration column no model knows about — fails here."""
+    schema = migrated_schema(engine)
 
     async with engine.connect() as connection:
         migrated = await connection.run_sync(
             lambda sync_connection: {
                 name: {
                     column["name"]
-                    for column in inspect(sync_connection).get_columns(name)
+                    for column in inspect(sync_connection).get_columns(
+                        name, schema=schema
+                    )
                 }
-                for name in inspect(sync_connection).get_table_names()
+                for name in inspect(sync_connection).get_table_names(schema=schema)
                 if name != "alembic_version"
             }
         )
@@ -120,14 +133,20 @@ async def test_migrated_database_matches_the_models(engine: AsyncEngine) -> None
 
 
 async def test_migrated_indexes_match_the_models(engine: AsyncEngine) -> None:
+    schema = migrated_schema(engine)
+
     async with engine.connect() as connection:
         migrated = await connection.run_sync(
             lambda sync_connection: {
                 index["name"]
-                for name in inspect(sync_connection).get_table_names()
-                for index in inspect(sync_connection).get_indexes(name)
+                for name in inspect(sync_connection).get_table_names(schema=schema)
+                for index in inspect(sync_connection).get_indexes(name, schema=schema)
                 if index["name"] is not None
+                # The index a UNIQUE constraint creates behind itself is not
+                # a declared index: SQLite names it "sqlite_autoindex_*",
+                # PostgreSQL names it after the constraint and flags it.
                 and not str(index["name"]).startswith("sqlite_autoindex")
+                and not index.get("duplicates_constraint")
             }
         )
     declared = {

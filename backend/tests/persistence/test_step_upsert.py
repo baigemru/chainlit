@@ -200,3 +200,85 @@ async def test_feedback_comes_back_with_the_step(uow: UnitOfWork) -> None:
     assert stored.feedback.id == feedback_id
     assert stored.feedback.value == 1
     assert stored.feedback.comment == "good"
+
+
+async def test_a_step_creates_the_thread_it_names(uow: UnitOfWork) -> None:
+    """Steps arrive before the thread row does, and the FK is real.
+
+    ``steps."threadId"`` references ``threads."id"``, so an out-of-order step
+    is a ForeignKeyViolationError in production and the message is simply
+    lost. The legacy layer opened ``create_step`` with ``update_thread()``
+    for exactly this reason.
+    """
+    thread_id = new_id()
+    step_id = new_id()
+
+    await uow.steps.save(
+        StepRecord(
+            id=step_id,
+            type="assistant_message",
+            thread_id=thread_id,
+            output="the answer",
+        )
+    )
+
+    stored = await uow.steps.fetch(step_id)
+    assert stored is not None
+    assert stored.thread_id == thread_id
+    assert (await uow.threads.fetch(thread_id)) is not None
+
+
+async def test_a_step_does_not_disturb_the_thread_it_belongs_to(
+    uow: UnitOfWork,
+) -> None:
+    """The guard creates a missing thread; it never rewrites a present one.
+
+    Marking the thread active is ``touch()``'s job. If the guard bumped
+    ``updatedAt`` the history would reorder on every streaming token.
+    """
+    thread_id = await make_thread(uow, name="Deployment notes", updated_at=at(hour=9))
+
+    await uow.steps.save(
+        StepRecord(id=new_id(), type="assistant_message", thread_id=thread_id)
+    )
+
+    stored = await uow.threads.fetch(thread_id)
+    assert stored is not None
+    assert stored.name == "Deployment notes"
+    assert stored.updated_at == iso(at(hour=9))
+
+
+async def test_input_is_suppressed_when_show_input_was_never_set(
+    uow: UnitOfWork,
+) -> None:
+    """A NULL showInput is not a "yes".
+
+    The column is nullable and most rows written before it existed hold NULL;
+    treating that as "show it" leaks the raw prompt of every legacy step.
+    """
+    thread_id = await make_thread(uow)
+    step_id = new_id()
+    await uow.steps.save(
+        StepRecord(id=step_id, type="tool", thread_id=thread_id, input="secret prompt")
+    )
+
+    stored = await uow.steps.fetch(step_id)
+    assert stored is not None
+    assert stored.show_input is None
+    assert stored.input == ""
+
+
+async def test_a_step_remembers_its_parent(uow: UnitOfWork) -> None:
+    """parentId is a uuid column: the id has to be converted, not passed through."""
+    thread_id = await make_thread(uow)
+    parent_id = new_id()
+    child_id = new_id()
+    await uow.steps.save(StepRecord(id=parent_id, type="run", thread_id=thread_id))
+
+    await uow.steps.save(
+        StepRecord(id=child_id, type="tool", thread_id=thread_id, parent_id=parent_id)
+    )
+
+    stored = await uow.steps.fetch(child_id)
+    assert stored is not None
+    assert stored.parent_id == parent_id

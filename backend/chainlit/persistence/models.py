@@ -49,14 +49,46 @@ NAMING_CONVENTION = {
 TagArray = ARRAY(Text()).with_variant(JSON(), "sqlite")
 
 
+def iso_text(value: Optional[datetime]) -> Optional[str]:
+    """Render a datetime the way this schema's TEXT columns hold it.
+
+    The one place the format is written down: the column type below, the
+    records the services hand out and the page cursors all go through here,
+    so a cursor minted from a row compares byte-for-byte with the stored value.
+    """
+    if value is None:
+        return None
+    # A naive datetime is taken as UTC: the legacy writer used local time
+    # with a "Z" glued on, so there is no offset to recover anyway.
+    moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return (
+        moment.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="microseconds")
+        + "Z"
+    )
+
+
+def iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse one of those strings back, tolerating the trailing Z.
+
+    Rows written before this package existed are not guaranteed to parse; a
+    malformed value reads back as ``None`` rather than breaking the whole page
+    of results.
+    """
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except TypeError, ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 class ISOTimestamp(TypeDecorator[datetime]):
     """A datetime stored as the ISO text this schema already holds.
 
     The deployed columns are ``TEXT`` carrying ``2026-08-27T10:11:12.131415Z``.
     Rewriting them to ``timestamptz`` would be a migration over live data, so
-    the type decorator absorbs the format instead. Rows written before this
-    package existed are not guaranteed to parse; a malformed value reads back
-    as ``None`` rather than breaking the whole page of results.
+    the type decorator absorbs the format instead.
     """
 
     impl = Text
@@ -65,28 +97,12 @@ class ISOTimestamp(TypeDecorator[datetime]):
     def process_bind_param(
         self, value: Optional[datetime], dialect: Dialect
     ) -> Optional[str]:
-        if value is None:
-            return None
-        # A naive datetime is taken as UTC: the legacy writer used local time
-        # with a "Z" glued on, so there is no offset to recover anyway.
-        moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-        return (
-            moment.astimezone(UTC)
-            .replace(tzinfo=None)
-            .isoformat(timespec="microseconds")
-            + "Z"
-        )
+        return iso_text(value)
 
     def process_result_value(
         self, value: Optional[str], dialect: Dialect
     ) -> Optional[datetime]:
-        if value is None:
-            return None
-        try:
-            parsed = datetime.fromisoformat(value)
-        except TypeError, ValueError:
-            return None
-        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+        return iso_datetime(value)
 
 
 class Base(BasicAttributes, DeclarativeBase):

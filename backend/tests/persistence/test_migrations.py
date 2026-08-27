@@ -5,15 +5,13 @@ from typing import Any, Dict, Sequence
 
 import sqlalchemy as sa
 from sqlalchemy import Row
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.persistence.conftest import (
-    TRANSLATE_MAP,
     at,
+    create_sqlite_engine,
     iso,
     migrate,
     new_id,
-    sqlite_url,
 )
 
 # Deliberately not the models: this data is written while the database is at
@@ -41,9 +39,7 @@ STEPS_0001 = sa.table(
 async def test_baseline_then_upgrade_backfills_updated_at(tmp_path: Path) -> None:
     import uuid
 
-    engine = create_async_engine(
-        sqlite_url(tmp_path), execution_options={"schema_translate_map": TRANSLATE_MAP}
-    )
+    engine = create_sqlite_engine(tmp_path)
     try:
         await migrate(engine, "0001_baseline")
 

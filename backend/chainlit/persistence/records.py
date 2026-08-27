@@ -12,9 +12,15 @@ means "store the empty value". Collapsing the two is what forced the legacy
 data layer into its ``COALESCE(NULLIF(...))`` guesswork.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
 
-from msgspec import UNSET, Struct, UnsetType
+from msgspec import UNSET, Meta, Struct, UnsetType
+
+# A page the caller cannot use is not worth serving: ``first=0`` used to mean
+# "an empty page, and there is more", which a client looping on hasNextPage
+# never escapes. The ceiling keeps one request from scanning the whole history.
+MIN_PAGE_SIZE = 1
+MAX_PAGE_SIZE = 100
 
 
 class FeedbackRecord(
@@ -158,7 +164,12 @@ class ThreadQuery(Struct, rename="camel", omit_defaults=True, kw_only=True):
     user_id: Optional[str] = None
     search: Optional[str] = None
     feedback: Optional[int] = None
-    first: int = 20
+    # Constrained on the record rather than only in the service, so the bound
+    # reaches the generated OpenAPI schema and a request carrying a nonsense
+    # page size is rejected at the edge instead of being quietly clamped.
+    first: Annotated[int, Meta(ge=MIN_PAGE_SIZE, le=MAX_PAGE_SIZE)] = 20
+    # Opaque. It encodes the ``(updatedAt, id)`` position itself rather than
+    # naming a thread, so it keeps working after that thread is deleted.
     cursor: Optional[str] = None
 
 
@@ -177,3 +188,20 @@ class ThreadPage(Struct, rename="camel", omit_defaults=True, kw_only=True):
 
     page_info: PageInfoRecord
     data: List[ThreadRecord] = []
+
+
+class PageCursor(Struct, rename="camel", kw_only=True, frozen=True):
+    """The position a page cursor encodes, before it is base64'd.
+
+    Naming a row and reading its timestamp back out of the table was the bug:
+    delete that row and the scalar subquery yields NULL, the keyset comparison
+    yields NULL, and everything below the cursor becomes unreachable. Carrying
+    the timestamp in the cursor removes the read entirely.
+
+    ``updated_at`` is optional because the column is: a thread the legacy layer
+    wrote, or one migration 0002 could not backfill, sorts at the end of the
+    history with no timestamp at all.
+    """
+
+    id: str
+    updated_at: Optional[str] = None

@@ -38,6 +38,7 @@ from chainlit.persistence.models import (
 from chainlit.persistence.records import (
     ElementRecord,
     FeedbackRecord,
+    PageCursor,
     PageInfoRecord,
     StepRecord,
     ThreadDetail,
@@ -75,6 +76,7 @@ __all__ = [
     "FeedbackRepository",
     "FeedbackService",
     "ISOTimestamp",
+    "PageCursor",
     "PageInfoRecord",
     "Persistence",
     "Step",

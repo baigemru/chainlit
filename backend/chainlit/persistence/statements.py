@@ -13,6 +13,8 @@ writing — ``StepRecord`` leaves everything else ``UNSET`` — and the statemen
 only mentions the columns it was given.
 """
 
+import base64
+import binascii
 import json
 from datetime import datetime
 from typing import (
@@ -28,6 +30,7 @@ from typing import (
 )
 from uuid import UUID
 
+import msgspec
 from sqlalchemy import (
     ARRAY,
     Select,
@@ -38,6 +41,7 @@ from sqlalchemy import (
     case,
     cast,
     exists,
+    false,
     func,
     literal,
     or_,
@@ -53,8 +57,21 @@ from sqlalchemy.sql.compiler import SQLCompiler
 from sqlalchemy.sql.dml import ReturningInsert
 from sqlalchemy.sql.functions import FunctionElement
 
-from chainlit.persistence.models import ELEMENTS, FEEDBACKS, STEPS, THREADS, USERS
-from chainlit.persistence.records import ThreadQuery
+from chainlit.persistence.models import (
+    ELEMENTS,
+    FEEDBACKS,
+    STEPS,
+    THREADS,
+    USERS,
+    iso_datetime,
+    iso_text,
+)
+from chainlit.persistence.records import (
+    MAX_PAGE_SIZE,
+    MIN_PAGE_SIZE,
+    PageCursor,
+    ThreadQuery,
+)
 
 # The type a step gets when it is created as a stand-in for a parent that has
 # not arrived yet. A later write carrying the real type must win, and a late
@@ -65,6 +82,10 @@ PLACEHOLDER_STEP_TYPE = "run"
 # and the two ``on_conflict_*`` methods; the generic ``sqlalchemy.Insert``
 # exposes neither, which is why the union is spelled out.
 DialectInsert = Union[PostgresInsert, SQLiteInsert]
+
+# LIKE's own metacharacters. Escaped explicitly rather than left to the
+# dialect default, which PostgreSQL ties to ``standard_conforming_strings``.
+LIKE_ESCAPE = "\\"
 
 
 class Least(FunctionElement[Any]):
@@ -141,6 +162,27 @@ def upsert_step(values: Mapping[str, Any], dialect_name: str) -> DialectInsert:
     )
 
 
+def ensure_thread(
+    thread_id: UUID, created_at: datetime, dialect_name: str
+) -> DialectInsert:
+    """Create the thread row if it is missing, and leave it alone if it is not.
+
+    ``steps."threadId"`` is a real foreign key in production. Steps arrive out
+    of order — a child before its parent, a message before the thread patch
+    that names it — so the write has to bring its own thread or lose the row
+    to a ForeignKeyViolationError. The legacy layer opened ``create_step``
+    with ``update_thread()`` for the same reason.
+
+    DO NOTHING on conflict, deliberately: an existing thread keeps its
+    ``updatedAt``. Marking a thread active is ``ThreadService.touch``'s job,
+    and doing it here would reshuffle the history on every streaming token.
+    """
+    statement = insert_for(dialect_name)(THREADS).values(
+        id=thread_id, createdAt=created_at, updatedAt=created_at
+    )
+    return statement.on_conflict_do_nothing(index_elements=[THREADS.c["id"]])
+
+
 def upsert_user(
     user_id: UUID,
     identifier: str,
@@ -188,14 +230,43 @@ def merge_thread_metadata(
     return THREADS.update().where(THREADS.c["id"] == thread_id).values(**values)
 
 
+def _json_path(key: str) -> str:
+    """A metadata key as a SQLite JSON path.
+
+    Always quoted: keys are user data and routinely contain ``.``, which an
+    unquoted path reads as a step into a nested object.
+    """
+    return '$."' + key.replace('"', '\\"') + '"'
+
+
 def _merged_metadata(column: Any, patch: Mapping[str, Any], dialect_name: str) -> Any:
-    """The merged-metadata expression for one dialect."""
+    """The merged-metadata expression for one dialect.
+
+    Both arms have to mean the same thing, and the meaning is the shallow one
+    the docstring above specifies: a top-level key is replaced whole, a
+    top-level ``None`` deletes, and anything nested is an opaque value.
+    """
     if dialect_name == "sqlite":
-        # RFC 7396 merge-patch: json_patch() deletes exactly the keys whose
-        # patch value is null, which is the semantics we want, for free.
-        return func.json_patch(
-            func.coalesce(column, literal("{}")), literal(json.dumps(dict(patch)))
-        )
+        # Not json_patch(): that is RFC 7396, which merges nested objects
+        # recursively and strips nulls at every level — neither of which the
+        # PostgreSQL arm or the legacy layer does. json_remove()/json_set()
+        # address exactly the top-level keys the patch names, and json() keeps
+        # each incoming value verbatim, nested nulls included.
+        expression: Any = func.coalesce(column, literal("{}"))
+        deleted = [key for key, value in patch.items() if value is None]
+        if deleted:
+            expression = func.json_remove(
+                expression, *[literal(_json_path(key)) for key in deleted]
+            )
+        for key, value in patch.items():
+            if value is None:
+                continue
+            expression = func.json_set(
+                expression,
+                literal(_json_path(key)),
+                func.json(literal(json.dumps(value))),
+            )
+        return expression
 
     # PostgreSQL has no merge-patch before 17, so deletion and addition are
     # two operators: subtract the null-valued keys, concatenate the rest.
@@ -204,6 +275,87 @@ def _merged_metadata(column: Any, patch: Mapping[str, Any], dialect_name: str) -
     current = func.coalesce(column, cast(literal("{}"), JSONB))
     kept = current.op("-")(cast(literal(deleted), ARRAY(Text())))
     return kept.op("||")(cast(literal(json.dumps(incoming)), JSONB))
+
+
+def page_size(query: ThreadQuery) -> int:
+    """The page size actually served.
+
+    ``ThreadQuery`` constrains this on decode, but the struct can also be
+    built in Python, and ``first=0`` is a trap rather than an empty page:
+    ``LIMIT 0 + 1`` returns a row, so hasNextPage says True, the row is then
+    trimmed off, so endCursor is None — and a client that loops until
+    hasNextPage goes False asks for page one forever.
+    """
+    return max(MIN_PAGE_SIZE, min(query.first, MAX_PAGE_SIZE))
+
+
+def like_pattern(term: str) -> str:
+    """A user's search term as a LIKE pattern, metacharacters and all.
+
+    Unescaped, a search for ``%`` matches every thread and ``a_c`` matches
+    ``abc``. The escape character itself has to go first.
+    """
+    escaped = (
+        term.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2)
+        .replace("%", LIKE_ESCAPE + "%")
+        .replace("_", LIKE_ESCAPE + "_")
+    )
+    return f"%{escaped}%"
+
+
+def encode_cursor(thread_id: str, updated_at: Optional[str]) -> str:
+    """A page position, as one opaque wire token."""
+    return base64.urlsafe_b64encode(
+        msgspec.json.encode(PageCursor(id=thread_id, updated_at=updated_at))
+    ).decode("ascii")
+
+
+def decode_cursor(raw: str) -> Optional[PageCursor]:
+    """Read one back, or None if it did not come from ``encode_cursor``.
+
+    A cursor the client did not get from us is noise, not an error: the caller
+    serves the first page rather than failing the request.
+    """
+    try:
+        return msgspec.json.decode(base64.urlsafe_b64decode(raw), type=PageCursor)
+    except msgspec.DecodeError, msgspec.ValidationError, binascii.Error, ValueError:
+        return None
+
+
+def _as_uuid(value: str) -> Optional[UUID]:
+    """Parse an id that arrived off the wire, without trusting it."""
+    try:
+        return UUID(value)
+    except AttributeError, TypeError, ValueError:
+        return None
+
+
+def _after_cursor(cursor: PageCursor) -> Optional[Any]:
+    """The keyset predicate for "strictly after this position".
+
+    Not a plain row comparison: ``(updatedAt, id) < (ts, id)`` is NULL, not
+    false, whenever either side has a NULL timestamp, and a NULL predicate
+    drops the row. Under ``updatedAt DESC NULLS LAST`` the threads with no
+    timestamp are the tail of the history, so they are added back explicitly
+    — and a cursor sitting *in* that tail is ordered by id alone.
+    """
+    cursor_id = _as_uuid(cursor.id)
+    if cursor_id is None:
+        return None
+    bound_id = literal(cursor_id, THREADS.c["id"].type)
+    cursor_updated_at = iso_datetime(cursor.updated_at)
+
+    if cursor_updated_at is None:
+        return and_(THREADS.c["updatedAt"].is_(None), THREADS.c["id"] < bound_id)
+
+    return or_(
+        tuple_(THREADS.c["updatedAt"], THREADS.c["id"])
+        < tuple_(
+            literal(cursor_updated_at, THREADS.c["updatedAt"].type),
+            bound_id,
+        ),
+        THREADS.c["updatedAt"].is_(None),
+    )
 
 
 def thread_page_query(query: ThreadQuery) -> Select[Any]:
@@ -219,17 +371,23 @@ def thread_page_query(query: ThreadQuery) -> Select[Any]:
 
     conditions: List[Any] = []
     if query.user_id is not None:
-        conditions.append(THREADS.c["userId"] == UUID(query.user_id))
+        user_id = _as_uuid(query.user_id)
+        if user_id is None:
+            # Not a uuid, so it is nobody's id and nothing can match. Dropping
+            # the filter instead would hand the caller every user's history.
+            conditions.append(false())
+        else:
+            conditions.append(THREADS.c["userId"] == user_id)
     if query.search:
-        pattern = f"%{query.search}%"
+        pattern = like_pattern(query.search)
         conditions.append(
             or_(
-                THREADS.c["name"].ilike(pattern),
+                THREADS.c["name"].ilike(pattern, escape=LIKE_ESCAPE),
                 exists(
                     select(STEPS.c["id"]).where(
                         and_(
                             STEPS.c["threadId"] == THREADS.c["id"],
-                            STEPS.c["output"].ilike(pattern),
+                            STEPS.c["output"].ilike(pattern, escape=LIKE_ESCAPE),
                         )
                     )
                 ),
@@ -247,24 +405,22 @@ def thread_page_query(query: ThreadQuery) -> Select[Any]:
             )
         )
     if query.cursor is not None:
-        cursor_id = UUID(query.cursor)
-        cursor_updated_at = (
-            select(THREADS.c["updatedAt"])
-            .where(THREADS.c["id"] == cursor_id)
-            .scalar_subquery()
-        )
-        conditions.append(
-            tuple_(THREADS.c["updatedAt"], THREADS.c["id"])
-            < tuple_(cursor_updated_at, literal(cursor_id, THREADS.c["id"].type))
-        )
+        cursor = decode_cursor(query.cursor)
+        after = None if cursor is None else _after_cursor(cursor)
+        if after is not None:
+            conditions.append(after)
 
     if conditions:
         statement = statement.where(and_(*conditions))
 
+    # NULLS LAST on both dialects: PostgreSQL puts NULLs *first* under DESC,
+    # which would head the history with a thread that has no activity at all.
+    # SQLite sorts them last already and accepts the clause since 3.30.
+    #
     # first + 1: the extra row is what answers hasNextPage without a count.
     return statement.order_by(
-        THREADS.c["updatedAt"].desc(), THREADS.c["id"].desc()
-    ).limit(query.first + 1)
+        THREADS.c["updatedAt"].desc().nulls_last(), THREADS.c["id"].desc()
+    ).limit(page_size(query) + 1)
 
 
 def _steps_with_feedback() -> Select[Any]:
@@ -321,8 +477,19 @@ def upsert_feedback(values: Mapping[str, Any], dialect_name: str) -> DialectInse
     )
 
 
+def cursor_for(row: Any) -> str:
+    """One row's position in the history, as an opaque cursor."""
+    return encode_cursor(str(row.id), iso_text(row.updatedAt))
+
+
 def cursors_for(rows: Sequence[Any]) -> Tuple[Optional[str], Optional[str]]:
-    """First and last thread id of a page, as the wire cursors."""
+    """First and last position of a page, as the wire cursors.
+
+    The position, not the thread id: a cursor naming a row forced the next
+    page to read that row's timestamp back out of the table, so deleting the
+    thread from another tab made the comparison NULL and everything below it
+    unreachable.
+    """
     if not rows:
         return None, None
-    return str(rows[0].id), str(rows[-1].id)
+    return cursor_for(rows[0]), cursor_for(rows[-1])

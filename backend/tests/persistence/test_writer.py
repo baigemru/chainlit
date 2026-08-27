@@ -474,29 +474,36 @@ async def test_a_failed_upload_drops_the_row_and_nothing_else(
     assert await uow.steps.fetch(survivor.id) is not None
 
 
-async def test_uploads_run_concurrently(writer: Recorder, thread_id: str):
+async def test_uploads_start_at_submit_not_at_write(writer: Recorder, thread_id: str):
     """The barrier costs the slowest upload, not the sum of them.
 
-    Both uploads must be in flight at once; if the writer awaited them at
-    consume time instead of starting them at submit time, the second would
-    never begin while the first is held.
+    The distinction only shows up while the consumer is already busy: these
+    two uploads are submitted behind one the writer is blocked on. Starting
+    them here means they overlap with it; starting them where the row is
+    written would serialise all three, and the barrier's cost would go from
+    the maximum to the sum.
     """
     parent = step(thread_id, name="carrier")
     writer.submit(SaveStep(parent))
-    started = [asyncio.Event(), asyncio.Event()]
     release = asyncio.Event()
+    started = [asyncio.Event() for _ in range(3)]
 
     async def upload(index: int) -> None:
         started[index].set()
         await release.wait()
 
-    for index in range(2):
+    writer.submit_element(element(thread_id, for_id=parent.id), upload(0))
+    await asyncio.wait_for(started[0].wait(), timeout=5.0)
+
+    for index in (1, 2):
         writer.submit_element(element(thread_id, for_id=parent.id), upload(index))
 
-    await asyncio.wait_for(
-        asyncio.gather(*(event.wait() for event in started)), timeout=5.0
-    )
-    release.set()
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(started[1].wait(), started[2].wait()), timeout=2.0
+        )
+    finally:
+        release.set()
     await writer.drain(timeout=5.0)
 
 

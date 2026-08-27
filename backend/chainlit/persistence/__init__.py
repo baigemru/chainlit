@@ -72,6 +72,8 @@ from chainlit.persistence.writer import (
     SaveElement,
     SaveStep,
     SessionWriter,
+    WriterRegistry,
+    default_registry,
     drain_thread,
 )
 
@@ -115,7 +117,9 @@ __all__ = [
     "UserRecord",
     "UserRepository",
     "UserService",
+    "WriterRegistry",
     "alembic_config",
+    "default_registry",
     "drain_thread",
     "sqlalchemy_config",
     "upgrade_database",

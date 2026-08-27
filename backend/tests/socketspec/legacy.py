@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
 from unittest.mock import AsyncMock, Mock, patch
 
 from chainlit.session import PendingAsk, WebsocketSession
@@ -33,10 +33,95 @@ from chainlit.socket import (
 )
 from chainlit.types import AskSpec
 
-from .frames import Ledger, ask_start, translate
-from .spec import AskState, Given, Result, Scenario
+from .frames import Ledger
+from .spec import AskState, Driver, Given, Result, Scenario
 
 SID = "spec-sid"
+
+# --------------------------------------------------------------------------
+# socket.io event -> protocol tag
+#
+# This table is the transport, spelled out. It lives here rather than beside
+# the Frame type because an event name is as much of a dependency on
+# socket.io as an import of it would be -- and the boundary test, which looks
+# at imports, would never have caught it there.
+# --------------------------------------------------------------------------
+
+# Straight renames: the payload travels as-is under the new tag.
+_RENAMES: Dict[str, str] = {
+    "resume_thread": "thread.resume",
+    "resume_thread_error": "thread.resume_error",
+    "first_interaction": "thread.first_interaction",
+    "parent_thread": "thread.parent",
+    "open_thread": "thread.open",
+    "chat_profile_changed": "profile.changed",
+    "set_chat_profile": "session.handoff",
+    "audio_interrupt": "audio.interrupt",
+    "toast": "toast",
+    "reload": "reload",
+    "window_message": "window.message",
+    "call_fn": "rpc.call",
+}
+
+# The payload moves under a named key -- the old event shipped a bare value.
+_WRAPPED: Dict[str, Tuple[str, str]] = {
+    "new_message": ("step.upsert", "step"),
+    "update_message": ("step.update", "patch"),
+    "delete_message": ("step.delete", "step"),
+    "stream_start": ("step.stream.start", "step"),
+    "stream_token": ("step.stream.token", "token"),
+    "element": ("element.upsert", "element"),
+    "remove_element": ("element.remove", "element"),
+    "action": ("action.add", "action"),
+    "remove_action": ("action.remove", "action"),
+    "ask": ("ask.start", "ask"),
+    "chat_settings": ("settings.set", "inputs"),
+    "set_commands": ("commands.set", "commands"),
+    "set_modes": ("modes.set", "modes"),
+    "set_favorites": ("favorites.set", "steps"),
+    "token_usage": ("token.usage", "count"),
+    "audio_connection": ("audio.connection", "state"),
+}
+
+# Collapsed pairs. The reason is only knowable for the timeout half: the
+# legacy `clear_ask` / `clear_call_fn` carry no reason at all, so the table
+# must not pin one on them. Phase 5 tightens this, it cannot be tightened here
+# without inventing information the current wire does not carry.
+_COLLAPSED: Dict[str, Tuple[str, Dict[str, Any]]] = {
+    "ask_timeout": ("ask.end", {"reason": "timeout"}),
+    "clear_ask": ("ask.end", {}),
+    "call_fn_timeout": ("rpc.cancel", {"reason": "timeout"}),
+    "clear_call_fn": ("rpc.cancel", {}),
+    "task_start": ("task.indicator", {"running": True}),
+    "task_end": ("task.indicator", {"running": False}),
+}
+
+
+def translate(event: str, payload: Any = None) -> Tuple[str, Dict[str, Any]]:
+    """Turn one socket.io event into its protocol tag and payload."""
+    if event in _COLLAPSED:
+        tag, extra = _COLLAPSED[event]
+        return tag, dict(extra)
+    if event in _RENAMES:
+        return _RENAMES[event], _as_payload(payload)
+    if event in _WRAPPED:
+        tag, key = _WRAPPED[event]
+        return tag, {key: payload}
+    raise KeyError(
+        f"No protocol tag for socket.io event {event!r}. Add it to "
+        f"tests/socketspec/frames.py -- an unmapped event would otherwise "
+        f"vanish from the ledger and the scenario would pass by silence."
+    )
+
+
+def _as_payload(payload: Any) -> Dict[str, Any]:
+    return dict(payload) if isinstance(payload, Mapping) else {"value": payload}
+
+
+def ask_start(payload: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """``emit_ask({"msg": ..., "spec": ...})`` under the new field names."""
+    return "ask.start", {"step": payload.get("msg"), "spec": payload.get("spec")}
+
 
 # Emitter helpers that put a frame on the wire in real code. Under a mocked
 # emitter they would vanish, so each one is recorded as the frame it sends.
@@ -262,6 +347,30 @@ async def _clear_frame(_session: Mock, _payload: Mapping[str, Any]) -> None:
     await _clean_session(SID)
 
 
+# The client -> server half of the vocabulary. Not used to dispatch -- the
+# handlers below are imported directly -- but written down so the boundary
+# test can check that no portable module names one of them.
+_INBOUND_EVENTS = (
+    "connect",
+    "connection_successful",
+    "disconnect",
+    "clear_session",
+    "switch_chat_profile",
+    "stop",
+    "ask_reply",
+    "client_message",
+    "edit_message",
+    "message_favorite",
+    "fetch_favorites",
+    "window_message",
+    "audio_start",
+    "audio_chunk",
+    "audio_end",
+    "chat_settings_change",
+    "chat_settings_edit",
+)
+
+
 HANDLERS: Dict[str, Callable[[Mock, Mapping[str, Any]], Any]] = {
     "hello": _hello,
     "ask.reply": _ask_reply_frame,
@@ -349,4 +458,20 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
     return Result(ledger=ledger, state=_report(session, pending))
 
 
-__all__ = ["HANDLERS", "RecordingEmitter", "run"]
+def build(request: Any) -> Driver:
+    """The driver, with the fixtures it happens to need.
+
+    Each driver pulls its own: this one wants the session mock factory, and
+    the driver for the new transport will want a Litestar test client and
+    nothing else. A runner that passed one implementation's fixtures to every
+    driver would have to change the moment a second one existed.
+    """
+    session_factory = request.getfixturevalue("mock_session_factory")
+
+    def drive(scenario: Scenario) -> Awaitable[Result]:
+        return run(scenario, session_factory)
+
+    return drive
+
+
+__all__ = ["HANDLERS", "RecordingEmitter", "build", "run"]

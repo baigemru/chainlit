@@ -9,7 +9,18 @@ calls is the driver's job, and is the only part that has to be written twice.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Literal, Mapping, Optional, Tuple
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Literal,
+    Mapping,
+    Optional,
+    Protocol,
+    Tuple,
+    Union,
+)
 
 from .frames import Expect, Ledger
 
@@ -146,8 +157,23 @@ class Scenario:
     row is in the table at all, for whoever reads a failure."""
 
 
+class Driver(Protocol):
+    """Runs one scenario against one implementation and reports what happened.
+
+    Deliberately allowed to be synchronous. Litestar's ``WebSocketTestSession``
+    is driven by a ``queue.Queue`` on a blocking portal and has no async
+    variant in 2.24 -- ``AsyncTestClient.websocket_connect`` hands back the
+    same synchronous object -- so the driver for the new transport will be a
+    plain function. A contract that insisted on a coroutine would have to be
+    rewritten the moment it met the primitive it exists to drive.
+    """
+
+    def __call__(self, scenario: "Scenario") -> Union[Result, Awaitable[Result]]: ...
+
+
 __all__ = [
     "AskState",
+    "Driver",
     "Given",
     "Incoming",
     "Result",

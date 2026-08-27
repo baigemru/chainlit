@@ -82,7 +82,7 @@ class ElementRecord(
     mime: Union[str, UnsetType, None] = UNSET
 
 
-class StepRecord(Struct, rename="camel", omit_defaults=True, kw_only=True):
+class StepRecord(Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True):
     """A step, on the way in as well as on the way out.
 
     Every field but the three NOT NULL columns defaults to ``UNSET``: a
@@ -142,7 +142,9 @@ class ThreadDetail(ThreadRecord, rename="camel", omit_defaults=True, kw_only=Tru
     elements: List[ElementRecord] = []
 
 
-class ThreadPatch(Struct, rename="camel", omit_defaults=True, kw_only=True):
+class ThreadPatch(
+    Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True
+):
     """A partial thread write.
 
     ``metadata`` is merged, not replaced: a key mapped to ``None`` deletes it,

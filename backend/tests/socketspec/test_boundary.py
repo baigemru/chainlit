@@ -35,6 +35,13 @@ print(",".join(leaked))
 """
 
 
+def _source_of(module: str) -> str:
+    """The text of a module in this package, whether file or package."""
+    base = PACKAGE / Path(*module.split("."))
+    path = base.with_suffix(".py")
+    return (path if path.exists() else base / "__init__.py").read_text()
+
+
 def _imports_of(module: str) -> set[str]:
     result = subprocess.run(
         [sys.executable, "-c", PROBE.format(module=module)],
@@ -64,3 +71,56 @@ def test_the_table_never_imports_chainlit():
 def test_the_driver_is_the_one_that_knows():
     """The boundary is only meaningful if something is actually on the far side."""
     assert "chainlit.socket" in _imports_of("tests.socketspec.legacy")
+
+
+def test_no_transport_event_name_leaks_into_the_table():
+    """An import is not the only way to depend on a transport.
+
+    A socket.io event name is a string literal, so the import probe above
+    cannot see it -- and the translation tables sat inside a module that
+    probe certified as portable until an audit noticed. Names that happen to
+    be protocol vocabulary too are excluded -- ``toast`` and ``reload`` as
+    message tags, ``action`` and ``element`` as ask-spec kinds. Those are not
+    a dependency; they are the same word in both vocabularies.
+    """
+    from typing import get_args
+
+    import msgspec
+
+    from chainlit.protocol import payloads
+    from chainlit.protocol.client import ClientMsg
+    from chainlit.protocol.server import ServerMsg
+
+    from . import legacy
+
+    tags = {branch.__struct_config__.tag for branch in get_args(ServerMsg)} | {
+        branch.__struct_config__.tag for branch in get_args(ClientMsg)
+    }
+    # Nested tags count as vocabulary too: an ask spec's kind is protocol,
+    # even where it is spelled like an old event name.
+    for name in dir(payloads):
+        candidate = getattr(payloads, name)
+        if isinstance(candidate, type) and issubclass(candidate, msgspec.Struct):
+            tag = candidate.__struct_config__.tag
+            if isinstance(tag, str):
+                tags.add(tag)
+    legacy_only = (
+        set(legacy._RENAMES)
+        | set(legacy._WRAPPED)
+        | set(legacy._COLLAPSED)
+        | set(legacy._INBOUND_EVENTS)
+    ) - tags
+    assert legacy_only, "the guard is vacuous if every legacy name is also a tag"
+
+    for module in PORTABLE:
+        source = _source_of(module)
+        leaked = sorted(
+            name
+            for name in legacy_only
+            if f'"{name}"' in source or f"'{name}'" in source
+        )
+        assert not leaked, (
+            f"tests/socketspec/{module.replace('.', '/')}.py names the socket.io "
+            f"events {leaked}. Event names belong with the driver that speaks "
+            f"them; the table speaks protocol tags."
+        )

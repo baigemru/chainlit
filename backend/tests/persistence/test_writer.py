@@ -24,6 +24,7 @@ from chainlit.persistence.writer import (
     SaveStep,
     SessionWriter,
     Upload,
+    WriterRegistry,
     coalesce,
     drain_thread,
     merge_steps,
@@ -771,3 +772,52 @@ async def test_an_upload_landing_during_the_final_drain_still_writes_its_row(
     await writer.aclose(timeout=5.0)
 
     assert await uow.elements.fetch(thread_id, attachment.id) is not None
+
+
+# ------------------------------------------------------------------- registry
+
+
+async def test_shutdown_flushes_every_live_writer(
+    persistence: Persistence, uow: UnitOfWork
+):
+    """A process exiting with live writers must not lose what they buffered.
+
+    While the registry was a module global there was no place for this to
+    live, so it did not happen and nothing was positioned to notice.
+    """
+    registry = WriterRegistry()
+    first, second = new_id(), new_id()
+    left = Recorder(persistence, first, registry=registry).start()
+    right = Recorder(persistence, second, registry=registry).start()
+
+    kept_left = step(first, name="left")
+    kept_right = step(second, name="right")
+    left.submit(SaveStep(kept_left))
+    right.submit(SaveStep(kept_right))
+
+    await registry.aclose(timeout=5.0)
+
+    assert await uow.steps.fetch(kept_left.id) is not None
+    assert await uow.steps.fetch(kept_right.id) is not None
+    assert registry.live == ()
+
+
+async def test_registries_do_not_see_each_others_writers(
+    persistence: Persistence, thread_id: str, uow: UnitOfWork
+):
+    """Two applications in one process share a thread id but nothing else."""
+    mine, theirs = WriterRegistry(), WriterRegistry()
+    writer = Recorder(persistence, thread_id, registry=mine).start()
+    try:
+        assert mine.writers_for(thread_id) == (writer,)
+        assert theirs.writers_for(thread_id) == ()
+
+        record = step(thread_id, name="mine")
+        writer.submit(SaveStep(record))
+        await theirs.drain_thread(thread_id, timeout=5.0)
+        assert await uow.steps.fetch(record.id) is None
+
+        await mine.drain_thread(thread_id, timeout=5.0)
+        assert await uow.steps.fetch(record.id) is not None
+    finally:
+        await writer.aclose(timeout=5.0)

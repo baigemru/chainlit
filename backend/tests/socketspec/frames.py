@@ -1,18 +1,16 @@
 """The frame vocabulary, and how a socket.io emit translates into it.
 
-Outbound frames leave the current implementation through four channels --
-``emitter.emit``, ``emitter.clear``, ``emitter.send_timeout`` and
-``session.emit_ask`` -- plus a dozen emitter helpers that funnel into the
-first one in real code but are mocked out in tests. The ledger below is the
-single ordered list all of them append to. Separate recorders per channel
-could not express "the actions went out before the ask", which is an
-invariant the fork already relies on.
+A frame is a protocol tag and a payload; the ledger is the ordered list of
+them. Nothing here knows how a frame reached the wire, and in particular no
+socket.io event name appears -- those live with the driver that speaks them,
+because a name is as much of a transport dependency as an import is, and the
+boundary test cannot see a string literal.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Sequence
 
 MISSING = object()
 
@@ -118,91 +116,9 @@ class Ledger:
         return None
 
 
-# --------------------------------------------------------------------------
-# socket.io event -> protocol tag
-# --------------------------------------------------------------------------
-
-# Straight renames: the payload travels as-is under the new tag.
-_RENAMES: Dict[str, str] = {
-    "resume_thread": "thread.resume",
-    "resume_thread_error": "thread.resume_error",
-    "first_interaction": "thread.first_interaction",
-    "parent_thread": "thread.parent",
-    "open_thread": "thread.open",
-    "chat_profile_changed": "profile.changed",
-    "set_chat_profile": "session.handoff",
-    "audio_interrupt": "audio.interrupt",
-    "toast": "toast",
-    "reload": "reload",
-    "window_message": "window.message",
-    "call_fn": "rpc.call",
-}
-
-# The payload moves under a named key -- the old event shipped a bare value.
-_WRAPPED: Dict[str, Tuple[str, str]] = {
-    "new_message": ("step.upsert", "step"),
-    "update_message": ("step.update", "patch"),
-    "delete_message": ("step.delete", "step"),
-    "stream_start": ("step.stream.start", "step"),
-    "stream_token": ("step.stream.token", "token"),
-    "element": ("element.upsert", "element"),
-    "remove_element": ("element.remove", "element"),
-    "action": ("action.add", "action"),
-    "remove_action": ("action.remove", "action"),
-    "ask": ("ask.start", "ask"),
-    "chat_settings": ("settings.set", "inputs"),
-    "set_commands": ("commands.set", "commands"),
-    "set_modes": ("modes.set", "modes"),
-    "set_favorites": ("favorites.set", "steps"),
-    "token_usage": ("token.usage", "count"),
-    "audio_connection": ("audio.connection", "state"),
-}
-
-# Collapsed pairs. The reason is only knowable for the timeout half: the
-# legacy `clear_ask` / `clear_call_fn` carry no reason at all, so the table
-# must not pin one on them. Phase 5 tightens this, it cannot be tightened here
-# without inventing information the current wire does not carry.
-_COLLAPSED: Dict[str, Tuple[str, Dict[str, Any]]] = {
-    "ask_timeout": ("ask.end", {"reason": "timeout"}),
-    "clear_ask": ("ask.end", {}),
-    "call_fn_timeout": ("rpc.cancel", {"reason": "timeout"}),
-    "clear_call_fn": ("rpc.cancel", {}),
-    "task_start": ("task.indicator", {"running": True}),
-    "task_end": ("task.indicator", {"running": False}),
-}
-
-
-def translate(event: str, payload: Any = None) -> Tuple[str, Dict[str, Any]]:
-    """Turn one socket.io event into its protocol tag and payload."""
-    if event in _COLLAPSED:
-        tag, extra = _COLLAPSED[event]
-        return tag, dict(extra)
-    if event in _RENAMES:
-        return _RENAMES[event], _as_payload(payload)
-    if event in _WRAPPED:
-        tag, key = _WRAPPED[event]
-        return tag, {key: payload}
-    raise KeyError(
-        f"No protocol tag for socket.io event {event!r}. Add it to "
-        f"tests/socketspec/frames.py -- an unmapped event would otherwise "
-        f"vanish from the ledger and the scenario would pass by silence."
-    )
-
-
-def _as_payload(payload: Any) -> Dict[str, Any]:
-    return dict(payload) if isinstance(payload, Mapping) else {"value": payload}
-
-
-def ask_start(payload: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    """``emit_ask({"msg": ..., "spec": ...})`` under the new field names."""
-    return "ask.start", {"step": payload.get("msg"), "spec": payload.get("spec")}
-
-
 __all__ = [
     "Effect",
     "Expect",
     "Frame",
     "Ledger",
-    "ask_start",
-    "translate",
 ]

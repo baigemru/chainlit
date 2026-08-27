@@ -4,15 +4,15 @@ One driver today. The second arrives with the new transport, is added to
 ``DRIVERS``, and the table does not change -- which is the point.
 """
 
-from typing import Any, Callable
+import inspect
 
 import pytest
 
 from . import legacy
 from .cases import SCENARIOS
-from .spec import Scenario
+from .spec import Result, Scenario
 
-DRIVERS = {"socketio": legacy.run}
+DRIVERS = {"socketio": legacy.build}
 
 
 def _ids(scenario: Scenario) -> str:
@@ -22,9 +22,11 @@ def _ids(scenario: Scenario) -> str:
 @pytest.mark.parametrize("driver_name", sorted(DRIVERS))
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=_ids)
 async def test_scenario(
-    scenario: Scenario, driver_name: str, mock_session_factory: Callable[..., Any]
+    scenario: Scenario, driver_name: str, request: pytest.FixtureRequest
 ) -> None:
-    result = await DRIVERS[driver_name](scenario, mock_session_factory)
+    drive = DRIVERS[driver_name](request)
+    outcome = drive(scenario)
+    result: Result = await outcome if inspect.isawaitable(outcome) else outcome
 
     unmatched = result.ledger.find_in_order(scenario.expect)
     assert unmatched is None, (

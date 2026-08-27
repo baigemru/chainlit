@@ -235,9 +235,13 @@ async def make_thread(
     from chainlit.persistence.records import ThreadPatch
 
     thread_id = thread_id or new_id()
-    patch = ThreadPatch(name=name, user_id=user_id)
-    if metadata is not None:
-        patch.metadata = metadata
+    # Built in one go rather than assigned into: the record is frozen, and
+    # "not provided" is a distinct value from "provided as empty".
+    patch = (
+        ThreadPatch(name=name, user_id=user_id)
+        if metadata is None
+        else ThreadPatch(name=name, user_id=user_id, metadata=metadata)
+    )
     await uow.threads.patch(thread_id, patch)
     if clear_updated_at:
         updated_at = None

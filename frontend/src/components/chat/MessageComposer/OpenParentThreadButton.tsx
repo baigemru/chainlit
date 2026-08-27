@@ -17,15 +17,22 @@ import { useParentThreadId } from '@/hooks/useParentThread';
 
 import { openThreadRequestState } from '@/state/chat';
 
+interface Props {
+  disabled?: boolean;
+}
+
 /**
  * Returns to the thread the current chat was spawned from by a profile
  * switch. Only rendered when the parent is known, so in a chat without one
  * (and in the copilot widget, where nothing ever learns a parent) it does
- * not exist. Never disabled while visible: like `set_chat_profile`, the
- * return may interrupt a running generation. The click stays router-free —
- * ThreadReturnListener picks the request up and performs the navigation.
+ * not exist. Gated by the same `disabled` the composer hands its settings
+ * button, so the return is unavailable exactly while the composer itself is:
+ * a generation in flight, a lost connection, or an ask that owns the whole
+ * input (file, action, element) rather than the text field. The click stays
+ * router-free — ThreadReturnListener picks the request up and performs the
+ * navigation.
  */
-export default function OpenParentThreadButton() {
+export default function OpenParentThreadButton({ disabled = false }: Props) {
   const parentThreadId = useParentThreadId();
   const setRequest = useSetRecoilState(openThreadRequestState);
   const { t } = useTranslation();
@@ -39,6 +46,7 @@ export default function OpenParentThreadButton() {
           <Button
             id="open-parent-thread"
             data-test="open-parent-thread"
+            disabled={disabled}
             onClick={() =>
               setRequest({
                 threadId: parentThreadId,

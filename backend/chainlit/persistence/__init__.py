@@ -12,6 +12,8 @@ The package is layered bottom-up:
     advanced_alchemy plumbing, and the record↔model conversion on top of it.
 ``config``
     the engine, the alembic hookup and the unit of work.
+``writer``
+    the ordered per-session writer everything above is driven through.
 
 Nothing here imports from ``chainlit.data``: the two live side by side until
 the rebuild lands.
@@ -62,11 +64,23 @@ from chainlit.persistence.services import (
     ThreadService,
     UserService,
 )
+from chainlit.persistence.writer import (
+    DeleteElement,
+    DeleteStep,
+    Op,
+    PatchThread,
+    SaveElement,
+    SaveStep,
+    SessionWriter,
+    drain_thread,
+)
 
 __all__ = [
     "MIGRATIONS_PATH",
     "SCHEMA_NAME",
     "Base",
+    "DeleteElement",
+    "DeleteStep",
     "Element",
     "ElementRecord",
     "ElementRepository",
@@ -76,9 +90,14 @@ __all__ = [
     "FeedbackRepository",
     "FeedbackService",
     "ISOTimestamp",
+    "Op",
     "PageCursor",
     "PageInfoRecord",
+    "PatchThread",
     "Persistence",
+    "SaveElement",
+    "SaveStep",
+    "SessionWriter",
     "Step",
     "StepRecord",
     "StepRepository",
@@ -97,6 +116,7 @@ __all__ = [
     "UserRepository",
     "UserService",
     "alembic_config",
+    "drain_thread",
     "sqlalchemy_config",
     "upgrade_database",
 ]

@@ -61,6 +61,22 @@ class TranscriptStep:
 
 
 @dataclass(frozen=True)
+class Handover:
+    """A message parked by the session that handed this one its id.
+
+    A profile switch mints the successor's id server-side and parks the
+    message under it, so the value never travels through the browser. The
+    record carries the previous thread's id even when there is no message at
+    all -- that is how the new thread learns what it descends from.
+    """
+
+    message: Optional[str] = None
+    parent: Optional[str] = None
+    foreign: bool = False
+    """Parked by a different user. Must not be delivered to this one."""
+
+
+@dataclass(frozen=True)
 class Given:
     """The state of the conversation before the frames arrive."""
 
@@ -87,6 +103,22 @@ class Given:
 
     transcript: Tuple[TranscriptStep, ...] = ()
     """The conversation the server already holds."""
+
+    hooks: Tuple[Literal["chat_start", "chat_resume", "thread_ready"], ...] = ()
+    """Which callbacks the running application registered.
+
+    Application state, not transport state: the same app runs on either
+    transport, and several handshake branches exist only because a hook is
+    registered. A hook is not a frame -- what a scenario asserts about one is
+    how many times it ran and what it could see when it did, both reported
+    through ``Result.state``.
+    """
+
+    chat_profile: Optional[str] = None
+    """The profile this session runs under, if any."""
+
+    handover: Optional[Handover] = None
+    """A record parked for this session by the one it succeeds."""
 
     stored_thread: Optional[Mapping[str, Any]] = None
     """What persistence has for this thread, if persistence is configured.
@@ -157,6 +189,15 @@ class Scenario:
     row is in the table at all, for whoever reads a failure."""
 
 
+def assert_that(condition: object, message: str) -> bool:
+    """Assert inside a lambda: a scenario's ``then`` is data, not a function body.
+
+    Returns a value so several of them compose into one tuple expression.
+    """
+    assert condition, message
+    return True
+
+
 class Driver(Protocol):
     """Runs one scenario against one implementation and reports what happened.
 
@@ -175,8 +216,10 @@ __all__ = [
     "AskState",
     "Driver",
     "Given",
+    "Handover",
     "Incoming",
     "Result",
     "Scenario",
     "TranscriptStep",
+    "assert_that",
 ]

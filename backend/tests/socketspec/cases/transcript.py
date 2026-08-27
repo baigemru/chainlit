@@ -13,7 +13,15 @@ sure it arrived".
 from typing import Optional
 
 from ..frames import Expect
-from ..spec import AskState, Given, Incoming, Result, Scenario, TranscriptStep
+from ..spec import (
+    AskState,
+    Given,
+    Incoming,
+    Result,
+    Scenario,
+    TranscriptStep,
+    assert_that,
+)
 
 HELLO = Incoming("hello")
 
@@ -114,7 +122,7 @@ TRANSCRIPT_SCENARIOS = (
         ),
         when=(HELLO,),
         expect=(Expect("element.upsert", {"element.id": "el-1"}),),
-        then=lambda result: _assert(
+        then=lambda result: assert_that(
             _count(result, "element.upsert", "element.id", "el-1") == 1,
             "the same attachment went out twice",
         ),
@@ -135,8 +143,3 @@ TRANSCRIPT_SCENARIOS = (
         ),
     ),
 )
-
-
-def _assert(condition: object, message: str) -> bool:
-    assert condition, message
-    return True

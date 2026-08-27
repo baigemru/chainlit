@@ -13,7 +13,7 @@ including the machinery steps the user never sees.
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from ..frames import Expect
-from ..spec import Given, Incoming, Result, Scenario
+from ..spec import Given, Incoming, Result, Scenario, assert_that
 
 HELLO = Incoming("hello")
 
@@ -69,7 +69,7 @@ RESYNC_SCENARIOS = (
         given=_restored(stored_thread=_thread(steps=(MESSAGE, MACHINERY))),
         when=(HELLO,),
         expect=(Expect("step.upsert", {"step.id": "m1"}),),
-        then=lambda result: _assert(
+        then=lambda result: assert_that(
             _count(result, "step.upsert", "step.id", "s1") == 0,
             "a machinery step was replayed into the conversation",
         ),
@@ -96,7 +96,7 @@ RESYNC_SCENARIOS = (
             stored_thread=_thread(steps=(MESSAGE,), elements=(FOREIGN_ATTACHMENT,))
         ),
         when=(HELLO,),
-        then=lambda result: _assert(
+        then=lambda result: assert_that(
             _count(result, "element.upsert", "element.id", "el-2") == 0,
             "an orphan attachment was replayed",
         ),
@@ -137,8 +137,3 @@ RESYNC_SCENARIOS = (
 
 def _count(result: Result, tag: str, path: str, value: object) -> int:
     return result.ledger.count(Expect(tag, {path: value}))
-
-
-def _assert(condition: object, message: str) -> bool:
-    assert condition, message
-    return True

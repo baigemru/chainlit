@@ -12,15 +12,27 @@ import sys
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent
-PORTABLE = (
-    "frames",
-    "spec",
-    "cases",
-    "cases.ask",
-    "cases.transcript",
-    "cases.orphans",
-    "cases.resync",
-)
+
+# Not a hand-written list: a case module added later would silently sit
+# outside a guard that exists precisely to catch what gets added later.
+NOT_PORTABLE = {"legacy", "__init__"}
+
+
+def _portable() -> tuple[str, ...]:
+    modules = [
+        path.stem
+        for path in sorted(PACKAGE.glob("*.py"))
+        if path.stem not in NOT_PORTABLE and not path.stem.startswith("test_")
+    ]
+    modules += ["cases"] + [
+        f"cases.{path.stem}"
+        for path in sorted((PACKAGE / "cases").glob("*.py"))
+        if path.stem != "__init__"
+    ]
+    return tuple(modules)
+
+
+PORTABLE = _portable()
 
 PROBE = """
 import sys

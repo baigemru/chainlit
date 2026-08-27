@@ -15,7 +15,7 @@ established, restated so the next transport has to satisfy it too.
 from typing import Optional
 
 from ..frames import Expect
-from ..spec import AskState, Given, Incoming, Scenario
+from ..spec import AskState, Given, Incoming, Scenario, assert_that
 
 ACTION = {"id": "a1", "name": "continue", "forId": "step-1"}
 ELEMENT = {"id": "el-1", "forId": "step-1"}
@@ -180,12 +180,12 @@ ASK_SCENARIOS = (
         given=Given(pending_ask=AskState()),
         when=(Incoming("ask.reply", {"stepId": "step-1", "value": {"name": "go"}}),),
         then=lambda result: (
-            _assert(result.state["ask_resolved"], "the ask was not resolved"),
-            _assert(
+            assert_that(result.state["ask_resolved"], "the ask was not resolved"),
+            assert_that(
                 result.state["ask_answer"] == {"name": "go"},
                 "the answer did not reach the waiter",
             ),
-            _assert(
+            assert_that(
                 result.state["last_resolved_ask_step_id"] == "step-1",
                 "the resolved step was not recorded",
             ),
@@ -199,7 +199,7 @@ ASK_SCENARIOS = (
         ),
         given=Given(pending_ask=AskState()),
         when=(Incoming("ask.reply", {"stepId": "other-step", "value": "x"}),),
-        then=lambda result: _assert(
+        then=lambda result: assert_that(
             not result.state["ask_resolved"], "a stale reply resolved a live ask"
         ),
     ),
@@ -211,7 +211,7 @@ ASK_SCENARIOS = (
         ),
         given=Given(pending_ask=AskState(answered=True)),
         when=(Incoming("ask.reply", {"stepId": "step-1", "value": "second"}),),
-        then=lambda result: _assert(
+        then=lambda result: assert_that(
             result.state["ask_answer"] == "already answered",
             "a duplicate reply overwrote the answer",
         ),
@@ -221,7 +221,7 @@ ASK_SCENARIOS = (
         why="A malformed frame must not take the connection down.",
         given=Given(pending_ask=AskState()),
         when=(Incoming("ask.reply", {}),),
-        then=lambda result: _assert(
+        then=lambda result: assert_that(
             not result.state["ask_resolved"], "an empty reply resolved the ask"
         ),
     ),
@@ -236,17 +236,11 @@ ASK_SCENARIOS = (
         when=(Incoming("stop"),),
         expect=(Expect("ask.end"),),
         then=lambda result: (
-            _assert(result.state["ask_cancelled"], "stop did not cancel the ask"),
-            _assert(
+            assert_that(result.state["ask_cancelled"], "stop did not cancel the ask"),
+            assert_that(
                 not result.state["ask_pending"],
                 "stop left the ask slot occupied, so a follow-up ask would be refused",
             ),
         ),
     ),
 )
-
-
-def _assert(condition: object, message: str) -> bool:
-    """Assert inside a lambda: a scenario's ``then`` is data, not a function body."""
-    assert condition, message
-    return True

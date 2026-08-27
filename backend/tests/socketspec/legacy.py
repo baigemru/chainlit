@@ -24,6 +24,7 @@ import time
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
 from unittest.mock import AsyncMock, Mock, patch
 
+import chainlit.transit as transit
 from chainlit.session import PendingAsk, WebsocketSession
 from chainlit.socket import (
     ask_reply as _ask_reply,
@@ -232,6 +233,7 @@ def _session(factory: Callable[..., Mock], given: Given, ledger: Ledger) -> Mock
         has_first_interaction=given.has_first_interaction,
         parent_thread_id=given.parent_thread,
         last_resolved_ask_step_id=given.last_resolved_ask_step_id,
+        chat_profile=given.chat_profile,
     )
     session.restored = given.restored
     session.chat_started = given.chat_started
@@ -305,6 +307,16 @@ def _interrupt(session: Mock, given: Given) -> Optional[Callable[[str], None]]:
     return interrupt
 
 
+def _registry(session: Mock) -> Dict[str, Mock]:
+    """The live-session registry, holding this scenario's session and no other.
+
+    Superseding walks it directly. Left unpatched, a session another test
+    forgot to close would make a scenario about eviction pass -- or fail --
+    for a reason no row states.
+    """
+    return {session.id: session}
+
+
 def _data_layer(given: Given) -> Optional[Mock]:
     """Persistence holding exactly what the scenario says it holds.
 
@@ -319,16 +331,70 @@ def _data_layer(given: Given) -> Optional[Mock]:
     return layer
 
 
-def _config() -> Mock:
+# The application callbacks a scenario can say are registered. Several
+# handshake branches exist only because one of these is not None, so "no app
+# is running" is a state the table has to be able to leave.
+_HOOK_NAMES = ("chat_start", "chat_resume", "thread_ready")
+
+
+class Hooks:
+    """The application, reduced to what a scenario can assert about it.
+
+    A hook is not a frame, so it is recorded twice over: as a count, and as
+    what the callback could *see* from inside itself. The second is the point
+    -- ``on_chat_start`` reading the handover out of ``cl.user_session`` is
+    the entire reason the handover is applied before the task is scheduled,
+    and no assertion made from outside the callback can tell that ordering
+    from the reverse one.
+    """
+
+    def __init__(self, session: Mock, sessions: Dict[str, Any], ledger: Ledger) -> None:
+        self._session = session
+        self._sessions = sessions
+        self._ledger = ledger
+        self.runs: Dict[str, int] = {}
+        self.saw: Dict[str, Any] = {}
+
+    def build(self, name: str) -> Callable[..., Awaitable[None]]:
+        async def hook(*args: Any) -> None:
+            self.runs[name] = self.runs.get(name, 0) + 1
+            self._ledger.effect(f"hook:{name}")
+            stored = self._sessions.get(self._session.id) or {}
+            self.saw[f"{name}_saw_handover"] = stored.get("transit_message")
+            if args:
+                self.saw[f"{name}_thread"] = args[0]
+
+        return hook
+
+
+def _config(given: Given, hooks: Hooks) -> Mock:
     config = Mock()
-    config.code.on_chat_start = None
-    config.code.on_chat_resume = None
-    config.code.on_thread_ready = None
+    for name in _HOOK_NAMES:
+        registered = hooks.build(name) if name in given.hooks else None
+        setattr(config.code, f"on_{name}", registered)
     config.code.on_profile_start = None
     config.code.on_stop = None
     config.code.on_message = None
     config.features.hot_swap_chat_profile = False
     return config
+
+
+async def _settle_hook_tasks(session: Mock) -> None:
+    """Let the callbacks the handshake scheduled actually run.
+
+    They are launched with ``create_task`` and never awaited by the handler,
+    so a report read the moment it returns would be taken before the
+    application did anything -- and the pending task would then surface as a
+    warning inside whichever test ran next.
+    """
+    tasks = [
+        task
+        for name in ("current_task", "thread_ready_task", "profile_start_task")
+        for task in (getattr(session, name, None),)
+        if isinstance(task, asyncio.Task)
+    ]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _hello(_session: Mock, _payload: Mapping[str, Any]) -> None:
@@ -400,7 +466,13 @@ def _message_factory(ledger: Ledger) -> Callable[..., Mock]:
     return build
 
 
-def _report(session: Mock, pending: Optional[PendingAsk]) -> Dict[str, Any]:
+def _report(
+    session: Mock,
+    pending: Optional[PendingAsk],
+    hooks: Hooks,
+    sessions: Dict[str, Any],
+    owner: Optional[str],
+) -> Dict[str, Any]:
     """Protocol-level facts, read off wherever this implementation keeps them.
 
     ``pending`` is the object the scenario started with, not the session's
@@ -413,10 +485,39 @@ def _report(session: Mock, pending: Optional[PendingAsk]) -> Dict[str, Any]:
         "ask_resolved": bool(pending and pending.future.done()),
         "ask_cancelled": bool(pending and pending.future.cancelled()),
         "last_resolved_ask_step_id": session.last_resolved_ask_step_id,
+        "has_first_interaction": session.has_first_interaction,
+        "parent_thread_id": session.parent_thread_id,
+        "hook_runs": dict(hooks.runs),
+        # Read, not observed: a record still parked is the *absence* of a
+        # frame, and no ledger can show that.
+        "handover_parked": transit.pop(session.id, owner) is not transit.NO_TRANSIT,
+        "handover_delivered": (sessions.get(session.id) or {}).get("transit_message"),
     }
+    state.update(hooks.saw)
     if pending is not None and pending.future.done() and not pending.future.cancelled():
         state["ask_answer"] = pending.future.result()
     return state
+
+
+def _park_handover(session: Mock, given: Given, owner: Optional[str]) -> None:
+    """Put the scenario's handover into the real transit store.
+
+    The real one, not a stand-in: the ownership check and the "a record may
+    carry a parent and no message" shape are the behaviour under test, and a
+    fake would only prove the fake agrees with the scenario. Cleared either
+    way -- an unclaimed record from a previous test is exactly the leak
+    ``pop`` exists to make impossible, so the spec must not depend on one
+    being absent by luck.
+    """
+    transit.clear()
+    if given.handover is None:
+        return
+    transit.store(
+        session.id,
+        given.handover.message,
+        "someone-else" if given.handover.foreign else owner,
+        given.handover.parent,
+    )
 
 
 async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Result:
@@ -424,38 +525,56 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
     ledger = Ledger()
     session = _session(session_factory, scenario.given, ledger)
     pending: Optional[PendingAsk] = session.pending_ask
+    owner = session.user.identifier if session.user else None
+
+    # Everything here is a module global the previous test may have written
+    # to. Each is replaced whether or not the scenario mentions it: a spec
+    # whose world depends on test ordering is not a spec.
+    sessions: Dict[str, Any] = {}
+    hooks = Hooks(session, sessions, ledger)
+    _park_handover(session, scenario.given, owner)
 
     context = Mock()
     context.session = session
     context.emitter = RecordingEmitter(ledger, _interrupt(session, scenario.given))
 
-    with (
-        patch("chainlit.socket.init_ws_context", return_value=context),
-        patch("chainlit.socket.config", _config()),
-        patch.object(WebsocketSession, "get", return_value=session),
-        patch("chainlit.socket.Message", side_effect=_message_factory(ledger)),
-        patch("chainlit.socket.chat_context", _transcript(scenario.given)),
-        patch(
-            "chainlit.socket.get_data_layer",
-            return_value=_data_layer(scenario.given),
-        ),
-    ):
-        for frame in scenario.when:
-            handler = HANDLERS.get(frame.tag)
-            if handler is None:
-                raise KeyError(
-                    f"The legacy driver has no handler for inbound {frame.tag!r}."
-                )
-            await handler(session, frame.payload)
+    try:
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.config", _config(scenario.given, hooks)),
+            patch.object(WebsocketSession, "get", return_value=session),
+            patch("chainlit.socket.Message", side_effect=_message_factory(ledger)),
+            patch("chainlit.socket.chat_context", _transcript(scenario.given)),
+            patch("chainlit.socket.user_sessions", sessions),
+            patch("chainlit.socket.wait_for_persist", AsyncMock()),
+            patch("chainlit.session.ws_sessions_id", _registry(session)),
+            patch(
+                "chainlit.socket.get_data_layer",
+                return_value=_data_layer(scenario.given),
+            ),
+        ):
+            for frame in scenario.when:
+                handler = HANDLERS.get(frame.tag)
+                if handler is None:
+                    raise KeyError(
+                        f"The legacy driver has no handler for inbound {frame.tag!r}."
+                    )
+                await handler(session, frame.payload)
 
-        # Rescuing an orphaned reply is a background task parked on the
-        # handshake gate. A ledger read before it finishes would be missing
-        # the frames the scenario is about.
-        parked = list(getattr(session, "deferred_ask_reply_tasks", ()) or ())
-        if parked:
-            await asyncio.gather(*parked, return_exceptions=True)
+            # Rescuing an orphaned reply is a background task parked on the
+            # handshake gate. A ledger read before it finishes would be missing
+            # the frames the scenario is about.
+            parked = list(getattr(session, "deferred_ask_reply_tasks", ()) or ())
+            if parked:
+                await asyncio.gather(*parked, return_exceptions=True)
 
-    return Result(ledger=ledger, state=_report(session, pending))
+            await _settle_hook_tasks(session)
+
+        return Result(
+            ledger=ledger, state=_report(session, pending, hooks, sessions, owner)
+        )
+    finally:
+        transit.clear()
 
 
 def build(request: Any) -> Driver:

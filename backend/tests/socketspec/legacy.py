@@ -111,6 +111,12 @@ class RecordingEmitter:
         return record
 
 
+def _element(payload: Mapping[str, Any]) -> Mock:
+    element = Mock()
+    element.to_dict = Mock(return_value=dict(payload))
+    return element
+
+
 def _pending_ask(state: AskState) -> PendingAsk:
     """Build the real PendingAsk a scenario's AskState describes."""
     loop = asyncio.get_event_loop()
@@ -147,6 +153,11 @@ def _session(factory: Callable[..., Mock], given: Given, ledger: Ledger) -> Mock
     session.fresh_page_load = given.fresh_page_load
     session.thread_id_to_resume = given.resuming_thread
     session.current_task = Mock() if given.running_task else None
+    session.transcript_element_dicts = {
+        step.id: [dict(element) for element in step.stored_elements]
+        for step in given.transcript
+        if step.stored_elements
+    }
     if given.running_task:
         session.current_task.done = Mock(return_value=False)
 
@@ -176,10 +187,10 @@ def _transcript(given: Given) -> Mock:
     messages = []
     for step in given.transcript:
         message = Mock()
-        message.id = step.get("id")
-        message.to_dict = Mock(return_value=dict(step))
-        message.elements = []
-        message._active_wait_payload = step.get("wait")
+        message.id = step.id
+        message.to_dict = Mock(return_value={"id": step.id, "output": step.output})
+        message.elements = [_element(element) for element in step.elements]
+        message._active_wait_payload = dict(step.wait) if step.wait else None
         messages.append(message)
 
     context = Mock()

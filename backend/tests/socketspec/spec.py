@@ -33,6 +33,23 @@ class AskState:
 
 
 @dataclass(frozen=True)
+class TranscriptStep:
+    """One message the server already holds for this conversation.
+
+    ``elements`` are attachments the server still has as live objects;
+    ``stored_elements`` are the dicts recorded when the conversation was
+    rebuilt from storage, where the live objects no longer exist. Both end up
+    on the wire, and an attachment present in both must not go out twice.
+    """
+
+    id: str
+    output: str = ""
+    wait: Optional[Mapping[str, Any]] = None
+    elements: Tuple[Mapping[str, Any], ...] = ()
+    stored_elements: Tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class Given:
     """The state of the conversation before the frames arrive."""
 
@@ -57,8 +74,8 @@ class Given:
 
     last_resolved_ask_step_id: Optional[str] = None
 
-    transcript: Tuple[Mapping[str, Any], ...] = ()
-    """The conversation the server already holds, as step payloads."""
+    transcript: Tuple[TranscriptStep, ...] = ()
+    """The conversation the server already holds."""
 
     during_restore: Optional[Literal["answer", "successor", "successor_dead"]] = None
     """Something that happens while the form is being rebuilt.
@@ -121,4 +138,11 @@ class Scenario:
     row is in the table at all, for whoever reads a failure."""
 
 
-__all__ = ["AskState", "Given", "Incoming", "Result", "Scenario"]
+__all__ = [
+    "AskState",
+    "Given",
+    "Incoming",
+    "Result",
+    "Scenario",
+    "TranscriptStep",
+]

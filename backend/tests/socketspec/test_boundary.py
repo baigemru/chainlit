@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent
-PORTABLE = ("frames", "spec", "cases", "cases.ask")
+PORTABLE = ("frames", "spec", "cases", "cases.ask", "cases.transcript")
 
 PROBE = """
 import sys

@@ -9,18 +9,23 @@ machine-specific, ratios are not.
 
 Today's step payload, encoded per streamed message and per element.
 
-| operation                      |        ops/sec |    µs/op |
-| ------------------------------ | -------------: | -------: |
-| stdlib `json.dumps(dict)`      |        475,153 |     2.10 |
-| pydantic `model_dump_json`     |        552,905 |     1.81 |
-| **msgspec encode**             |  **3,394,889** | **0.29** |
-| stdlib `json.loads`            |        382,681 |     2.61 |
-| pydantic `model_validate_json` |        311,392 |     3.21 |
-| **msgspec decode**             |    **599,659** | **1.67** |
-| pydantic construct             |        857,625 |     1.17 |
-| **msgspec construct**          | **12,704,801** | **0.08** |
+| operation                      |       ops/sec |    µs/op |
+| ------------------------------ | ------------: | -------: |
+| stdlib `json.dumps(dict)`      |       475,153 |     2.10 |
+| pydantic `model_dump_json`     |       552,905 |     1.81 |
+| **msgspec encode**             | **3,566,970** | **0.28** |
+| stdlib `json.loads`            |       389,818 |     2.57 |
+| pydantic `model_validate_json` |       311,607 |     3.21 |
+| **msgspec decode**             |   **614,060** | **1.63** |
+| pydantic construct             |       871,661 |     1.15 |
+| **msgspec construct**          | **3,397,701** | **0.29** |
 
-encode **6.1x**, decode **1.9x**, construct **14.8x**.
+encode **6.7x**, decode **2.0x**, construct **3.9x**.
+
+An earlier revision of this file claimed 14.8x on construct. That number was
+wrong: it built a 20-field pydantic model against a 3-field msgspec struct.
+Both rows now build all 20 fields. The encode and decode rows were always a
+like-for-like comparison of the same object and the same payload.
 
 Wire size for the same step: **1620 -> 731 bytes**. The halving is `omit_defaults`:
 today every `null` and `false` of ~20 optional step fields is serialized and sent.

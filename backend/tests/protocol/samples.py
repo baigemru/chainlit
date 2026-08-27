@@ -21,6 +21,7 @@ from chainlit.protocol.payloads import (
     Mode,
     ModeOption,
     Step,
+    StepPatch,
     TextElement,
     Thread,
     Wait,
@@ -39,6 +40,15 @@ SAMPLE_STEP = Step(
     metadata={"favorite": True},
     feedback=Feedback(value=1, for_id="4d8f", comment="good"),
     wait=Wait(texts=["thinking", "still thinking"], interval_ms=3000, loop=True),
+)
+
+# A patch is deliberately *not* a full step: it sets a couple of fields,
+# turns one boolean explicitly off, and stays silent about everything else.
+SAMPLE_STEP_PATCH = StepPatch(
+    id=SAMPLE_STEP.id,
+    output="hello there",
+    streaming=False,
+    wait=None,
 )
 
 SAMPLE_ACTION = Action(
@@ -79,7 +89,7 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
     "hb": s.Heartbeat(seq=7),
     "reload": s.Reload(),
     "step.upsert": s.StepUpsert(step=SAMPLE_STEP),
-    "step.update": s.StepUpdate(step=SAMPLE_STEP),
+    "step.update": s.StepUpdate(step=SAMPLE_STEP_PATCH),
     "step.delete": s.StepDelete(step_id=SAMPLE_STEP.id),
     "step.stream.start": s.StepStreamStart(step=SAMPLE_STEP),
     "step.stream.token": s.StepStreamToken(

@@ -9,6 +9,10 @@ Conventions
   side stays snake_case.
 * Every struct is ``omit_defaults=True`` — absent means "default", which
   keeps frames small and makes adding optional fields backward compatible.
+* A *patch* struct (``StepPatch``) is the one deviation: its fields default
+  to ``msgspec.UNSET``, so absent means "no opinion" and an explicitly
+  encoded ``false`` / ``""`` / ``null`` is an instruction to write that
+  value. A value default would make the two indistinguishable on the wire.
 * Unions are *tagged*. The tag field is spelled out explicitly on every
   branch so a decoder never has to guess, and so a payload belonging to a
   sibling branch is rejected instead of silently coerced.
@@ -19,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Literal, Union
 
 import msgspec
+from msgspec import UNSET, UnsetType
 
 __all__ = [
     "Action",
@@ -50,6 +55,7 @@ __all__ = [
     "PdfElement",
     "PlotlyElement",
     "Step",
+    "StepPatch",
     "StepType",
     "TasklistElement",
     "TextElement",
@@ -103,7 +109,9 @@ class Wait(msgspec.Struct, rename="camel", omit_defaults=True):
     """Transient "waiting" presentation for a step.
 
     Never persisted: it rides the wire on ``step.upsert`` / ``step.update``
-    only, and an update without it ends wait mode on the client.
+    only. On an upsert — a full statement of the step — its absence ends
+    wait mode. On a ``step.update`` the step is a ``StepPatch``, so absence
+    means "leave wait mode as it is" and an explicit ``wait: null`` ends it.
     """
 
     texts: list[str] = []
@@ -112,9 +120,17 @@ class Wait(msgspec.Struct, rename="camel", omit_defaults=True):
 
 
 class Feedback(msgspec.Struct, rename="camel", omit_defaults=True):
-    value: Literal[0, 1] = 0
+    """A thumbs up/down left on a step.
+
+    ``value`` and ``for_id`` are required, as they are on the legacy
+    ``types.Feedback`` dataclass, and deliberately have no defaults: ``0``
+    is a thumbs-*down*, so a default would make ``Feedback()`` a silent
+    negative rating of nothing at all.
+    """
+
+    value: Literal[0, 1]
+    for_id: str
     id: str | None = None
-    for_id: str | None = None
     thread_id: str | None = None
     comment: str | None = None
 
@@ -152,6 +168,50 @@ class Step(msgspec.Struct, rename="camel", omit_defaults=True):
     feedback: Feedback | None = None
     wait: Wait | None = None
     steps: list["Step"] | None = None
+
+
+class StepPatch(msgspec.Struct, rename="camel", omit_defaults=True):
+    """A partial update of a step already on the client — ``step.update``.
+
+    Every field but ``id`` defaults to ``UNSET`` and is therefore left out
+    of the frame entirely. That is the whole point: under ``omit_defaults``
+    a value default (``output=""``, ``streaming=False``) encodes to nothing
+    as well, so "stop streaming" and "no opinion about streaming" would
+    travel as the same bytes and the client could never be told to turn a
+    boolean off. An explicit ``False`` / ``""`` *is* encoded and means
+    "write this value"; for the nullable fields an explicit ``null`` means
+    "clear it".
+
+    Mirrors ``Step`` field for field except ``steps``: a patch of the child
+    list has no meaning — children arrive as their own upserts, and the
+    nested list only ever appears in a thread snapshot.
+    """
+
+    id: str
+    output: Union[str, UnsetType] = UNSET
+    name: Union[str, UnsetType] = UNSET
+    type: Union[StepType, UnsetType] = UNSET
+    thread_id: Union[str, UnsetType, None] = UNSET
+    parent_id: Union[str, UnsetType, None] = UNSET
+    input: Union[str, UnsetType] = UNSET
+    created_at: Union[str, UnsetType, None] = UNSET
+    start: Union[str, UnsetType, None] = UNSET
+    end: Union[str, UnsetType, None] = UNSET
+    is_error: Union[bool, UnsetType] = UNSET
+    streaming: Union[bool, UnsetType] = UNSET
+    wait_for_answer: Union[bool, UnsetType] = UNSET
+    show_input: Union[bool, str, UnsetType] = UNSET
+    default_open: Union[bool, UnsetType] = UNSET
+    auto_collapse: Union[bool, UnsetType] = UNSET
+    language: Union[str, UnsetType, None] = UNSET
+    icon: Union[str, UnsetType, None] = UNSET
+    command: Union[str, UnsetType, None] = UNSET
+    modes: Union[dict[str, str], UnsetType, None] = UNSET
+    tags: Union[list[str], UnsetType, None] = UNSET
+    metadata: Union[dict[str, Any], UnsetType, None] = UNSET
+    generation: Union[dict[str, Any], UnsetType, None] = UNSET
+    feedback: Union[Feedback, UnsetType, None] = UNSET
+    wait: Union[Wait, UnsetType, None] = UNSET
 
 
 # --------------------------------------------------------------------------

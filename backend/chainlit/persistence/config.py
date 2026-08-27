@@ -6,12 +6,16 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Type
 
 from advanced_alchemy.config import AlembicAsyncConfig, AsyncSessionConfig
-from advanced_alchemy.extensions.litestar import SQLAlchemyAsyncConfig
+
+# EngineConfig must come from the Litestar extension, not from
+# advanced_alchemy.config: they are two distinct classes with the same name,
+# and SQLAlchemyAsyncConfig here is the extension's one.
+from advanced_alchemy.extensions.litestar import EngineConfig, SQLAlchemyAsyncConfig
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from chainlit.persistence.models import SCHEMA_NAME
+from chainlit.persistence.models import SCHEMA_NAME, Base
 from chainlit.persistence.services import (
     ElementService,
     FeedbackService,
@@ -66,20 +70,35 @@ def sqlalchemy_config(
     """
     if (url is None) == (engine is None):
         raise ValueError("Pass exactly one of url or engine")
+    if engine is not None and engine_kwargs:
+        raise ValueError("Engine settings belong to the engine you passed in")
+
     return SQLAlchemyAsyncConfig(
         connection_string=url,
         engine_instance=engine,
+        # Engine settings go through EngineConfig. Spreading them into the
+        # SQLAlchemyAsyncConfig constructor instead raises TypeError on the
+        # first caller who passes one, which is what `pool_size` did.
+        engine_config=EngineConfig(**engine_kwargs)
+        if engine_kwargs
+        else EngineConfig(),
         session_config=AsyncSessionConfig(expire_on_commit=False),
+        # advanced_alchemy registers this against its bind key; without it the
+        # registry keeps its own empty MetaData and anything driving DDL or
+        # autogenerate through the config sees no tables at all.
+        metadata=Base.metadata,
         # The ORM never writes an `updated_at` column of its own here — the
         # thread service sets "updatedAt" explicitly, and the listener would
         # only go looking for a column that does not exist.
         enable_touch_updated_timestamp_listener=False,
+        # No model uses FileObject/StoredObject: element blobs live in
+        # `objectKey`/`url` as plain text, so the listener has nothing to do.
+        enable_file_object_listener=False,
         alembic_config=AlembicAsyncConfig(
             script_location=str(MIGRATIONS_PATH),
             version_table_name=VERSION_TABLE,
             version_table_schema=SCHEMA_NAME,
         ),
-        **engine_kwargs,
     )
 
 

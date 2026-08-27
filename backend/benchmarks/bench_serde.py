@@ -110,8 +110,10 @@ rows = [
     bench("msgspec decode->Struct", lambda: msg_dec.decode(raw), N),
     bench("pydantic construct", lambda: PydStep(**STEP), N),  # type: ignore[arg-type]
     bench(
+        # Same 20 fields as the pydantic row above. Constructing a 3-field
+        # struct against a 20-field model measures nothing.
         "msgspec Struct construct",
-        lambda: MsgStep(id=STEP["id"], name=STEP["name"], type=STEP["type"]),
+        lambda: msgspec.convert(STEP, MsgStep, strict=False),
         N,
     ),
 ]

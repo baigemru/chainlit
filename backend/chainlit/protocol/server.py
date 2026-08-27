@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal, Union, get_args
 
 import msgspec
+from msgspec import UNSET, UnsetType
 
 from chainlit.protocol.payloads import (
     Action,
@@ -20,6 +21,7 @@ from chainlit.protocol.payloads import (
     InputWidgetSpec,
     Mode,
     Step,
+    StepPatch,
     Thread,
     ToastType,
 )
@@ -132,15 +134,21 @@ class StepUpsert(_Msg, tag="step.upsert"):
 
 
 class StepUpdate(_Msg, tag="step.update"):
-    """Update an existing step in place.
+    """Merge a partial update into an existing step.
 
-    Kept separate from ``step.upsert`` on purpose: the client's merge
-    semantics differ. An upsert *creates* the step when the id is unknown;
-    an update addresses a step that must already exist, and its absence is
-    a no-op rather than a new bubble at the bottom of the feed.
+    Kept separate from ``step.upsert`` on purpose, and the payload is a
+    ``StepPatch`` rather than a ``Step`` for the same reason: the client's
+    merge semantics differ. An upsert *creates* the step when the id is
+    unknown and states the whole object, so its value defaults are the
+    value; an update addresses a step that must already exist, its absence
+    is a no-op rather than a new bubble at the bottom of the feed, and it
+    must be able to say "streaming is now false" without also restating —
+    or silently clearing — every field it does not mention. Only the fields
+    present in the frame are written; ``wait: null`` ends wait mode, an
+    absent ``wait`` leaves it alone.
     """
 
-    step: Step
+    step: StepPatch
 
 
 class StepDelete(_Msg, tag="step.delete"):
@@ -310,13 +318,19 @@ class SidebarSet(_Msg, tag="sidebar.set"):
 
     Collapses ``set_sidebar_title`` and ``set_sidebar_elements``, which the
     client had to reconcile into a single ``sideView`` atom — each event
-    reading the other's half out of the previous state. ``None`` for a
-    field means "leave it alone"; an empty element list closes the sidebar.
+    reading the other's half out of the previous state.
+
+    An *absent* field means "leave it alone"; an explicit ``null`` on
+    ``title`` or ``key`` clears it. The two are different instructions and
+    a ``None`` default could not express the second: ``omit_defaults``
+    would drop it from the frame, so the client could never be told to
+    clear a title it is already showing. ``elements`` has no null form —
+    an empty list already closes the sidebar.
     """
 
-    title: str | None = None
-    elements: list[Element] | None = None
-    key: str | None = None
+    title: Union[str, UnsetType, None] = UNSET
+    elements: Union[list[Element], UnsetType] = UNSET
+    key: Union[str, UnsetType, None] = UNSET
 
 
 # --------------------------------------------------------------------------

@@ -45,24 +45,35 @@ class ElementRecord(
 
     ``auto_play`` and ``player_config`` are part of the wire contract but were
     missing from the deployed schema; migration 0002 adds their columns.
+
+    Every field but the three the INSERT half of the upsert cannot be built
+    without defaults to ``UNSET``, exactly as ``StepRecord`` does: an element
+    is written incrementally — the blob is uploaded, then the url is attached
+    — and a ``None`` default would make each of those writes null every column
+    the caller did not happen to mention, because ``_column_values`` skips
+    ``UNSET`` and nothing else.
+
+    ``id``, ``name`` and ``type`` stay required: ``name`` is NOT NULL in the
+    schema, ``id`` is the conflict target, and every caller knows what kind of
+    element it is writing.
     """
 
     id: str
     name: str
     type: str
-    thread_id: Optional[str] = None
-    chainlit_key: Optional[str] = None
-    url: Optional[str] = None
-    object_key: Optional[str] = None
-    display: Optional[str] = None
-    size: Optional[str] = None
-    language: Optional[str] = None
-    page: Optional[int] = None
-    props: Optional[Dict[str, Any]] = None
-    auto_play: Optional[bool] = None
-    player_config: Optional[Dict[str, Any]] = None
-    for_id: Optional[str] = None
-    mime: Optional[str] = None
+    thread_id: Union[str, UnsetType, None] = UNSET
+    chainlit_key: Union[str, UnsetType, None] = UNSET
+    url: Union[str, UnsetType, None] = UNSET
+    object_key: Union[str, UnsetType, None] = UNSET
+    display: Union[str, UnsetType, None] = UNSET
+    size: Union[str, UnsetType, None] = UNSET
+    language: Union[str, UnsetType, None] = UNSET
+    page: Union[int, UnsetType, None] = UNSET
+    props: Union[Dict[str, Any], UnsetType, None] = UNSET
+    auto_play: Union[bool, UnsetType, None] = UNSET
+    player_config: Union[Dict[str, Any], UnsetType, None] = UNSET
+    for_id: Union[str, UnsetType, None] = UNSET
+    mime: Union[str, UnsetType, None] = UNSET
 
 
 class StepRecord(Struct, rename="camel", omit_defaults=True, kw_only=True):

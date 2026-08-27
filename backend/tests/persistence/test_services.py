@@ -12,6 +12,7 @@ from chainlit.persistence import (
     UnitOfWork,
 )
 from chainlit.persistence.models import ELEMENTS, STEPS, THREADS
+from chainlit.persistence.services import _column_values
 from tests.persistence.conftest import at, iso, make_thread, new_id
 
 
@@ -81,6 +82,92 @@ async def test_element_reads_back_by_thread_and_id(uow: UnitOfWork) -> None:
 
     # Scoped to the thread: another thread's id must not reach it.
     assert await uow.elements.fetch(new_id(), element_id) is None
+
+
+async def test_an_element_write_leaves_the_columns_it_omits_alone(
+    uow: UnitOfWork,
+) -> None:
+    """Elements are written incrementally: upload the blob, then the url.
+
+    Every field the caller omits is ``UNSET`` and therefore never reaches the
+    statement. With ``None`` defaults the second write below nulled
+    ``objectKey``, ``props`` and ``mime``, silently losing the upload.
+    """
+    thread_id = await make_thread(uow)
+    element_id = new_id()
+    await uow.elements.save(
+        ElementRecord(
+            id=element_id,
+            name="chart.png",
+            type="image",
+            thread_id=thread_id,
+            object_key="threads/abc/chart.png",
+            mime="image/png",
+            props={"width": 400},
+            display="inline",
+        )
+    )
+
+    # The url arrives later, on its own.
+    await uow.elements.save(
+        ElementRecord(
+            id=element_id,
+            name="chart.png",
+            type="image",
+            url="https://cdn.example/chart.png",
+        )
+    )
+
+    stored = await uow.elements.fetch(thread_id, element_id)
+    assert stored is not None
+    assert stored.url == "https://cdn.example/chart.png"
+    assert stored.object_key == "threads/abc/chart.png"
+    assert stored.mime == "image/png"
+    assert stored.props == {"width": 400}
+    assert stored.display == "inline"
+    assert stored.thread_id == thread_id
+
+
+async def test_an_element_column_can_still_be_cleared_on_purpose(
+    uow: UnitOfWork,
+) -> None:
+    """UNSET is "no opinion"; an explicit ``None`` is "clear this column"."""
+    thread_id = await make_thread(uow)
+    element_id = new_id()
+    await uow.elements.save(
+        ElementRecord(
+            id=element_id,
+            name="chart.png",
+            type="image",
+            thread_id=thread_id,
+            object_key="threads/abc/chart.png",
+            mime="image/png",
+        )
+    )
+    await uow.elements.save(
+        ElementRecord(
+            id=element_id,
+            name="chart.png",
+            type="image",
+            thread_id=thread_id,
+            object_key=None,
+        )
+    )
+
+    stored = await uow.elements.fetch(thread_id, element_id)
+    assert stored is not None
+    assert stored.object_key is None
+    assert stored.mime == "image/png"
+
+
+def test_an_omitted_element_field_never_reaches_the_statement() -> None:
+    """The record's own contract, without a database in the way."""
+    values = _column_values(
+        ElementRecord(
+            id=new_id(), name="chart.png", type="image", url="https://x/y.png"
+        )
+    )
+    assert set(values) == {"id", "name", "type", "url"}
 
 
 async def test_patch_records_the_author_and_the_parent(uow: UnitOfWork) -> None:

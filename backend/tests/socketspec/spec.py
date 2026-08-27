@@ -138,6 +138,23 @@ class Given:
     handover: Optional[Handover] = None
     """A record parked for this session by the one it succeeds."""
 
+    server_holds_session: bool = True
+    """Whether the server still has a session under the id the client offers.
+
+    Only meaningful for the frame that opens a connection; every other frame
+    in the table is addressed to a session that exists by definition.
+    """
+
+    owned_by_someone_else: bool = False
+    """The held session belongs to a different user than the one arriving."""
+
+    parked_reply: bool = False
+    """An answer arrived early and is still waiting for the handshake to end.
+
+    A session holding one is doing work even though nothing is running: the
+    only copy of something the user typed is inside it.
+    """
+
     bystanders: Tuple[Bystander, ...] = ()
     """Other sessions the server is holding when the frames arrive."""
 

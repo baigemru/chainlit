@@ -25,10 +25,11 @@ from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tupl
 from unittest.mock import AsyncMock, Mock, patch
 
 import chainlit.transit as transit
-from chainlit.session import PendingAsk, WebsocketSession
+from chainlit.session import PendingAsk
 from chainlit.socket import (
     ask_reply as _ask_reply,
     clean_session as _clean_session,
+    connect as _connect,
     connection_successful as _connection_successful,
     stop as _stop,
 )
@@ -240,6 +241,8 @@ def _session(factory: Callable[..., Mock], given: Given, ledger: Ledger) -> Mock
     # this one. Left as a Mock attribute it reads truthy, which would make
     # the session look abandoned to every check that asks.
     session.socket_disconnected = False
+    if given.parked_reply:
+        session.deferred_ask_reply_tasks = [_unfinished()]
     if given.resuming_thread:
         # The session's thread *is* the one it resumes: the live-ask and
         # live-task protections match candidates by thread id, and a session
@@ -315,6 +318,41 @@ def _interrupt(session: Mock, given: Given) -> Optional[Callable[[str], None]]:
         session.pending_ask = successor
 
     return interrupt
+
+
+class SessionClass:
+    """Stands in for the session class while one scenario runs.
+
+    Opening a connection both looks a session up on the class and builds a
+    new one through it, so the two cannot be patched apart -- and every
+    handler afterwards reaches its session the same way. Which session that
+    is changes mid-scenario: once a stale one has been replaced, ``get``
+    has to answer with the replacement, exactly as the registry would.
+    """
+
+    def __init__(
+        self,
+        session: Mock,
+        given: Given,
+        factory: Callable[..., Mock],
+        outcome: Dict[str, Any],
+    ) -> None:
+        self._session = session
+        self._held = session if given.server_holds_session else None
+        self._factory = factory
+        self._outcome = outcome
+
+    def __call__(self, **kwargs: Any) -> Mock:
+        built = self._factory(id=kwargs.get("id"))
+        built.socket_disconnected = False
+        self._outcome["built"] = built
+        return built
+
+    def get(self, _sid: str) -> Mock:
+        return self._outcome.get("built") or self._session
+
+    def get_by_id(self, _session_id: str) -> Optional[Mock]:
+        return self._held
 
 
 def _unfinished() -> Mock:
@@ -486,6 +524,9 @@ def _config(given: Given, hooks: Hooks) -> Mock:
     config.code.on_stop = None
     config.code.on_message = None
     config.features.hot_swap_chat_profile = False
+    # No required environment variables: a Mock here reads truthy, and every
+    # connection would be refused for want of variables no scenario asked for.
+    config.project.user_env = None
     return config
 
 
@@ -521,6 +562,39 @@ async def _stop_frame(_session: Mock, _payload: Mapping[str, Any]) -> None:
 
 async def _clear_frame(_session: Mock, _payload: Mapping[str, Any]) -> None:
     await _clean_session(SID)
+
+
+OPEN = "session.open"
+"""The frame that opens a connection.
+
+Not in ``HANDLERS``: it is the one frame that arrives *before* there is a
+session to hand to a handler, which is the whole reason the behaviour it
+carries is worth stating.
+"""
+
+
+async def _open(
+    given: Given, payload: Mapping[str, Any], outcome: Dict[str, Any]
+) -> None:
+    """Run the real connection handler and record what it decided."""
+    auth = {
+        "sessionId": "test_session_id",
+        "userEnv": None,
+        "clientType": "webapp",
+        "chatProfile": given.chat_profile,
+        "threadId": None,
+        "pageLoad": bool(payload.get("reload")),
+    }
+    try:
+        await _connect(SID, {}, auth)  # type: ignore[arg-type]
+    except ConnectionRefusedError:
+        outcome["result"] = "refused"
+        return
+    built = outcome.get("built")
+    if built is None:
+        outcome["result"] = "kept"
+    else:
+        outcome["result"] = "replaced" if outcome.get("dropped") else "created"
 
 
 # The client -> server half of the vocabulary. Not used to dispatch -- the
@@ -585,6 +659,7 @@ def _report(
     storage: Optional[Storage],
     registry: Dict[str, Mock],
     evicted: List[str],
+    outcome: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Protocol-level facts, read off wherever this implementation keeps them.
 
@@ -606,6 +681,9 @@ def _report(
         "handover_parked": transit.pop(session.id, owner) is not transit.NO_TRANSIT,
         "handover_delivered": (sessions.get(session.id) or {}).get("transit_message"),
     }
+    current = outcome.get("built") or session
+    state["on_open"] = outcome.get("result")
+    state["fresh_page_load"] = current.fresh_page_load
     state["evicted"] = list(evicted)
     state["live_sessions"] = sorted(registry)
     state["deleted_steps"] = list(storage.deleted_steps) if storage else []
@@ -642,7 +720,12 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
     ledger = Ledger()
     session = _session(session_factory, scenario.given, ledger)
     pending: Optional[PendingAsk] = session.pending_ask
-    owner = session.user.identifier if session.user else None
+    # The user who is arriving, which is not always the one the held session
+    # belongs to -- that difference is the whole ownership check.
+    arriving = session.user
+    owner = arriving.identifier if arriving else None
+    if scenario.given.owned_by_someone_else:
+        session.user = Mock(identifier="a-different-person")
 
     # Everything here is a module global the previous test may have written
     # to. Each is replaced whether or not the scenario mentions it: a spec
@@ -650,6 +733,12 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
     sessions: Dict[str, Any] = {}
     hooks = Hooks(session, sessions, ledger)
     evicted: List[str] = []
+    outcome: Dict[str, Any] = {}
+
+    async def dropped() -> None:
+        outcome["dropped"] = True
+
+    session.delete = Mock(side_effect=dropped)
     registry = _registry(session, scenario.given, session_factory, evicted)
     storage = _data_layer(scenario.given, owner)
     _park_handover(session, scenario.given, owner)
@@ -662,7 +751,15 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
         with (
             patch("chainlit.socket.init_ws_context", return_value=context),
             patch("chainlit.socket.config", _config(scenario.given, hooks)),
-            patch.object(WebsocketSession, "get", return_value=session),
+            patch(
+                "chainlit.socket.WebsocketSession",
+                SessionClass(session, scenario.given, session_factory, outcome),
+            ),
+            patch("chainlit.socket.require_login", Mock(return_value=True)),
+            patch(
+                "chainlit.socket._authenticate_connection",
+                AsyncMock(return_value=(arriving, "token")),
+            ),
             patch("chainlit.socket.Message", side_effect=_message_factory(ledger)),
             patch("chainlit.socket.chat_context", _transcript(scenario.given)),
             patch("chainlit.socket.user_sessions", sessions),
@@ -671,6 +768,9 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
             patch("chainlit.socket.get_data_layer", return_value=storage),
         ):
             for index, frame in enumerate(scenario.when):
+                if frame.tag == OPEN:
+                    await _open(scenario.given, frame.payload, outcome)
+                    continue
                 handler = HANDLERS.get(frame.tag)
                 if handler is None:
                     raise KeyError(
@@ -683,7 +783,11 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
             # Rescuing an orphaned reply is a background task parked on the
             # handshake gate. A ledger read before it finishes would be missing
             # the frames the scenario is about.
-            parked = list(getattr(session, "deferred_ask_reply_tasks", ()) or ())
+            parked = [
+                task
+                for task in getattr(session, "deferred_ask_reply_tasks", ()) or ()
+                if isinstance(task, asyncio.Task)
+            ]
             if parked:
                 await asyncio.gather(*parked, return_exceptions=True)
 
@@ -692,7 +796,15 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
         return Result(
             ledger=ledger,
             state=_report(
-                session, pending, hooks, sessions, owner, storage, registry, evicted
+                session,
+                pending,
+                hooks,
+                sessions,
+                owner,
+                storage,
+                registry,
+                evicted,
+                outcome,
             ),
         )
     finally:
@@ -715,4 +827,4 @@ def build(request: Any) -> Driver:
     return drive
 
 
-__all__ = ["HANDLERS", "RecordingEmitter", "build", "run"]
+__all__ = ["HANDLERS", "OPEN", "RecordingEmitter", "build", "run"]

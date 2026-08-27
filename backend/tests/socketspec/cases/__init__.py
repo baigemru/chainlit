@@ -7,6 +7,7 @@ from .ask import ASK_SCENARIOS
 from .bystanders import BYSTANDER_SCENARIOS
 from .handshake import HANDSHAKE_SCENARIOS
 from .orphans import ORPHAN_SCENARIOS, PARENT_SCENARIOS
+from .reload import RELOAD_SCENARIOS
 from .resume_delete import RESUME_DELETE_SCENARIOS
 from .resync import RESYNC_SCENARIOS
 from .transcript import TRANSCRIPT_SCENARIOS
@@ -18,6 +19,7 @@ SCENARIOS: Tuple[Scenario, ...] = (
     + TRANSCRIPT_SCENARIOS
     + ORPHAN_SCENARIOS
     + PARENT_SCENARIOS
+    + RELOAD_SCENARIOS
     + RESUME_DELETE_SCENARIOS
     + RESYNC_SCENARIOS
 )

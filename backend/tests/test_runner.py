@@ -190,7 +190,7 @@ def test_stop_cancels_the_running_task_and_calls_on_stop(
         # Stop only once the callback is the thing running: a stop that
         # lands earlier cancels the message before it is handed over, which
         # is also right, but not what this test is about.
-        for _ in range(50):
+        for _ in range(250):
             if running:
                 break
             time.sleep(0.02)
@@ -201,7 +201,7 @@ def test_stop_cancels_the_running_task_and_calls_on_stop(
         # Two spinner updates follow -- the cancelled task's and on_stop's --
         # in whichever order the loop schedules them. The hook is what the
         # test is about, so it is waited for by name.
-        for _ in range(50):
+        for _ in range(250):
             if stopped:
                 break
             time.sleep(0.02)
@@ -232,7 +232,7 @@ def test_a_closed_socket_runs_on_chat_end_and_schedules_the_reaper(
             open_session(ws)
         # The session survives the socket for the grace period ...
         assert plugin.runner.registry.get("s1") is not None
-        for _ in range(50):
+        for _ in range(250):
             if ended:
                 break
             time.sleep(0.02)

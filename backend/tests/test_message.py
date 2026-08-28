@@ -8,6 +8,7 @@ with the dict is the thing being asserted.
 
 import asyncio
 import json
+import time
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -79,12 +80,16 @@ def no_author_rename(monkeypatch):
 
 
 async def until_asked(session) -> None:
-    """Yield until the ask is on the session's slot."""
-    for _ in range(50):
-        if session.pending_ask is not None:
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("no ask was sent")
+    """Wait until the ask is on the session's slot.
+
+    A deadline, not a turn count: asking may spool a file to disk first,
+    and how many loop turns that takes is the machine's business.
+    """
+    deadline = time.monotonic() + 5.0
+    while session.pending_ask is None:
+        if time.monotonic() > deadline:
+            raise AssertionError("no ask was sent")
+        await asyncio.sleep(0.001)
 
 
 async def answer(session, value: Any) -> None:

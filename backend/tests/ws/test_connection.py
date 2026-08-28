@@ -20,6 +20,7 @@ from litestar.testing import create_test_client
 from litestar.types import ASGIApp, Receive, Scope, Send
 
 from chainlit.protocol.codec import MAX_FRAME_BYTES, CloseCode
+from chainlit.protocol.server import Heartbeat
 from chainlit.ws.connection import make_websocket_handler
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import Session
@@ -292,3 +293,27 @@ def test_answering_the_probe_keeps_the_connection() -> None:
             frame = json.loads(ws.receive_text(timeout=5))
             assert frame["t"] == "hb", frame
             ws.send_text(json.dumps({"t": "hb.ack", "seq": frame.get("seq", 0)}))
+
+
+def test_a_kept_sessions_backlog_follows_the_ready_frame() -> None:
+    """What the last socket never took is delivered -- after ``session.ready``.
+
+    A session kept across a gap may hold frames produced while nobody was
+    listening. They are a continuation, not the opening: the client starts
+    the conversation on ``session.ready`` and would otherwise see them as
+    noise before it, or -- for a level frame like the spinner -- as a stale
+    truth ahead of the real one.
+    """
+    handler, middleware, registry = build()
+    with create_test_client(route_handlers=[handler], middleware=middleware) as client:
+        with client.websocket_connect("/ws") as ws:
+            open_session(ws)
+        entry = registry.get("s1")
+        assert entry is not None
+        entry.session.send(Heartbeat(seq=99))  # queued while disconnected
+        with client.websocket_connect("/ws") as ws:
+            ws.send_text(hello(pageLoad=False))
+            tags = [json.loads(ws.receive_text(timeout=5))["t"] for _ in range(2)]
+
+    assert tags[0] == "session.ready"
+    assert "hb" in tags

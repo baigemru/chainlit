@@ -124,7 +124,20 @@ class ApplicationRunner:
 
         task = asyncio.create_task(run())
         setattr(session, slot, task)
+        # The spinner is level state derived from the session's tasks, and
+        # the client only hears about it when told. Launching lit it; the
+        # task ending has to put it out, or the composer stays locked for
+        # as long as the session lives -- which is exactly what happened.
+        task.add_done_callback(lambda _: self._resync_after(session))
         return task
+
+    def _resync_after(self, session: Session) -> None:
+        # Nobody to tell while the socket is gone: the reconnect's replay
+        # ends with the spinner's current truth anyway, and a level frame
+        # queued now would only arrive ahead of session.ready, stale.
+        if session.outbound.closed or not session.connected:
+            return
+        Emitter(session, transit=self.transit).resync_task_indicator()
 
     # ---------------------------------------------------------- construction
 

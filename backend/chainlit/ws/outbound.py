@@ -202,7 +202,7 @@ class Outbound:
 
     # -------------------------------------------------------------- producers
 
-    def send(self, msg: "ServerMsg") -> bool:
+    def send(self, msg: "ServerMsg", *, first: bool = False) -> bool:
         """Queue one frame. Never blocks, never awaits, never raises.
 
         Returns ``False`` if the frame was refused, which happens when the
@@ -236,7 +236,14 @@ class Outbound:
             self.abort(CloseCode.BACKLOG_EXCEEDED, "outbound backlog exceeded")
             return False
 
-        self._items.append(msg)
+        if first:
+            # Ahead of everything still queued. For the one frame that has
+            # to open a socket: whatever the previous socket never took is
+            # still valid, but it is a continuation, and it must not
+            # precede the frame the client starts the conversation on.
+            self._items.appendleft(msg)
+        else:
+            self._items.append(msg)
         self._pending += 1
         self._wake.set()
         return True

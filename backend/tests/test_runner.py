@@ -95,12 +95,16 @@ def test_on_chat_start_runs_after_the_handshake_and_its_message_arrives(
     ):
         handshake = open_session(ws)
         greeting = read_until(ws, "step.upsert")
+        after = read_until(ws, "task.indicator")
 
     # The greeting lands after the handshake's spinner, never inside it: the
     # hook is launched only once the screen is rebuilt.
     assert handshake[0]["t"] == "session.ready"
     assert greeting[-1]["step"]["output"] == "hello there"
     assert started == ["s1"]
+    # And once the hook is done the spinner goes out -- the composer is
+    # locked while it is lit, so a spinner nobody puts out is a dead chat.
+    assert after[-1]["running"] is False
 
 
 def test_a_message_reaches_on_message_and_the_reply_reaches_the_socket(
@@ -264,7 +268,12 @@ def test_a_reconnect_within_the_grace_period_keeps_the_session(
         with client.websocket_connect("/ws") as ws:
             frames = open_session(ws, pageLoad=False)
 
-    assert frames[0]["restored"] is True
+    # Not necessarily the first frame: a session kept across the gap may
+    # still hold frames the last socket never took, and the queue delivers
+    # those first. The client rebuilds its screen after ``session.ready``
+    # regardless.
+    ready = next(f for f in frames if f["t"] == "session.ready")
+    assert ready["restored"] is True
     assert starts == [1], "on_chat_start ran again on a reconnect"
     session = plugin.runner.registry.get("s1")
     assert session is not None

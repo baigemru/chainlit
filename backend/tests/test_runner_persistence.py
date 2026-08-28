@@ -718,7 +718,7 @@ def test_a_disconnect_persists_state_and_a_reconnect_keeps_the_writer(
 
         with client.websocket_connect("/ws") as ws:
             frames = open_session(ws, pageLoad=False)
-            assert frames[0]["restored"] is True
+            assert first(frames, "session.ready")["restored"] is True
             assert frames[0]["threadId"] == thread_id
             entry = plugin.runner.registry.get("s1")
             assert entry is not None

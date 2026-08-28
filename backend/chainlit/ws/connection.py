@@ -160,17 +160,21 @@ def make_websocket_handler(
         if on_arrival is not None:
             await on_arrival(arrival)
 
-        # Attached only now: a queue attached before the handshake would
-        # have a writer draining frames onto a connection we might still
-        # refuse.
-        session.outbound.attach(socket)
-        session.send(
+        # ``session.ready`` goes to the front of the queue, and only then is
+        # the writer attached: a kept session may still hold frames the
+        # previous socket never took, and those are a continuation the
+        # client is entitled to -- after the frame it starts on, not before.
+        # Attached only now, too, because a writer attached before the
+        # handshake would drain frames onto a connection we might refuse.
+        session.outbound.send(
             ready_frame(
                 session,
                 restored=arrival.outcome.value == "kept",
                 heartbeat_ms=heartbeat_ms,
-            )
+            ),
+            first=True,
         )
+        session.outbound.attach(socket)
 
         try:
             await _serve(

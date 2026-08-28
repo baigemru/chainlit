@@ -81,8 +81,14 @@ export const toWireStep = (step: IStep): WireStep => ({
   metadata: step.metadata
 });
 
+/**
+ * The wire omits a field that holds its default (`omit_defaults` on the
+ * server), so an element with no `display` is an inline one -- and the
+ * components compare `display === 'inline'` strictly. Absent means default;
+ * the default is applied here, once, not in every reader.
+ */
 export const toElement = (element: ProtocolElement): IElement =>
-  withoutNulls(element) as unknown as IElement;
+  ({ display: 'inline', ...withoutNulls(element) }) as unknown as IElement;
 
 export const toAction = (action: Action): IAction =>
   withoutNulls(action) as unknown as IAction;

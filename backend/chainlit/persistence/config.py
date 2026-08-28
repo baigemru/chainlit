@@ -10,7 +10,11 @@ from advanced_alchemy.config import AlembicAsyncConfig, AsyncSessionConfig
 # EngineConfig must come from the Litestar extension, not from
 # advanced_alchemy.config: they are two distinct classes with the same name,
 # and SQLAlchemyAsyncConfig here is the extension's one.
-from advanced_alchemy.extensions.litestar import EngineConfig, SQLAlchemyAsyncConfig
+from advanced_alchemy.extensions.litestar import (
+    EngineConfig,
+    SQLAlchemyAsyncConfig,
+    SQLAlchemyPlugin,
+)
 from advanced_alchemy.extensions.litestar.providers import create_service_dependencies
 from alembic.config import Config as AlembicConfig
 from litestar.di import Provide
@@ -202,6 +206,18 @@ class Persistence:
                 self.feedback_service, key="feedbacks", config=self.config
             ),
         }
+
+    def plugin(self) -> SQLAlchemyPlugin:
+        """The advanced_alchemy plugin this config has to be registered with.
+
+        The engine, the request-scoped session and the autocommit before-send
+        handler all come from here, so nothing above works without it.
+        ``ChainlitPlugin`` registers it rather than asking the host app to
+        list both: a host that listed only one would get a working import and
+        a broken request, which is the kind of mistake that should not be
+        expressible.
+        """
+        return SQLAlchemyPlugin(config=self.config)
 
     def bind(self, session: AsyncSession) -> UnitOfWork:
         """Bind the services to a session someone else owns."""

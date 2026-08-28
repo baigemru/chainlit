@@ -19,7 +19,17 @@ PACKAGE = Path(__file__).resolve().parents[1] / "chainlit"
 
 DEPARTING = ("fastapi", "pydantic", "dataclasses_json", "lazify", "syncer", "asyncer")
 
-REBUILT = ("chainlit.persistence", "chainlit.protocol")
+# ``chainlit.plugin`` is deliberately absent: the startup bootstrap it took
+# over from the CLI reaches ``chainlit.markdown``, ``chainlit.cache`` and the
+# pydantic ``ChainlitConfig``, and will keep reaching them until those are
+# ported. Its two new dependencies are listed instead, because they can be
+# kept clean and are what the socket and the auth middleware will import.
+REBUILT = (
+    "chainlit.persistence",
+    "chainlit.protocol",
+    "chainlit.security",
+    "chainlit.transit_store",
+)
 
 # Every module still importing one of the departing libraries, and which.
 # This is the port's remaining surface, written down. Shrink it as modules

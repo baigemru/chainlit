@@ -34,6 +34,12 @@ def _reply(value: object, step_id: Optional[str] = "step-1") -> Incoming:
 ORPHAN_SCENARIOS = (
     Scenario(
         name="a typed reply with no question left is rescued as a message",
+        superseded=(
+            "an answer for a question the session is not showing is parked on "
+            "session.parked_replies and delivered when the ask is (re)asked "
+            "(ws.connection._deliver_reply, emitter._deliver_parked). It is never "
+            "converted into a message, and no ask.end goes out for it."
+        ),
         why=(
             "The user typed it. The ask it answered is gone -- server "
             "restart, timeout, stop -- but the words are still content, and "
@@ -45,6 +51,12 @@ ORPHAN_SCENARIOS = (
     ),
     Scenario(
         name="a click with no question left only takes the form down",
+        superseded=(
+            "an answer for a question the session is not showing is parked on "
+            "session.parked_replies and delivered when the ask is (re)asked "
+            "(ws.connection._deliver_reply, emitter._deliver_parked). It is never "
+            "converted into a message, and no ask.end goes out for it."
+        ),
         why=(
             "A dead button is not content. Rescuing it would post a form "
             "payload into the conversation as if the user had typed it."
@@ -56,6 +68,12 @@ ORPHAN_SCENARIOS = (
     ),
     Scenario(
         name="a redelivered reply that was already answered is not rescued",
+        superseded=(
+            "an answer for a question the session is not showing is parked on "
+            "session.parked_replies and delivered when the ask is (re)asked "
+            "(ws.connection._deliver_reply, emitter._deliver_parked). It is never "
+            "converted into a message, and no ask.end goes out for it."
+        ),
         why=(
             "The slot empties milliseconds after an answer is taken, so a "
             "redelivery -- the send buffer after a blip, a second tab -- "

@@ -302,11 +302,28 @@ class _Store:
 async def test_an_empty_memory_falls_back_to_what_was_written_down() -> None:
     session = make("s1")
     session.thread_id = "t1"
+    session.resumed_thread_id = "t1"
     store = _Store([TranscriptEntry(step=StepPayload(id="m1"))])
 
     await restore(session, thread_store=store)
 
     assert tags(session).count("step.upsert") == 1
+
+
+async def test_a_thread_the_session_was_not_let_into_is_not_read_from_storage() -> None:
+    """The id in the hello is the client's claim, not its right.
+
+    The application decides whether a session may resume a thread and marks
+    it ``resumed_thread_id``. Without that mark the storage fallback must
+    stay shut, or a refused claim is answered from the database anyway.
+    """
+    session = make("s1")
+    session.thread_id = "t1"
+    store = _Store([TranscriptEntry(step=StepPayload(id="somebody-elses"))])
+
+    await restore(session, thread_store=store)
+
+    assert "step.upsert" not in tags(session)
 
 
 async def test_a_live_memory_is_not_overwritten_by_storage() -> None:
@@ -319,6 +336,7 @@ async def test_a_live_memory_is_not_overwritten_by_storage() -> None:
     """
     session = make("s1")
     session.thread_id = "t1"
+    session.resumed_thread_id = "t1"
     session.transcript = [TranscriptEntry(step=StepPayload(id="live"))]
     store = _Store([TranscriptEntry(step=StepPayload(id="stored"))])
 
@@ -332,6 +350,7 @@ async def test_the_steps_a_resume_may_delete_go_with_their_children() -> None:
 
     session = make("s1")
     session.thread_id = "t1"
+    session.resumed_thread_id = "t1"
     store = _Store(
         [
             TranscriptEntry(
@@ -354,6 +373,7 @@ async def test_a_step_a_live_question_is_waiting_on_is_never_deleted() -> None:
 
     session = make("s1")
     session.thread_id = "t1"
+    session.resumed_thread_id = "t1"
     store = _Store(
         [
             TranscriptEntry(

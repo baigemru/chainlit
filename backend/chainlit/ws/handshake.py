@@ -228,6 +228,7 @@ async def restore(
     thread_store: Optional[ThreadStore] = None,
     protected_step_ids: Optional[Set[str]] = None,
     prune: bool = False,
+    fresh_page_load: bool = True,
 ) -> None:
     """Rebuild the client's screen, in the order it has to be rebuilt in.
 
@@ -247,9 +248,17 @@ async def restore(
     never on the reconnects that follow.
     """
     entries: Sequence[TranscriptEntry] = list(session.transcript)
-    if not entries and thread_store is not None and session.thread_id:
+    if (
+        not entries
+        and thread_store is not None
+        and session.thread_id
+        and session.resumed_thread_id == session.thread_id
+    ):
         # Nothing in memory: this session did not live through the
-        # conversation it is showing. Fall back to what was written down.
+        # conversation it is showing. Fall back to what was written down --
+        # but only for a thread the application has already let this
+        # session resume. The id in the hello is the client's claim, not
+        # its right, and a refused claim must not be answered from storage.
         entries = await thread_store.transcript_of(session.thread_id)
 
     if prune and thread_store is not None and session.thread_id:
@@ -258,11 +267,6 @@ async def restore(
             await thread_store.delete_steps(session.thread_id, doomed)
             entries = [e for e in entries if e.step.id not in doomed]
 
-    if session.parent_thread_id:
-        # Re-sent on every reconnect by design: it is level state about
-        # where this conversation came from, and the client loses it.
-        session.send(ThreadParent(parent_thread_id=session.parent_thread_id))
-
     if session.first_interaction and session.thread_id:
         session.send(
             ThreadFirstInteraction(
@@ -270,14 +274,28 @@ async def restore(
             )
         )
 
-    sent_elements: Set[str] = set()
-    for entry in entries:
-        session.send(StepUpsert(step=entry.step))
-        for element in entry.elements:
-            if element.id in sent_elements:
-                continue
-            sent_elements.add(element.id)
-            session.send(ElementUpsert(element=element))
+    if session.parent_thread_id:
+        # Re-sent on every reconnect by design: it is level state about
+        # where this conversation came from, and the client loses it. After
+        # the thread's own frame: a parent is said of a thread that exists.
+        session.send(ThreadParent(parent_thread_id=session.parent_thread_id))
+
+    snapshot = session.state.get("__resumed_thread")
+    if snapshot is not None:
+        # The session has just resumed a stored thread and the client's feed
+        # is whatever it had before: a snapshot *replaces* it, the way the
+        # client understands ``thread.resume``. The transcript replay below
+        # would say the same thing one step at a time.
+        session.send(resume_frame(msgspec.convert(snapshot, ThreadPayload)))
+    else:
+        sent_elements: Set[str] = set()
+        for entry in entries:
+            session.send(StepUpsert(step=entry.step))
+            for element in entry.elements:
+                if element.id in sent_elements:
+                    continue
+                sent_elements.add(element.id)
+                session.send(ElementUpsert(element=element))
 
     # Read here, not above: everything before this may have awaited, and an
     # answer is free to have landed in any of those awaits. Restoring a
@@ -287,7 +305,9 @@ async def restore(
     if ask is not None and ask.is_live:
         for action in ask.restore_actions:
             session.send(ActionAdd(action=action))
-        if ask.restore_element is not None:
+        if ask.restore_element is not None and fresh_page_load:
+            # A transport blip keeps the element the client is still
+            # holding; only a reload has lost it.
             session.send(ElementUpsert(element=ask.restore_element))
         # What is *left* of the deadline, never a fresh one: a form that
         # resets its own timer on every network hiccup never times out.

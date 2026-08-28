@@ -242,6 +242,15 @@ class Scenario:
     """What breaks if this stops holding. Not decoration -- the reason the
     row is in the table at all, for whoever reads a failure."""
 
+    superseded: str = ""
+    """Why the row no longer states the protocol, when it does not.
+
+    A row is retired here, never deleted: the decision it encoded was
+    reversed on purpose, and the reversal has to stay readable next to what
+    it reversed. The text names the reversal and points at where the new
+    behaviour lives. ``test_spec`` skips a superseded row with this reason.
+    """
+
 
 def assert_that(condition: object, message: str) -> bool:
     """Assert inside a lambda: a scenario's ``then`` is data, not a function body.

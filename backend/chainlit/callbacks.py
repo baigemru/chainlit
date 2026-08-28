@@ -390,17 +390,6 @@ def action_callback(name: str) -> Callable:
     return decorator
 
 
-def data_layer(func: Callable[[], Any]) -> Callable[[], Any]:
-    """
-    Hook to configure custom data layer.
-
-    Not wrapped: the factory is called synchronously by whoever builds the
-    persistence, and a wrapper would make it a coroutine.
-    """
-    config.code.data_layer = func
-    return func
-
-
 def on_feedback(func: Callable) -> Callable:
     """
     Hook to react to user feedback events from the UI.

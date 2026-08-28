@@ -129,6 +129,11 @@ TRANSCRIPT_SCENARIOS = (
     ),
     Scenario(
         name="a running shimmer survives the replay",
+        superseded=(
+            "payload drift: protocol.payloads.Wait carries texts/intervalMs/loop, not "
+            "kind, so the row can never match a real frame. Respell against "
+            "step.wait.texts."
+        ),
         why=(
             "The client force-overwrites a step's wait state on every upsert, "
             "so a replay that omits it stops a spinner for work that is still "

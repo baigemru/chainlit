@@ -60,7 +60,6 @@ EXPECTED_EXPORTS = {
     "author_rename",
     "chat_context",
     "context",
-    "data_layer",
     "input_widget",
     "logger",
     "oauth_callback",
@@ -115,7 +114,6 @@ CONSUMER_SURFACE = {
     "oauth_callback",
     "password_auth_callback",
     "action_callback",
-    "data_layer",
 }
 
 

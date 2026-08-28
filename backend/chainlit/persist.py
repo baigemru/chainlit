@@ -42,9 +42,13 @@ __all__ = [
     "writer_of",
 ]
 
-# Metadata keys that describe a live session, never a thread. ``transit``
-# is a hand-off between two sessions and would resurrect on every resume.
-_VOLATILE_STATE = frozenset({"transit_message"})
+# State keys that describe a live session, never a thread. ``transit`` is a
+# hand-off between two sessions and would resurrect on every resume; the
+# rest are mirrors of the session the accessor keeps for the app's
+# convenience, and the conversation log, which is the steps table's job.
+_VOLATILE_STATE = frozenset(
+    {"transit_message", "__chat_messages", "__resumed_thread", "id", "user", "env"}
+)
 
 
 def writer_of(session: Optional["Session"] = None) -> Optional[SessionWriter]:
@@ -124,18 +128,22 @@ def delete_element(element_id: str, thread_id: Optional[str] = None) -> None:
         writer.submit(DeleteElement(element_id, thread_id))
 
 
-async def open_thread(session: "Session", name: str) -> None:
+async def open_thread(session: "Session", name: str, *, announce: bool = True) -> None:
     """The thread's first interaction: name the row, then release the writes.
 
     The one place the wire and the database meet on purpose. The client is
     told first, so a session with no database still learns its thread id;
     the row is attributed and the gate opens after, behind the patch that
     creates it -- steps queued before this moment are waiting for exactly
-    that row.
+    that row. ``announce=False`` records the interaction without the frame,
+    for the one caller that runs before ``session.ready`` may go out.
     """
     from chainlit.emitter import Emitter
 
-    Emitter(session).first_interaction(name)
+    if announce:
+        Emitter(session).first_interaction(name)
+    else:
+        session.first_interaction = name
 
     writer = writer_of(session)
     if writer is None or not session.thread_id:
@@ -178,12 +186,18 @@ def thread_state(session: "Session") -> dict[str, Any]:
     return _jsonable(state)
 
 
-def _jsonable(value: Any) -> Any:
-    """Drop what JSON cannot carry rather than fail the whole write."""
-    try:
-        return msgspec.json.decode(msgspec.json.encode(value))
-    except TypeError, msgspec.EncodeError:
-        return {k: v for k, v in value.items() if _encodable(v)}
+def _jsonable(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop what JSON cannot carry rather than fail the whole write.
+
+    Round-tripped through msgspec key by key: what survives is plain JSON
+    data, never an object msgspec happens to know how to encode but the
+    database driver does not.
+    """
+    return {
+        k: msgspec.json.decode(msgspec.json.encode(v))
+        for k, v in value.items()
+        if _encodable(v)
+    }
 
 
 def _encodable(value: Any) -> bool:

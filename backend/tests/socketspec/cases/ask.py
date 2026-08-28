@@ -96,6 +96,15 @@ ASK_SCENARIOS = (
     ),
     Scenario(
         name="no pending ask means the form is cleared",
+        superseded=(
+            "ask.end is addressed by stepId and comes from the ask's own lifecycle "
+            "(emitter.send_ask_user: answered/timeout/cancelled; runner.teardown: "
+            "superseded). It is queued on the session and kept across the disconnect "
+            "(ws.outbound.Outbound: what has not been sent stays queued for the next "
+            "writer), so the restore has nothing left to clear -- and with no pending "
+            "ask, no stepId to address. handshake.restore sends ask.start for a live "
+            "ask or nothing."
+        ),
         why="A form left on screen collects an answer nobody is waiting for.",
         given=_reconnect(pending_ask=None),
         when=(HELLO,),
@@ -104,6 +113,15 @@ ASK_SCENARIOS = (
     ),
     Scenario(
         name="an expired ask is cleared, not re-emitted",
+        superseded=(
+            "ask.end is addressed by stepId and comes from the ask's own lifecycle "
+            "(emitter.send_ask_user: answered/timeout/cancelled; runner.teardown: "
+            "superseded). It is queued on the session and kept across the disconnect "
+            "(ws.outbound.Outbound: what has not been sent stays queued for the next "
+            "writer), so the restore has nothing left to clear -- and with no pending "
+            "ask, no stepId to address. handshake.restore sends ask.start for a live "
+            "ask or nothing."
+        ),
         why=(
             "The deadline passed while the socket was down. Re-sending the "
             "form would invite an answer the waiter has already given up on."
@@ -115,6 +133,15 @@ ASK_SCENARIOS = (
     ),
     Scenario(
         name="an already-answered ask is cleared, not re-emitted",
+        superseded=(
+            "ask.end is addressed by stepId and comes from the ask's own lifecycle "
+            "(emitter.send_ask_user: answered/timeout/cancelled; runner.teardown: "
+            "superseded). It is queued on the session and kept across the disconnect "
+            "(ws.outbound.Outbound: what has not been sent stays queued for the next "
+            "writer), so the restore has nothing left to clear -- and with no pending "
+            "ask, no stepId to address. handshake.restore sends ask.start for a live "
+            "ask or nothing."
+        ),
         why="The answer is in flight; a second form would collect a second one.",
         given=_reconnect(pending_ask=AskState(answered=True)),
         when=(HELLO,),
@@ -123,6 +150,13 @@ ASK_SCENARIOS = (
     ),
     Scenario(
         name="an answer arriving mid-restore takes the form down",
+        superseded=(
+            "handshake.restore re-reads pending_ask once, after its last await, and "
+            "sends the buttons and the form in one synchronous block; nothing can "
+            "land between them. The gap this row describes no longer exists. The mid- "
+            "await case that remains (the storage fallback) is pinned by tests/ws/tes "
+            "t_handshake.py::test_an_answered_question_is_not_put_back_on_screen."
+        ),
         why=(
             "Rebuilding the form is a sequence of awaits, and the reply is "
             "free to land in any of them. Finishing the rebuild anyway would "
@@ -137,6 +171,13 @@ ASK_SCENARIOS = (
     ),
     Scenario(
         name="a successor ask that took the slot mid-restore is not wiped",
+        superseded=(
+            "handshake.restore re-reads pending_ask once, after its last await, and "
+            "sends the buttons and the form in one synchronous block; nothing can "
+            "land between them. The gap this row describes no longer exists. The mid- "
+            "await case that remains (the storage fallback) is pinned by tests/ws/tes "
+            "t_handshake.py::test_an_answered_question_is_not_put_back_on_screen."
+        ),
         why=(
             "This is the reason ask.end had to grow a stepId. The old "
             "clear_ask addressed nothing, so ending the ask we were restoring "
@@ -152,6 +193,13 @@ ASK_SCENARIOS = (
     ),
     Scenario(
         name="a slot that changed hands to a dead ask is cleared",
+        superseded=(
+            "handshake.restore re-reads pending_ask once, after its last await, and "
+            "sends the buttons and the form in one synchronous block; nothing can "
+            "land between them. The gap this row describes no longer exists. The mid- "
+            "await case that remains (the storage fallback) is pinned by tests/ws/tes "
+            "t_handshake.py::test_an_answered_question_is_not_put_back_on_screen."
+        ),
         why=(
             "Nothing live is on screen to protect, and leaving the form up "
             "would offer an answer to a waiter that is already gone."

@@ -59,7 +59,6 @@ from chainlit.version import __version__
 from .callbacks import (
     action_callback,
     author_rename,
-    data_layer,
     oauth_callback,
     on_app_shutdown,
     on_app_startup,
@@ -127,7 +126,6 @@ __all__ = [
     "author_rename",
     "chat_context",
     "context",
-    "data_layer",
     "input_widget",
     "logger",
     "oauth_callback",

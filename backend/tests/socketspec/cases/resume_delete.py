@@ -68,26 +68,27 @@ def _resumed_steps(result: Result) -> list:
 
 RESUME_DELETE_SCENARIOS = (
     Scenario(
-        name="a flagged step is stripped from the resumed conversation and deleted",
+        name="a flagged step is hidden from the resumed conversation",
         why=(
             "The flag exists because the message stops being true when the "
             "conversation goes away. Rebuilding the feed with it still in "
-            "place shows the user an offer the server will not honour."
+            "place shows the user an offer the server will not honour. Hidden, "
+            "not deleted: the socket no longer deletes anything on a resume -- "
+            "the read path owns the filter (controllers.project."
+            "hide_resume_deleted) and applies it to the snapshot, the hooks "
+            "and every HTTP read alike."
         ),
         given=_resuming(_thread((KEEP, FLAGGED), (ATTACHMENT,))),
         when=(HELLO,),
         expect=(
             Expect("thread.first_interaction", {"interaction": "resume"}),
             Expect("thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1"]}),
-            Expect("step.delete", {"stepId": "m2"}),
         ),
+        forbid=("step.delete",),
         then=lambda result: (
             assert_that(
-                result.state["deleted_steps"] == ["m2"], "the flagged step was kept"
-            ),
-            assert_that(
-                result.state["deleted_elements"] == ["el-2"],
-                "the flagged step's attachment was left behind",
+                result.state["deleted_steps"] == [],
+                "a resume deleted through the socket",
             ),
             assert_that(
                 _resumed_steps(result) == ["m1"],
@@ -108,12 +109,18 @@ RESUME_DELETE_SCENARIOS = (
             Expect("thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1"]}),
         ),
         then=lambda result: assert_that(
-            result.state["deleted_steps"] == ["m2", "m3"],
-            "the orphaned child of a deleted step survived",
+            _resumed_steps(result) == ["m1"],
+            "the orphaned child of a hidden step survived",
         ),
     ),
     Scenario(
         name="the deletion happens on the first resume, not on every reconnect",
+        superseded=(
+            "deleting resume=delete steps through the socket is gone: "
+            "handshake.restore is never called with prune=True, and "
+            "controllers.project.hide_resume_deleted owns the read path. Nothing is "
+            "deleted on any hello, so once-only deletion has no meaning."
+        ),
         why=(
             "One session resumes once and reconnects many times. Re-running "
             "the decision on a reconnect would delete the messages the "
@@ -147,7 +154,14 @@ RESUME_DELETE_SCENARIOS = (
         ),
         given=_resuming(_thread((KEEP,)), produced_between_connections=(LATER,)),
         when=(HELLO, HELLO),
-        expect=(Expect("thread.resume", {"thread.steps": lambda s: "m9" in _ids(s)}),),
+        # The first hello resumes with a snapshot; the reconnect is a kept
+        # arrival and replays the session's own transcript, step by step --
+        # the fresh offer must be in it.
+        expect=(
+            Expect("thread.resume"),
+            Expect("session.ready", {"restored": True}),
+            Expect("step.upsert", {"step.id": "m9"}),
+        ),
         then=lambda result: assert_that(
             result.state["deleted_steps"] == [],
             "a reconnect deleted a message the resume never saw",
@@ -155,6 +169,12 @@ RESUME_DELETE_SCENARIOS = (
     ),
     Scenario(
         name="a step whose attachment cannot be deleted is kept, hidden and retried",
+        superseded=(
+            "deleting resume=delete steps through the socket is gone: "
+            "handshake.restore is never called with prune=True, and "
+            "controllers.project.hide_resume_deleted owns the read path. The retry "
+            "contract is deletion machinery through and through."
+        ),
         why=(
             "Deleting the step first would orphan the attachment forever -- "
             "its owner never enters the doomed set again, and no later pass "
@@ -180,6 +200,14 @@ RESUME_DELETE_SCENARIOS = (
     ),
     Scenario(
         name="a step a live question is waiting on is never deleted",
+        superseded=(
+            "a session cannot hold a question before it has resumed the thread it is "
+            "asked in: runner.on_arrival resumes only created/replaced sessions, "
+            "which are built empty, and a held session with a live ask is kept and "
+            "never resumes. The protection itself is the bystander row 'a question "
+            "waiting in another session protects its own step' and "
+            "registry.protected_step_ids."
+        ),
         why=(
             "The flag says the message does not outlive the conversation, "
             "and a question still being waited on says the conversation is "

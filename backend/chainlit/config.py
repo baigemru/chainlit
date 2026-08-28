@@ -442,9 +442,6 @@ class CodeSettings(BaseModel):
 
     # Helpers
     author_rename: Optional[Callable[[str], Awaitable[str]]] = None
-    # ``BaseDataLayer`` is gone with ``chainlit.data``; the factory is untyped
-    # until the ``@cl.data_layer`` hook is redefined against ``chainlit.persistence``.
-    data_layer: Optional[Callable[[], Any]] = None
 
 
 class ProjectSettings(BaseModel):

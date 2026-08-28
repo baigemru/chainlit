@@ -180,6 +180,7 @@ def make_websocket_handler(
                 thread_store=thread_store,
                 heartbeat_ms=heartbeat_ms,
                 on_ready=(lambda: on_ready(arrival)) if on_ready is not None else None,
+                fresh_page_load=arrival.fresh_page_load,
             )
         finally:
             # The socket is gone; the session is not. It keeps its queue,
@@ -201,6 +202,7 @@ async def _serve(
     thread_store: Optional[ThreadStore],
     heartbeat_ms: int,
     on_ready: Optional[Callable[[], Awaitable[None]]] = None,
+    fresh_page_load: bool = True,
 ) -> None:
     """Run the reader, the restore and the heartbeat until the socket goes.
 
@@ -220,7 +222,9 @@ async def _serve(
             # buffered while disconnected -- and an answer typed before a
             # reload arrives *during* this, which is exactly what the
             # restore has to notice.
-            await restore(session, thread_store=thread_store)
+            await restore(
+                session, thread_store=thread_store, fresh_page_load=fresh_page_load
+            )
             if on_ready is not None:
                 # After the replay, inside the group: a hook that fails is
                 # this connection's failure, and one that launches work

@@ -127,6 +127,14 @@ BYSTANDER_SCENARIOS = (
     ),
     Scenario(
         name="eviction happens first, so the conversation reads as idle again",
+        superseded=(
+            "deleting resume=delete steps through the socket is gone: "
+            "handshake.restore is never called with prune=True, and "
+            "controllers.project.hide_resume_deleted owns the read path. The eviction "
+            "half is the sibling row 'a session parked on a question nobody came back "
+            "to is evicted'; the ordering wants respelling against hiding once "
+            "runner._resume hides."
+        ),
         why=(
             "This is what the eviction is for. The abandoned session's work "
             "makes the conversation look alive, and nothing is tidied up "

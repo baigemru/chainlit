@@ -25,6 +25,7 @@ import msgspec
 
 from chainlit import persist
 from chainlit.context import init_context
+from chainlit.controllers.project import hide_resume_deleted
 from chainlit.emitter import Emitter
 from chainlit.logger import logger
 from chainlit.persistence.records import ThreadDetail, ThreadPatch
@@ -38,6 +39,7 @@ from chainlit.protocol.payloads import (
 )
 from chainlit.utils import utc_now
 from chainlit.ws.handshake import Arrival, sweep_superseded
+from chainlit.ws.lookup import SessionLookup
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import Session, TranscriptEntry
 
@@ -192,28 +194,46 @@ class ApplicationRunner:
             return
         session.state["transit_message"] = record.value
         name = record.value if isinstance(record.value, str) and record.value else None
-        await persist.open_thread(session, name or session.chat_profile or "transit")
+        # Silently: this runs before ``session.ready``, and the replay
+        # announces the first interaction itself.
+        await persist.open_thread(
+            session, name or session.chat_profile or "transit", announce=False
+        )
 
     async def _resume(self, session: Session) -> bool:
-        """Load the thread this session was opened on, if it is the user's."""
+        """Load the thread this session was opened on, if it is the user's.
+
+        Ownership is checked before anything else and regardless of which
+        hooks the application registered: a session that keeps a thread id
+        it does not own would write its next message into somebody else's
+        conversation, so a refused thread is *disowned* -- the session gets a
+        fresh id and a fresh writer -- not merely left unreplayed.
+        """
         if self.persistence is None or session.first_interaction:
-            return False
-        if not (self.code.on_chat_resume or self.code.on_thread_ready):
             return False
         thread_id = session.thread_id
         identifier = _identifier(session.user)
-        if not thread_id or identifier is None:
+        if not thread_id:
             return False
 
         async with self.persistence.uow() as unit:
             detail = await unit.threads.get_detail(thread_id)
-        if detail is None or detail.user_identifier != identifier:
+        if detail is None:
+            return False
+        if identifier is None or detail.user_identifier != identifier:
+            await self._disown_thread(session)
+            return False
+        if not (self.code.on_chat_resume or self.code.on_thread_ready):
             return False
 
         if self.transit is not None:
             # A record parked for this id would outlive a resume, which
             # never reads it, and leak into an unrelated chat later.
             await self.transit.claim(session.id, identifier)
+
+        # Filtered before anything reads it: the hooks and the client both
+        # get a thread already free of the steps a resume takes away.
+        detail = hide_resume_deleted(detail, SessionLookup(self.registry))
 
         metadata = dict(detail.metadata or {})
         session.state.update(
@@ -232,6 +252,22 @@ class ApplicationRunner:
         # do not share a frame.
         session.state["__resumed_thread"] = _thread_dict(detail)
         return True
+
+    async def _disown_thread(self, session: Session) -> None:
+        """Give the session a thread of its own, and a writer to match."""
+        session.thread_id = str(uuid.uuid4())
+        self.registry.set_thread(session.id, session.thread_id)
+        old = session.writer
+        session.writer = None
+        if isinstance(old, SessionWriter):
+            await old.aclose()
+        if self.persistence is not None:
+            session.writer = SessionWriter(
+                self.persistence,
+                session.thread_id,
+                registry=self.writers,
+                hold_until_interaction=True,
+            ).start()
 
     async def on_ready(self, arrival: Arrival) -> None:
         """The screen is rebuilt; now the application may speak."""
@@ -487,20 +523,43 @@ def _transcript_of(detail: ThreadDetail) -> list[TranscriptEntry]:
     by_step: dict[str, TranscriptEntry] = {}
     entries: list[TranscriptEntry] = []
     for record in detail.steps:
-        step = msgspec.convert(msgspec.to_builtins(record), Step)
+        if "message" not in record.type:
+            # Only the conversation is replayed. Tool calls and other
+            # machinery were shown once, when they happened, and a screen
+            # rebuilt from storage shows what was said, not how.
+            continue
+        # NULL columns come back as None, and the wire structs would rather
+        # have the field absent than null -- absent means their default.
+        step = msgspec.convert(_present(msgspec.to_builtins(record)), Step)
         entry = TranscriptEntry(step=step)
         by_step[step.id] = entry
         entries.append(entry)
     for element in detail.elements:
-        payload = msgspec.convert(msgspec.to_builtins(element), Element)
+        payload = msgspec.convert(_present(msgspec.to_builtins(element)), Element)
         if payload.for_id and payload.for_id in by_step:
             by_step[payload.for_id].elements.append(payload)
     return entries
 
 
+def _present(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in record.items() if v is not None}
+
+
 def _thread_dict(detail: ThreadDetail) -> dict[str, Any]:
-    """The ``ThreadDict`` the hooks have always received."""
-    return msgspec.to_builtins(detail)
+    """The ``ThreadDict`` the hooks have always received.
+
+    Nulls stripped throughout: the same dict is the ``thread.resume``
+    snapshot, and the wire structs want an absent field, not a null one.
+    """
+    return _without_nulls(msgspec.to_builtins(detail))
+
+
+def _without_nulls(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _without_nulls(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_without_nulls(v) for v in value]
+    return value
 
 
 class ThreadStoreAdapter:

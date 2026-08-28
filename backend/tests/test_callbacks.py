@@ -341,20 +341,6 @@ async def test_on_profile_start_is_registered(test_config):
     assert seen is info
 
 
-def test_data_layer_config(test_config):
-    factory_calls = 0
-
-    @callbacks.data_layer
-    def make_layer():
-        nonlocal factory_calls
-        factory_calls += 1
-        return object()
-
-    # Not wrapped: the factory is called synchronously and returns its value.
-    assert test_config.code.data_layer() is not None
-    assert factory_calls == 1
-
-
 def test_chat_profile_with_config_overrides():
     from chainlit.config import ChainlitConfigOverrides, UISettings
 

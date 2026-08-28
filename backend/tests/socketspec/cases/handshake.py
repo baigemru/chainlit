@@ -90,6 +90,14 @@ HANDSHAKE_SCENARIOS = (
     ),
     Scenario(
         name="a session that has already interacted leaves the record for its successor",
+        superseded=(
+            "handshake.restore re-sends thread.first_interaction on every kept "
+            "arrival (a page load loses it client-side), so the frame no longer "
+            "evidences a handover being delivered; a kept arrival never claims the "
+            "transit record (runner.on_arrival returns before _claim_transit). "
+            "Inferred from the code, not from the reversal list -- may be "
+            "reclassified as a bug."
+        ),
         why=(
             "The record is parked under an id the current session still "
             "answers to. If its socket flaps between the park and the claim, "
@@ -170,6 +178,13 @@ HANDSHAKE_SCENARIOS = (
     ),
     Scenario(
         name="the start callback runs once across two different handshake branches",
+        superseded=(
+            "thread.first_interaction is re-sent by every restore "
+            "(handshake.restore), so 'opened once' can no longer be counted in "
+            "frames. The start-once guard across the handover and reconnect branches "
+            "is the sibling row 'the start callback runs once even when the handover "
+            "opens no thread'. Inferred, not enumerated -- may be reclassified."
+        ),
         why=(
             "The first hello takes the handover branch and the second cannot "
             "-- claiming the handover made this an interacted session. A "

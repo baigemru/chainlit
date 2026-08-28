@@ -844,3 +844,62 @@ async def test_registries_do_not_see_each_others_writers(
         assert await uow.steps.fetch(record.id) is not None
     finally:
         await writer.aclose(timeout=5.0)
+
+
+async def test_an_upload_that_starts_during_the_close_still_gets_its_row(
+    writer: Recorder, thread_id: str, uow: UnitOfWork
+):
+    """The blob and the row that points at it leave together, or not at all.
+
+    ``aclose`` deliberately keeps accepting submissions while it drains, so
+    that an upload finishing mid-drain still has a row to enqueue. But the
+    drain used to snapshot the outstanding uploads once, which left a window:
+    an upload starting after that snapshot uploaded its blob and was then
+    cancelled before enqueueing its row -- silently, since the cancellation
+    is re-raised without a log. The blob stays in the bucket with nothing
+    pointing at it, which is the one thing this class exists to prevent.
+    """
+    parent = step(thread_id, name="carrier")
+    writer.submit(SaveStep(parent))
+
+    first_release = asyncio.Event()
+    late_started = asyncio.Event()
+    late_release = asyncio.Event()
+
+    async def slow_upload() -> None:
+        await first_release.wait()
+        return None
+
+    async def late_upload() -> None:
+        late_started.set()
+        await late_release.wait()
+        return None
+
+    early = element(thread_id, for_id=parent.id)
+    writer.submit_element(early, slow_upload)
+
+    closing = asyncio.create_task(writer.aclose())
+    await asyncio.sleep(0.05)
+
+    late = element(thread_id, for_id=parent.id)
+    writer.submit_element(late, late_upload)
+    first_release.set()
+
+    await asyncio.wait_for(late_started.wait(), timeout=5.0)
+
+    # Held until the *first* fence has demonstrably passed -- the early row is
+    # committed -- so the late upload is still in flight at exactly the moment
+    # a one-shot drain would decide it was finished and let `aclose` cancel it.
+    async def committed() -> None:
+        while await uow.elements.fetch(thread_id, early.id) is None:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(committed(), timeout=5.0)
+    late_release.set()
+    await asyncio.wait_for(closing, timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, early.id) is not None
+    assert await uow.elements.fetch(thread_id, late.id) is not None, (
+        "the blob was uploaded and the row was not written: an orphan in the "
+        "bucket, which is exactly what the ordering is for"
+    )

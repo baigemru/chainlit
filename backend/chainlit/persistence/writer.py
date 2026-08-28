@@ -456,6 +456,13 @@ class SessionWriter:
         the uploads outstanding right now, then a fence behind the rows they
         just queued. Both are covered by one deadline.
 
+        Repeated until no upload is outstanding, not done once: submissions
+        keep being accepted while this runs -- ``aclose`` says so deliberately
+        -- so an upload starting after the first snapshot would upload its
+        blob and then be cancelled before enqueueing the row that points at
+        it, leaving the blob orphaned in the bucket. That is the one invariant
+        this class exists to hold.
+
         Bounded and silent on failure: a reader that cannot get a clean
         barrier proceeds with a possibly-incomplete read, which is what it did
         before any barrier existed.
@@ -469,23 +476,28 @@ class SessionWriter:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         try:
-            uploads = tuple(self._uploads)
-            if uploads:
-                _done, pending = await asyncio.wait(
-                    uploads, timeout=max(0.0, deadline - loop.time())
-                )
-                if pending:
-                    logger.warning(
-                        "Timed out waiting for %d upload(s) of thread %s; "
-                        "reading anyway.",
-                        len(pending),
-                        self.thread_id,
+            while True:
+                uploads = tuple(self._uploads)
+                if uploads:
+                    _done, pending = await asyncio.wait(
+                        uploads, timeout=max(0.0, deadline - loop.time())
                     )
-            fence = loop.create_future()
-            self._queue.put_nowait(_Fence(fence))
-            await asyncio.wait_for(
-                asyncio.shield(fence), max(0.0, deadline - loop.time())
-            )
+                    if pending:
+                        logger.warning(
+                            "Timed out waiting for %d upload(s) of thread %s; "
+                            "reading anyway.",
+                            len(pending),
+                            self.thread_id,
+                        )
+                fence = loop.create_future()
+                self._queue.put_nowait(_Fence(fence))
+                await asyncio.wait_for(
+                    asyncio.shield(fence), max(0.0, deadline - loop.time())
+                )
+                if not self._uploads:
+                    return
+                if loop.time() >= deadline:
+                    raise TimeoutError
         except TimeoutError:
             logger.warning(
                 "Timed out after %ss waiting for the pending writes of thread "

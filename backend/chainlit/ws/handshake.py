@@ -310,4 +310,4 @@ async def restore(
     # Level-triggered, and last: the client's spinner is a boolean, and the
     # only honest value for it is the one that is true once everything else
     # has been said.
-    session.send(TaskIndicator(running=session.has_live_task))
+    session.send(TaskIndicator(running=session.is_busy))

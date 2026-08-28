@@ -285,6 +285,18 @@ class Session:
         )
 
     @property
+    def is_busy(self) -> bool:
+        """Whether the spinner should be lit: working, and not waiting on the user.
+
+        Not ``has_live_task``: a task parked on a question is alive -- it
+        keeps the session and protects its steps -- but the one who has to
+        act is the user, and a lit spinner locks the composer they would
+        act in. The old counter got this right by accident; this gets it
+        right by definition.
+        """
+        return self.has_live_task and not self.has_live_ask
+
+    @property
     def has_parked_reply(self) -> bool:
         return bool(self.parked_replies)
 

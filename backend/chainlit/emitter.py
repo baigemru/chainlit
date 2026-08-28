@@ -312,7 +312,7 @@ class Emitter:
 
     def resync_task_indicator(self) -> None:
         """Say whether anything is running, from the tasks, never a counter."""
-        self.session.send(TaskIndicator(running=self.session.has_live_task))
+        self.session.send(TaskIndicator(running=self.session.is_busy))
 
     # ---------------------------------------------------------------- thread
 

@@ -730,3 +730,56 @@ def test_a_disconnect_persists_state_and_a_reconnect_keeps_the_writer(
 
     assert thread_ids(db_url) == [thread_id]
     assert {s.output for s in detail.steps} == {"one", "echo: one", "two", "echo: two"}
+
+
+def test_an_offer_after_a_resume_leaves_the_composer_open(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """on_thread_ready parks on a question for hours; the user must still type.
+
+    The spinner locks the composer, and it is derived from the session's
+    tasks. A resume runs on_chat_resume in one task and on_thread_ready in
+    another; when the first ends it resyncs the spinner -- and the second,
+    waiting on an offer, is alive. Alive is not busy: a task waiting on the
+    user must leave the spinner dark, or every resumed chat is locked for
+    as long as the offer stands.
+    """
+    seed_user(db_url, ALICE)
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo: {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        pass
+
+    async def on_thread_ready(thread: Dict[str, Any]) -> None:
+        await cl.AskActionMessage(
+            content="continue?",
+            actions=[cl.Action(name="yes", payload={})],
+            timeout=3600,
+        ).send()
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+    test_config.code.on_thread_ready = on_thread_ready
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            send_and_read_reply(ws, "first words")
+        thread_id = handshake[0]["threadId"]
+        wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+
+        with client.websocket_connect("/ws") as ws:
+            open_session(ws, sessionId="s2", threadId=thread_id)
+            read_until(ws, "ask.start")
+            after: List[dict] = []
+            for _ in range(6):
+                try:
+                    after.append(json.loads(ws.receive_text(timeout=0.4)))
+                except Exception:
+                    break
+
+    spinner = [f["running"] for f in after if f["t"] == "task.indicator"]
+    assert True not in spinner, after

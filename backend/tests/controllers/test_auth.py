@@ -23,7 +23,6 @@ from litestar.di import Provide
 from litestar.testing import create_test_client
 
 from chainlit.config import config
-from chainlit.controllers.auth import AuthController
 from chainlit.oauth_providers import OAuthProvider
 from chainlit.persistence.records import UserRecord
 from chainlit.plugin import ChainlitPlugin
@@ -189,19 +188,13 @@ def client(user_service: Optional[FakeUserService] = None, **kwargs):
     async def provide_fake() -> Any:
         return user_service
 
-    controller = type(
-        "TestAuthController",
-        (AuthController,),
-        {
-            "dependencies": {
-                **AuthController.dependencies,
-                "user_service": Provide(provide_fake),
-            }
-        },
-    )
+    # Bound at the application layer, not by subclassing the controller.
+    # The plugin brings the routes now, and contributes its own bindings
+    # with `setdefault`, so one passed here simply wins.
     return create_test_client(
-        route_handlers=[controller],
+        route_handlers=[],
         plugins=[ChainlitPlugin(auth=chainlit_auth(token_secret=SECRET))],
+        dependencies={"user_service": Provide(provide_fake)},
         debug=False,
         **kwargs,
     )

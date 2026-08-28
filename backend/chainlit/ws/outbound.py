@@ -50,7 +50,16 @@ from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Final, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterator,
+    Callable,
+    Final,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from litestar.status_codes import WS_1000_NORMAL_CLOSURE
 
@@ -258,6 +267,16 @@ class Outbound:
     # ------------------------------------------------------------ observation
 
     @property
+    def pending_frames(self) -> Tuple["ServerMsg", ...]:
+        """The messages queued and not yet written, in order.
+
+        The fences and the close marker are not messages and are left out:
+        they are how this queue talks to itself, and a caller counting
+        what a session is about to say should not have to know they exist.
+        """
+        return tuple(item for item in self._items if not isinstance(item, _Control))
+
+    @property
     def backlog(self) -> int:
         """Frames waiting to be written, including one being written now."""
         return self._pending
@@ -306,15 +325,15 @@ class Outbound:
         Returns ``False`` if the frame was refused, which happens when the
         queue is already closed or when the backlog is full. A full backlog
         is not a dropped frame -- it *closes the connection*
-        (``CloseCode.INTERNAL``), because a client that missed a delta on this
-        wire cannot be repaired in place, and reconnect-and-resume rebuilds it
-        correctly in one frame. The refusal is counted in ``dropped``, logged,
-        and passed to ``on_overflow``.
+        (``CloseCode.BACKLOG_EXCEEDED``), because a client that missed a delta
+        on this wire cannot be repaired in place, and reconnect-and-resume
+        rebuilds it correctly in one frame. The refusal is counted in
+        ``dropped``, logged, and passed to ``on_overflow``.
 
-        ``INTERNAL`` is a policy close wearing the catch-all code: the
-        protocol has no member for "the peer stopped reading". See the module
-        report; adding one is a change to ``codec.CloseCode``, not to this
-        file.
+        The code is its own, not ``INTERNAL``: nothing failed here. The
+        server is fine and the session is intact -- the peer stopped reading
+        -- and the client is meant to come straight back, which a catch-all
+        "internal server error" tells it nothing about.
         """
         if self._closed or self._fatal is not None:
             self._dropped += 1
@@ -338,7 +357,7 @@ class Outbound:
             event = Overflow(
                 tag=_tag_of(msg), backlog=self._pending, dropped=self._dropped
             )
-            self.abort(CloseCode.INTERNAL, "outbound backlog exceeded")
+            self.abort(CloseCode.BACKLOG_EXCEEDED, "outbound backlog exceeded")
             self._notify_overflow(event)
             return False
 

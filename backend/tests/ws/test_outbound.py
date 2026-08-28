@@ -173,11 +173,11 @@ def test_overflow_refuses_the_frame_closes_and_is_observable() -> None:
     with create_test_client([handler]) as client, client.websocket_connect("/ws") as ws:
         code = close_code_of(ws)
 
-    assert code == CloseCode.INTERNAL
+    assert code == CloseCode.BACKLOG_EXCEEDED
     assert state["accepted"] == [True, True, True, True, False, False]
     assert state["overflowed"] is True
     assert state["dropped"] == 2
-    assert state["close_code"] == CloseCode.INTERNAL
+    assert state["close_code"] == CloseCode.BACKLOG_EXCEEDED
     # Observable, and observable once: the second refusal is a closing queue,
     # not a second overflow.
     assert seen == [Overflow(tag="step.stream.token", backlog=4, dropped=1)]
@@ -725,7 +725,7 @@ async def test_live_slow_client_overflows_rather_than_blocking_producers() -> No
     assert state.get("done") is True, state
     assert state["overflowed"] is True
     assert state["dropped"] >= 1
-    assert state["close_code"] == CloseCode.INTERNAL
+    assert state["close_code"] == CloseCode.BACKLOG_EXCEEDED
     # The bound was reached because the socket stalled, and the producer paid
     # nothing for it: 400 issues against a wedged connection in well under a
     # second, where an unqueued producer would still be inside its first send.

@@ -122,12 +122,24 @@ def test_the_plugin_contributes_the_service_dependencies(persistence: Persistenc
     assert "db_session" in names
 
 
-def test_without_persistence_nothing_database_shaped_is_registered():
-    """No data layer is Chainlit's default and has to stay startable."""
+def test_without_persistence_the_database_routes_refuse_rather_than_break():
+    """No data layer is Chainlit's default and has to stay startable.
+
+    The service names *are* bound, which reads backwards until you see
+    why: Litestar resolves dependencies at registration, so a handler
+    asking for ``threads`` with nothing bound is a startup failure -- and
+    ``/project/settings`` lives on the same controller, so the whole
+    frontend would fail to load over a feature the application never asked
+    for. They are bound to a refusal instead, and the refusal says what is
+    actually wrong.
+    """
     app = Litestar(plugins=[ChainlitPlugin()])
 
     assert "db_session" not in app.dependencies
-    assert "threads" not in app.dependencies
+
+    with create_test_client(plugins=[ChainlitPlugin()]) as client:
+        assert client.get("/health").status_code == 200
+        assert client.post("/project/threads", json={}).status_code == 503
 
 
 # --- request_max_body_size ---------------------------------------------------

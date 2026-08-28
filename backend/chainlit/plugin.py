@@ -44,8 +44,9 @@ from typing import (
 
 from litestar import Litestar, Request, Response, Router
 from litestar.config.app import AppConfig
+from litestar.di import Provide
 from litestar.enums import MediaType
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, ServiceUnavailableException
 from litestar.exceptions.responses import create_exception_response
 from litestar.plugins import InitPlugin
 from litestar.response import File
@@ -53,6 +54,13 @@ from litestar.static_files import create_static_files_router
 from litestar.stores.registry import StoreRegistry
 from litestar.types import Empty, EmptyType
 
+from chainlit.controllers.auth import (
+    AuthController,
+    provide_security,
+    provide_user_service,
+)
+from chainlit.controllers.files import FilesController
+from chainlit.controllers.project import ProjectController
 from chainlit.security import ChainlitAuth, chainlit_auth, get_auth_secret
 from chainlit.transit_store import (
     SWEEP_INTERVAL_SECONDS,
@@ -60,6 +68,10 @@ from chainlit.transit_store import (
     TransitStore,
     transit_sweeper,
 )
+from chainlit.ws.connection import make_websocket_handler
+from chainlit.ws.lookup import SessionLookup
+from chainlit.ws.registry import SessionRegistry
+from chainlit.ws.session import Session
 
 if TYPE_CHECKING:
     from chainlit.persistence.config import Persistence
@@ -208,6 +220,7 @@ class ChainlitPlugin(InitPlugin):
         "_frontend_dir",
         "_persistence",
         "_request_max_body_size",
+        "_sessions",
         "_transit",
         "_transit_sweep_interval",
     )
@@ -229,6 +242,11 @@ class ChainlitPlugin(InitPlugin):
         self._auth = self._resolve_auth(auth, config)
         self._frontend_dir = frontend_dir if frontend_dir is not None else FRONTEND_DIST
         self._transit = transit if transit is not None else TransitStore()
+        #: One registry per plugin instance, never a module global. A
+        #: process-wide one would be the old ``ws_sessions_id`` again, and
+        #: two applications in one interpreter -- which is what two tests
+        #: are -- would see each other's sessions.
+        self._sessions = SessionRegistry()
         self._transit_sweep_interval = transit_sweep_interval
         self._request_max_body_size: Union[int, None] = (
             max_request_body_size(config)
@@ -275,12 +293,16 @@ class ChainlitPlugin(InitPlugin):
     def route_handlers(self) -> Sequence[Any]:
         """Chainlit's own routes.
 
-        Only the static assets so far — the REST API lands here as it is
-        ported, which is why they are gathered under one router: that router
-        is the layer that owns Chainlit's body-size limit and its 404
-        behaviour, so a host embedding Chainlit inherits neither app-wide.
+        Gathered under one router on purpose: that router is the layer that
+        owns Chainlit's body-size limit and its 404 behaviour, so a host
+        embedding Chainlit inherits neither app-wide.
         """
-        handlers: list[Any] = []
+        handlers: list[Any] = [
+            AuthController,
+            ProjectController,
+            FilesController,
+            self._websocket(),
+        ]
         assets = self._frontend_dir / "assets"
         if assets.is_dir():
             handlers.append(
@@ -300,6 +322,54 @@ class ChainlitPlugin(InitPlugin):
             )
         return handlers
 
+    def _bind_absent_services(self, app_config: AppConfig) -> None:
+        """Answer 503 for the routes that need a database there isn't.
+
+        Litestar resolves dependencies at registration, so a handler asking
+        for ``threads`` with nothing bound is a startup failure -- which
+        would mean an application with no persistence could not mount the
+        routes that do not need any. ``/project/settings`` is one of those,
+        and the frontend cannot draw itself without it.
+
+        So the routes are always mounted and the missing halves say what is
+        actually wrong. "Service unavailable" is the truth here; a 500 would
+        blame the request, and refusing to start would take a whole
+        application down over a feature it never asked for.
+        """
+        if self._persistence is not None:
+            return
+
+        # One provider per name, never one shared: Litestar refuses the same
+        # ``Provide`` object under two keys, on the grounds that an override
+        # has to name the key it overrides.
+        def refuse(service: str) -> Provide:
+            def unavailable() -> Any:
+                raise ServiceUnavailableException(
+                    f"This route needs {service}, and no data layer is configured."
+                )
+
+            return Provide(unavailable, sync_to_thread=False)
+
+        for name in ("users", "threads", "steps", "elements", "feedbacks"):
+            app_config.dependencies.setdefault(name, refuse(name))
+
+    def _websocket(self) -> Any:
+        """The one socket, at the path the client already speaks to."""
+
+        def make_session(session_id: str, hello: Any, user: Any) -> Session:
+            return Session(
+                id=session_id,
+                user=user,
+                thread_id=hello.thread_id,
+                chat_profile=hello.chat_profile,
+                client_type=hello.client_type,
+                user_env=dict(hello.user_env or {}),
+            )
+
+        return make_websocket_handler(
+            registry=self._sessions, make_session=make_session
+        )
+
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
         if self._persistence is not None:
             # Appending a plugin here is seen by the init loop: Litestar
@@ -308,6 +378,29 @@ class ChainlitPlugin(InitPlugin):
             # own ``SQLAlchemyPlugin`` installs its two sub-plugins.
             app_config.plugins.append(self._persistence.plugin())
             app_config.dependencies.update(self._persistence.dependencies())
+
+        # The two session-affine routes ask for this by name, through a
+        # protocol they declare themselves. Both are required dependencies,
+        # so forgetting to bind one is a registration error rather than a
+        # surprise at request time.
+        # setdefault throughout: a host that has already bound one of these
+        # names keeps its own. A plugin that overwrote them would be
+        # deciding something about the application it was added to.
+        app_config.dependencies.setdefault(
+            "sessions",
+            Provide(lambda: SessionLookup(self._sessions), sync_to_thread=False),
+        )
+        app_config.dependencies.setdefault(
+            "persistence_enabled",
+            Provide(lambda: self._persistence is not None, sync_to_thread=False),
+        )
+        app_config.dependencies.setdefault(
+            "security", Provide(provide_security, sync_to_thread=False)
+        )
+        app_config.dependencies.setdefault(
+            "user_service", Provide(provide_user_service)
+        )
+        self._bind_absent_services(app_config)
 
         if self._auth is not None:
             # AbstractSecurityConfig.on_app_init inserts the authentication

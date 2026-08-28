@@ -444,10 +444,13 @@ class AuthController(Controller):
 
     path = "/"
     tags = ["auth"]
-    dependencies = {
-        "security": Provide(provide_security, sync_to_thread=False),
-        "user_service": Provide(provide_user_service),
-    }
+    # Deliberately empty. Both `security` and `user_service` are bound by
+    # `ChainlitPlugin` at the *application* layer, with `setdefault`, so a
+    # host that wants its own keeps it. Declaring them here instead would
+    # make them unoverridable: Litestar resolves a dependency at the
+    # closest layer that declares it, and nothing is closer than the
+    # controller a handler lives on.
+    dependencies: Dict[str, Provide] = {}
 
     # --- config ---
 

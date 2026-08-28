@@ -38,8 +38,8 @@ async def public() -> dict:
     return {"public": True}
 
 
-@get("/health")
-async def health() -> dict:
+@get("/probe")
+async def probe() -> dict:
     """No opt key: this one is public only if the ``exclude`` pattern says so."""
     return {"ok": True}
 
@@ -49,7 +49,7 @@ async def public_touching_user(request: Request) -> dict:
     return {"identifier": request.user.identifier}
 
 
-@websocket_listener("/ws")
+@websocket_listener("/probe-ws")
 async def ws(data: str, socket: WebSocket) -> dict:
     user: Identity = socket.user
     return {"identifier": user.identifier}
@@ -62,7 +62,7 @@ def _auth(**kwargs):
 def _client(**kwargs):
     auth = kwargs.pop("auth", None) or _auth()
     return create_test_client(
-        route_handlers=[whoami, public, public_touching_user, health, ws],
+        route_handlers=[whoami, public, public_touching_user, probe, ws],
         plugins=[ChainlitPlugin(auth=auth)],
         debug=False,
         **kwargs,
@@ -132,10 +132,10 @@ def test_a_regex_excluded_path_needs_no_credentials():
     """``exclude`` takes regex patterns and ``exclude_from_auth`` is an opt
     key: two separate mechanisms, and both have to reach the middleware."""
     with _client() as client:
-        assert client.get("/health").status_code == 401
+        assert client.get("/probe").status_code == 401
 
-    with _client(auth=_auth(exclude=["^/health"])) as client:
-        assert client.get("/health").json() == {"ok": True}
+    with _client(auth=_auth(exclude=["^/probe"])) as client:
+        assert client.get("/probe").json() == {"ok": True}
 
 
 def test_a_public_handler_must_not_touch_the_user():
@@ -233,7 +233,7 @@ def test_the_cookie_authenticates_the_websocket():
     defaults to ``{http, websocket}``."""
     with _client() as client:
         client.cookies.set(COOKIE, _auth().mint("ada"))
-        with client.websocket_connect("/ws") as socket:
+        with client.websocket_connect("/probe-ws") as socket:
             socket.send_text("ping")
             assert socket.receive_json() == {"identifier": "ada"}
 
@@ -242,7 +242,7 @@ def test_an_unauthenticated_websocket_is_refused():
     from litestar.exceptions import WebSocketDisconnect
 
     def connect(client) -> None:
-        with client.websocket_connect("/ws") as socket:
+        with client.websocket_connect("/probe-ws") as socket:
             socket.send_text("ping")
             socket.receive_json()
 

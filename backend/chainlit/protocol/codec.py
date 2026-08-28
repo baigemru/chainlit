@@ -1,14 +1,9 @@
 """Encoders, decoders and wire-level enums.
 
-Two frame kinds:
-
-``TEXT``
-    JSON. Everything except the two audio messages.
-
-``BINARY``
-    msgpack. Only ``audio.out`` (server) and ``audio.in`` (client). JSON
-    would base64 their ``bytes`` payload, inflating every audio chunk by a
-    third for no benefit — msgpack carries raw bytes natively.
+Every frame is JSON in a text frame. There is no binary branch: the only
+messages that ever needed one were the two audio chunks, and audio is gone
+-- file upload and download were already HTTP, so nothing else on this
+wire carries ``bytes``.
 
 The decoders are module-level singletons: building a ``msgspec.Decoder``
 compiles the type once, and rebuilding it per frame is the single easiest
@@ -22,30 +17,18 @@ from typing import Final
 
 import msgspec
 
-from chainlit.protocol.client import AudioIn, ClientMsg
-from chainlit.protocol.server import AudioOut, ServerMsg
+from chainlit.protocol.client import ClientMsg
+from chainlit.protocol.server import ServerMsg
 
 __all__ = [
-    "BINARY_CLIENT_TAGS",
-    "BINARY_SERVER_TAGS",
-    "MAX_TEXT_FRAME_BYTES",
+    "MAX_FRAME_BYTES",
     "CloseCode",
     "ErrorCode",
-    "FrameKind",
-    "client_frame_kind",
     "decode_client",
     "decode_server",
     "encode_client",
     "encode_server",
-    "server_frame_kind",
 ]
-
-
-class FrameKind(StrEnum):
-    """Which websocket frame type a message travels in."""
-
-    TEXT = "text"
-    BINARY = "binary"
 
 
 class CloseCode(IntEnum):
@@ -104,72 +87,41 @@ class ErrorCode(StrEnum):
     PROFILE_FORBIDDEN = "profile_forbidden"
     """The requested chat profile does not exist for this user."""
 
-    RPC_TIMEOUT = "rpc_timeout"
     RATE_LIMITED = "rate_limited"
     PAYLOAD_TOO_LARGE = "payload_too_large"
     INTERNAL = "internal"
 
 
-MAX_TEXT_FRAME_BYTES: Final[int] = 8 * 1024 * 1024
-"""Refuse a text frame above this; answer with ``CloseCode.FRAME_TOO_LARGE``."""
+MAX_FRAME_BYTES: Final[int] = 8 * 1024 * 1024
+"""Refuse a frame above this; answer with ``CloseCode.FRAME_TOO_LARGE``."""
 
 
-BINARY_SERVER_TAGS: Final[frozenset[str]] = frozenset({"audio.out"})
-BINARY_CLIENT_TAGS: Final[frozenset[str]] = frozenset({"audio.in"})
-
-
-_json_encoder: Final = msgspec.json.Encoder()
-_msgpack_encoder: Final = msgspec.msgpack.Encoder()
-
-_server_json_decoder: Final = msgspec.json.Decoder(ServerMsg)
-_server_msgpack_decoder: Final = msgspec.msgpack.Decoder(ServerMsg)
-_client_json_decoder: Final = msgspec.json.Decoder(ClientMsg)
-_client_msgpack_decoder: Final = msgspec.msgpack.Decoder(ClientMsg)
-
-
-def server_frame_kind(msg: ServerMsg) -> FrameKind:
-    """Which frame kind ``msg`` must be sent in."""
-    return FrameKind.BINARY if isinstance(msg, AudioOut) else FrameKind.TEXT
-
-
-def client_frame_kind(msg: ClientMsg) -> FrameKind:
-    """Which frame kind ``msg`` must be sent in."""
-    return FrameKind.BINARY if isinstance(msg, AudioIn) else FrameKind.TEXT
+_encoder: Final = msgspec.json.Encoder()
+_server_decoder: Final = msgspec.json.Decoder(ServerMsg)
+_client_decoder: Final = msgspec.json.Decoder(ClientMsg)
 
 
 def encode_server(msg: ServerMsg) -> bytes:
-    """Serialize a server message, picking the encoder from its type."""
-    if server_frame_kind(msg) is FrameKind.BINARY:
-        return _msgpack_encoder.encode(msg)
-    return _json_encoder.encode(msg)
+    """Serialize a server message."""
+    return _encoder.encode(msg)
 
 
 def encode_client(msg: ClientMsg) -> bytes:
-    """Serialize a client message, picking the encoder from its type."""
-    if client_frame_kind(msg) is FrameKind.BINARY:
-        return _msgpack_encoder.encode(msg)
-    return _json_encoder.encode(msg)
+    """Serialize a client message."""
+    return _encoder.encode(msg)
 
 
-def decode_server(data: bytes, kind: FrameKind = FrameKind.TEXT) -> ServerMsg:
+def decode_server(data: bytes) -> ServerMsg:
     """Parse a server message out of a received frame.
-
-    ``kind`` comes from the transport, which is the only thing that knows
-    whether the frame arrived as text or binary — guessing from the bytes
-    is how a protocol grows a content sniffer.
 
     Raises:
         msgspec.ValidationError: unknown tag, wrong branch, or a field of
             the wrong type.
-        msgspec.DecodeError: malformed JSON / msgpack.
+        msgspec.DecodeError: malformed JSON.
     """
-    if kind is FrameKind.BINARY:
-        return _server_msgpack_decoder.decode(data)
-    return _server_json_decoder.decode(data)
+    return _server_decoder.decode(data)
 
 
-def decode_client(data: bytes, kind: FrameKind = FrameKind.TEXT) -> ClientMsg:
+def decode_client(data: bytes) -> ClientMsg:
     """Parse a client message out of a received frame. See ``decode_server``."""
-    if kind is FrameKind.BINARY:
-        return _client_msgpack_decoder.decode(data)
-    return _client_json_decoder.decode(data)
+    return _client_decoder.decode(data)

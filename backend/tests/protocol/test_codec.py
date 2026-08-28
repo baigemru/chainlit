@@ -7,12 +7,9 @@ import pytest
 
 from chainlit.protocol import client as c, server as s
 from chainlit.protocol.codec import (
-    BINARY_CLIENT_TAGS,
-    BINARY_SERVER_TAGS,
-    MAX_TEXT_FRAME_BYTES,
+    MAX_FRAME_BYTES,
     CloseCode,
     ErrorCode,
-    FrameKind,
     decode_client,
     decode_server,
     encode_server,
@@ -45,20 +42,19 @@ def test_an_error_message_accepts_an_error_code() -> None:
     assert decode_server(encode_server(msg)) == msg
 
 
-def test_binary_tag_sets_agree_with_the_frame_selector() -> None:
-    assert BINARY_SERVER_TAGS == {"audio.out"}
-    assert BINARY_CLIENT_TAGS == {"audio.in"}
+def test_max_frame_is_declared() -> None:
+    assert MAX_FRAME_BYTES > 0
 
 
-def test_max_text_frame_is_declared() -> None:
-    assert MAX_TEXT_FRAME_BYTES > 0
+def test_the_wire_is_json_only() -> None:
+    """No binary branch survives: every frame must parse as JSON.
 
-
-def test_decoding_a_text_frame_as_binary_fails_loudly() -> None:
-    """A transport that mixes the two kinds up must not half-succeed."""
+    The two audio messages were the only ones that ever needed msgpack, and
+    they are gone. A frame that only msgpack can read means someone
+    reintroduced a second encoder without saying so.
+    """
     payload = encode_server(s.TaskIndicator(running=True))
-    with pytest.raises((msgspec.ValidationError, msgspec.DecodeError)):
-        decode_server(payload, FrameKind.BINARY)
+    assert msgspec.json.decode(payload) == {"t": "task.indicator", "running": True}
 
 
 def test_malformed_json_raises_decode_error() -> None:

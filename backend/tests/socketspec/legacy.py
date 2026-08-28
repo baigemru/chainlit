@@ -21,7 +21,17 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+)
 from unittest.mock import AsyncMock, Mock, patch
 
 import chainlit.transit as transit
@@ -52,17 +62,13 @@ SID = "spec-sid"
 # Straight renames: the payload travels as-is under the new tag.
 _RENAMES: Dict[str, str] = {
     "resume_thread": "thread.resume",
-    "resume_thread_error": "thread.resume_error",
     "first_interaction": "thread.first_interaction",
     "parent_thread": "thread.parent",
     "open_thread": "thread.open",
     "chat_profile_changed": "profile.changed",
     "set_chat_profile": "session.handoff",
-    "audio_interrupt": "audio.interrupt",
     "toast": "toast",
     "reload": "reload",
-    "window_message": "window.message",
-    "call_fn": "rpc.call",
     "remove_element": "element.remove",
 }
 
@@ -74,12 +80,6 @@ _WRAPPED: Dict[str, Tuple[str, str]] = {
     "stream_token": ("step.stream.token", "token"),
     "element": ("element.upsert", "element"),
     "action": ("action.add", "action"),
-    "chat_settings": ("settings.set", "inputs"),
-    "set_commands": ("commands.set", "commands"),
-    "set_modes": ("modes.set", "modes"),
-    "set_favorites": ("favorites.set", "steps"),
-    "token_usage": ("token.usage", "count"),
-    "audio_connection": ("audio.connection", "state"),
 }
 
 # Neither a rename nor a wrap: the old event shipped a whole object where the
@@ -94,21 +94,50 @@ _EXTRACTED: Dict[str, Tuple[str, Callable[[Any], Dict[str, Any]]]] = {
 
 
 # Collapsed pairs. The reason is only knowable for the timeout half: the
-# legacy `clear_ask` / `clear_call_fn` carry no reason at all, so the table
+# the legacy `clear_ask` carries no reason at all, so the table
 # must not pin one on them. Phase 5 tightens this, it cannot be tightened here
 # without inventing information the current wire does not carry.
 _COLLAPSED: Dict[str, Tuple[str, Dict[str, Any]]] = {
     "ask_timeout": ("ask.end", {"reason": "timeout"}),
     "clear_ask": ("ask.end", {}),
-    "call_fn_timeout": ("rpc.cancel", {"reason": "timeout"}),
-    "clear_call_fn": ("rpc.cancel", {}),
     "task_start": ("task.indicator", {"running": True}),
     "task_end": ("task.indicator", {"running": False}),
 }
 
 
-def translate(event: str, payload: Any = None) -> Tuple[str, Dict[str, Any]]:
-    """Turn one socket.io event into its protocol tag and payload."""
+# Events the old code still emits and the protocol no longer carries. They
+# are dropped on the floor rather than mapped, because the feature behind
+# each one is gone -- see INTENTIONALLY_DROPPED in tests/protocol/
+# test_coverage.py for the evidence. This set exists so that a *new*
+# unmapped event is still a loud KeyError: silence here would be exactly
+# the "passes by omission" failure the ledger is built to prevent.
+_RETIRED: FrozenSet[str] = frozenset(
+    {
+        "audio_chunk",
+        "audio_connection",
+        "audio_interrupt",
+        "call_fn",
+        "call_fn_timeout",
+        "clear_call_fn",
+        "chat_settings",
+        "resume_thread_error",
+        "set_commands",
+        "set_favorites",
+        "set_modes",
+        "token_usage",
+        "window_message",
+    }
+)
+
+
+def translate(event: str, payload: Any = None) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Turn one socket.io event into its protocol tag and payload.
+
+    ``None`` means the event belongs to a retired feature: the old code
+    still emits it, and the new wire has no name for it.
+    """
+    if event in _RETIRED:
+        return None
     if event in _COLLAPSED:
         tag, extra = _COLLAPSED[event]
         return tag, dict(extra)
@@ -144,12 +173,6 @@ _HELPER_FRAMES: Dict[str, Callable[..., Any]] = {
     "delete_step": lambda step: ("step.delete", {"stepId": step["id"]}),
     "send_element": lambda element: ("element.upsert", {"element": element}),
     "resume_thread": lambda thread: ("thread.resume", {"thread": thread}),
-    "send_resume_thread_error": lambda error: (
-        "thread.resume_error",
-        {"error": error},
-    ),
-    "set_favorites": lambda steps: ("favorites.set", {"steps": steps}),
-    "update_audio_connection": lambda state: ("audio.connection", {"state": state}),
     "task_end": lambda: ("task.indicator", {"running": False}),
     "init_thread": lambda interaction: (
         "thread.first_interaction",
@@ -183,15 +206,22 @@ class RecordingEmitter:
             interrupt(tag)
 
     async def emit(self, event: str, payload: Any = None) -> None:
-        tag, body = translate(event, payload)
+        frame = translate(event, payload)
+        if frame is None:
+            return
+        tag, body = frame
         self._ledger.wire(tag, body)
         self._sent(tag)
 
     async def clear(self, event: str) -> None:
-        self._ledger.wire(*translate(event))
+        frame = translate(event)
+        if frame is not None:
+            self._ledger.wire(*frame)
 
     async def send_timeout(self, event: str) -> None:
-        self._ledger.wire(*translate(event))
+        frame = translate(event)
+        if frame is not None:
+            self._ledger.wire(*frame)
 
     async def process_message(self, payload: Any) -> Any:
         self._ledger.effect("process_message")
@@ -281,7 +311,9 @@ def _session(factory: Callable[..., Mock], given: Given, ledger: Ledger) -> Mock
     session.emit_ask = Mock(side_effect=emit_ask)
 
     async def emit(event: str, payload: Any = None) -> None:
-        ledger.wire(*translate(event, payload))
+        frame = translate(event, payload)
+        if frame is not None:
+            ledger.wire(*frame)
 
     session.emit = Mock(side_effect=emit)
     return session

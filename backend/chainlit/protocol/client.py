@@ -7,7 +7,7 @@ a transport can dispatch both directions with one decoder shape.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Union, get_args
+from typing import Literal, Union, get_args
 
 import msgspec
 
@@ -16,23 +16,13 @@ from chainlit.protocol.payloads import AskReplyValue, FileRef, Step
 __all__ = [
     "CLIENT_TAGS",
     "AskReply",
-    "AudioEnd",
-    "AudioIn",
-    "AudioStart",
     "ClientMsg",
-    "FavoritesFetch",
     "HeartbeatAck",
     "Hello",
-    "MessageEdit",
-    "MessageFavorite",
     "MessageSend",
     "ProfileSwitch",
-    "RpcResult",
     "SessionClear",
-    "SettingsChange",
-    "SettingsEdit",
     "Stop",
-    "WindowMessage",
 ]
 
 
@@ -91,19 +81,6 @@ class MessageSend(_Msg, tag="message.send"):
     file_references: list[FileRef] = []
 
 
-class MessageEdit(_Msg, tag="message.edit"):
-    message: Step
-
-
-class MessageFavorite(_Msg, tag="message.favorite"):
-    message_id: str
-    favorite: bool = False
-
-
-class FavoritesFetch(_Msg, tag="favorites.fetch"):
-    pass
-
-
 # --------------------------------------------------------------------------
 # Asks
 # --------------------------------------------------------------------------
@@ -122,7 +99,7 @@ class AskReply(_Msg, tag="ask.reply"):
 
 
 # --------------------------------------------------------------------------
-# Profiles and settings
+# Profiles
 # --------------------------------------------------------------------------
 
 
@@ -137,80 +114,14 @@ class ProfileSwitch(_Msg, tag="profile.switch"):
     chat_profile: str
 
 
-class SettingsChange(_Msg, tag="settings.change"):
-    """The settings form was submitted."""
-
-    settings: dict[str, Any] = {}
-
-
-class SettingsEdit(_Msg, tag="settings.edit"):
-    """The settings form changed on the fly, before submission."""
-
-    settings: dict[str, Any] = {}
-
-
-# --------------------------------------------------------------------------
-# Audio
-# --------------------------------------------------------------------------
-
-
-class AudioStart(_Msg, tag="audio.start"):
-    pass
-
-
-class AudioIn(_Msg, tag="audio.in"):
-    """A chunk of recorded audio. Binary frame — msgpack, not JSON."""
-
-    data: bytes
-    mime_type: str = "pcm16"
-    is_start: bool = False
-    elapsed_time: float = 0.0
-
-
-class AudioEnd(_Msg, tag="audio.end"):
-    pass
-
-
-# --------------------------------------------------------------------------
-# Misc
-# --------------------------------------------------------------------------
-
-
-class RpcResult(_Msg, tag="rpc.result"):
-    """The result of a server-initiated ``rpc.call``, correlated by id.
-
-    New as a message: the old protocol carried this in a socket.io ack.
-    """
-
-    call_id: str
-    result: dict[str, Any] | None = None
-    error: str | None = None
-
-
-class WindowMessage(_Msg, tag="window.message"):
-    """Custom data sent by the host window into the app."""
-
-    data: Any = None
-
-
 ClientMsg = Union[
     Hello,
     HeartbeatAck,
     SessionClear,
     Stop,
     MessageSend,
-    MessageEdit,
-    MessageFavorite,
-    FavoritesFetch,
     AskReply,
     ProfileSwitch,
-    SettingsChange,
-    SettingsEdit,
-    AudioStart,
-    AudioIn,
-    AudioEnd,
-    RpcResult,
-    WindowMessage,
 ]
 
 CLIENT_TAGS: frozenset[str] = frozenset(

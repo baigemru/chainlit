@@ -13,13 +13,9 @@ from chainlit.protocol.payloads import (
     Action,
     AskElementReply,
     AskFileSpec,
-    Command,
     CustomElement,
     Feedback,
     FileRef,
-    InputWidgetSpec,
-    Mode,
-    ModeOption,
     Step,
     StepPatch,
     TextElement,
@@ -114,7 +110,6 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
     "ask.end": s.AskEnd(step_id=SAMPLE_STEP.id, reason="timeout"),
     "task.indicator": s.TaskIndicator(running=True),
     "thread.resume": s.ThreadResume(thread=SAMPLE_THREAD),
-    "thread.resume_error": s.ThreadResumeError(error="Thread not found."),
     "thread.first_interaction": s.ThreadFirstInteraction(
         interaction="resume", thread_id="thread-1"
     ),
@@ -129,47 +124,12 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
         keep_transcript=True,
         has_transit_message=True,
     ),
-    "settings.set": s.SettingsSet(
-        inputs=[
-            InputWidgetSpec(
-                id="temperature",
-                label="Temperature",
-                type="slider",
-                initial=0.7,
-                min=0,
-                max=2,
-                step=0.1,
-            )
-        ]
-    ),
-    "commands.set": s.CommandsSet(
-        commands=[
-            Command(id="search", icon="search", description="Search", button=True)
-        ]
-    ),
-    "modes.set": s.ModesSet(
-        modes=[
-            Mode(
-                id="llm",
-                name="Model",
-                options=[ModeOption(id="gpt-5", name="GPT-5", default=True)],
-            )
-        ]
-    ),
-    "favorites.set": s.FavoritesSet(steps=[SAMPLE_STEP]),
     "sidebar.set": s.SidebarSet(
         title="Sources",
         elements=[TextElement(id="el-3", name="src", language="markdown")],
         key="sources-v1",
     ),
-    "audio.connection": s.AudioConnection(state="on"),
-    "audio.out": s.AudioOut(track="voice", mime_type="pcm16", data=b"\x01\x02\x03"),
-    "audio.interrupt": s.AudioInterrupt(),
-    "rpc.call": s.RpcCall(call_id="call-1", name="openModal", args={"title": "Hi"}),
-    "rpc.cancel": s.RpcCancel(call_id="call-1", reason="timeout"),
     "toast": s.Toast(message="Saved", type="success"),
-    "token.usage": s.TokenUsage(count=1234),
-    "window.message": s.WindowMessage(data={"kind": "ping"}),
 }
 
 
@@ -188,21 +148,9 @@ CLIENT_SAMPLES: dict[str, c.ClientMsg] = {
     "message.send": c.MessageSend(
         message=SAMPLE_STEP, file_references=[FileRef(id="file-1")]
     ),
-    "message.edit": c.MessageEdit(message=SAMPLE_STEP),
-    "message.favorite": c.MessageFavorite(message_id=SAMPLE_STEP.id, favorite=True),
-    "favorites.fetch": c.FavoritesFetch(),
     "ask.reply": c.AskReply(
         step_id=SAMPLE_STEP.id,
         value=AskElementReply(submitted=True, props={"choice": "b"}),
     ),
     "profile.switch": c.ProfileSwitch(chat_profile="fast"),
-    "settings.change": c.SettingsChange(settings={"temperature": 0.5}),
-    "settings.edit": c.SettingsEdit(settings={"temperature": 0.5}),
-    "audio.start": c.AudioStart(),
-    "audio.in": c.AudioIn(
-        data=b"\x10\x20\x30", mime_type="pcm16", is_start=True, elapsed_time=12.5
-    ),
-    "audio.end": c.AudioEnd(),
-    "rpc.result": c.RpcResult(call_id="call-1", result={"clicked": True}),
-    "window.message": c.WindowMessage(data=[1, 2, 3]),
 }

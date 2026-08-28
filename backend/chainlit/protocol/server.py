@@ -16,10 +16,7 @@ from msgspec import UNSET, UnsetType
 from chainlit.protocol.payloads import (
     Action,
     AskSpec,
-    Command,
     Element,
-    InputWidgetSpec,
-    Mode,
     Step,
     StepPatch,
     Thread,
@@ -33,25 +30,15 @@ __all__ = [
     "AskEnd",
     "AskEndReason",
     "AskStart",
-    "AudioConnection",
-    "AudioInterrupt",
-    "AudioOut",
-    "CommandsSet",
     "ElementRemove",
     "ElementUpsert",
     "Error",
-    "FavoritesSet",
     "Heartbeat",
-    "ModesSet",
     "ProfileChanged",
     "Reload",
-    "RpcCall",
-    "RpcCancel",
-    "RpcCancelReason",
     "ServerMsg",
     "SessionHandoff",
     "SessionReady",
-    "SettingsSet",
     "SidebarSet",
     "StepDelete",
     "StepStreamStart",
@@ -63,14 +50,10 @@ __all__ = [
     "ThreadOpen",
     "ThreadParent",
     "ThreadResume",
-    "ThreadResumeError",
     "Toast",
-    "TokenUsage",
-    "WindowMessage",
 ]
 
 AskEndReason = Literal["answered", "timeout", "cancelled", "superseded", "stale"]
-RpcCancelReason = Literal["answered", "timeout", "cancelled"]
 
 
 class _Msg(msgspec.Struct, tag_field="t", rename="camel", omit_defaults=True):
@@ -241,10 +224,6 @@ class ThreadResume(_Msg, tag="thread.resume"):
     thread: Thread
 
 
-class ThreadResumeError(_Msg, tag="thread.resume_error"):
-    error: str
-
-
 class ThreadFirstInteraction(_Msg, tag="thread.first_interaction"):
     """The thread row now exists; adopt its id."""
 
@@ -266,7 +245,7 @@ class ThreadOpen(_Msg, tag="thread.open"):
 
 
 # --------------------------------------------------------------------------
-# Profiles and settings
+# Profiles and sidebar
 # --------------------------------------------------------------------------
 
 
@@ -297,22 +276,6 @@ class SessionHandoff(_Msg, tag="session.handoff"):
     has_transit_message: bool = False
 
 
-class SettingsSet(_Msg, tag="settings.set"):
-    inputs: list[InputWidgetSpec] = []
-
-
-class CommandsSet(_Msg, tag="commands.set"):
-    commands: list[Command] = []
-
-
-class ModesSet(_Msg, tag="modes.set"):
-    modes: list[Mode] = []
-
-
-class FavoritesSet(_Msg, tag="favorites.set"):
-    steps: list[Step] = []
-
-
 class SidebarSet(_Msg, tag="sidebar.set"):
     """Title and contents of the element sidebar in one message.
 
@@ -334,55 +297,6 @@ class SidebarSet(_Msg, tag="sidebar.set"):
 
 
 # --------------------------------------------------------------------------
-# Audio
-# --------------------------------------------------------------------------
-
-
-class AudioConnection(_Msg, tag="audio.connection"):
-    state: Literal["on", "off"]
-
-
-class AudioOut(_Msg, tag="audio.out"):
-    """A chunk of synthesized audio. Binary frame — msgpack, not JSON."""
-
-    track: str
-    mime_type: str
-    data: bytes
-
-
-class AudioInterrupt(_Msg, tag="audio.interrupt"):
-    pass
-
-
-# --------------------------------------------------------------------------
-# RPC into the client
-# --------------------------------------------------------------------------
-
-
-class RpcCall(_Msg, tag="rpc.call"):
-    """Call a function in the host page and wait for ``rpc.result``.
-
-    ``call_id`` is explicit. socket.io correlated the reply through its own
-    ack machinery, which is bound to the socket id and therefore did not
-    survive a reconnect.
-    """
-
-    call_id: str
-    name: str
-    args: dict[str, Any] = {}
-
-
-class RpcCancel(_Msg, tag="rpc.cancel"):
-    """Stop waiting for ``call_id``.
-
-    Collapses ``clear_call_fn`` and ``call_fn_timeout``.
-    """
-
-    call_id: str
-    reason: RpcCancelReason = "cancelled"
-
-
-# --------------------------------------------------------------------------
 # Misc
 # --------------------------------------------------------------------------
 
@@ -390,16 +304,6 @@ class RpcCancel(_Msg, tag="rpc.cancel"):
 class Toast(_Msg, tag="toast"):
     message: str
     type: ToastType = "info"
-
-
-class TokenUsage(_Msg, tag="token.usage"):
-    count: int
-
-
-class WindowMessage(_Msg, tag="window.message"):
-    """Custom data forwarded to the host window via postMessage."""
-
-    data: Any = None
 
 
 ServerMsg = Union[
@@ -420,25 +324,13 @@ ServerMsg = Union[
     AskEnd,
     TaskIndicator,
     ThreadResume,
-    ThreadResumeError,
     ThreadFirstInteraction,
     ThreadParent,
     ThreadOpen,
     ProfileChanged,
     SessionHandoff,
-    SettingsSet,
-    CommandsSet,
-    ModesSet,
-    FavoritesSet,
     SidebarSet,
-    AudioConnection,
-    AudioOut,
-    AudioInterrupt,
-    RpcCall,
-    RpcCancel,
     Toast,
-    TokenUsage,
-    WindowMessage,
 ]
 
 SERVER_TAGS: frozenset[str] = frozenset(

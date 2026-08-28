@@ -11,9 +11,9 @@ See ``README.md`` in this package for the old-event-name → tag map.
 from chainlit.protocol import client, codec, payloads, server
 from chainlit.protocol.client import CLIENT_TAGS, ClientMsg
 from chainlit.protocol.codec import (
+    MAX_FRAME_BYTES,
     CloseCode,
     ErrorCode,
-    FrameKind,
     decode_client,
     decode_server,
     encode_client,
@@ -23,11 +23,11 @@ from chainlit.protocol.server import SERVER_TAGS, ServerMsg
 
 __all__ = [
     "CLIENT_TAGS",
+    "MAX_FRAME_BYTES",
     "SERVER_TAGS",
     "ClientMsg",
     "CloseCode",
     "ErrorCode",
-    "FrameKind",
     "ServerMsg",
     "client",
     "codec",

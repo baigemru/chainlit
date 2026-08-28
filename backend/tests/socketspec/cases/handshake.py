@@ -10,7 +10,7 @@ matter which branch each hello takes.
 """
 
 from ..frames import Expect
-from ..spec import AskState, Given, Handover, Incoming, Scenario, assert_that
+from ..spec import Given, Handover, Incoming, Scenario, assert_that
 
 HELLO = Incoming("hello")
 
@@ -187,25 +187,6 @@ HANDSHAKE_SCENARIOS = (
                 result.ledger.count(Expect("thread.first_interaction")) == 1,
                 "the thread was opened twice",
             ),
-        ),
-    ),
-    Scenario(
-        name="a call bound to the dead socket is cancelled before anything is restored",
-        why=(
-            "An in-flight call cannot survive the socket it was addressed "
-            "to. Cancelling it late would kill a call the newly started "
-            "application had already placed on the new one."
-        ),
-        given=Given(
-            restored=True,
-            chat_started=True,
-            pending_ask=AskState(remaining=30),
-        ),
-        when=(HELLO,),
-        expect=(
-            Expect("task.indicator", {"running": False}),
-            Expect("rpc.cancel"),
-            Expect("ask.start"),
         ),
     ),
 )

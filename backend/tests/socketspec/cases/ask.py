@@ -122,17 +122,6 @@ ASK_SCENARIOS = (
         forbid=("ask.start",),
     ),
     Scenario(
-        name="an in-flight call is always cancelled on reconnect",
-        why=(
-            "A call was correlated through a socket.io ack, which is bound to "
-            "the socket id and cannot survive the reconnect. The new protocol "
-            "gives it a callId; until then the only safe move is to cancel."
-        ),
-        given=_reconnect(pending_ask=AskState()),
-        when=(HELLO,),
-        expect=(Expect("rpc.cancel"),),
-    ),
-    Scenario(
         name="an answer arriving mid-restore takes the form down",
         why=(
             "Rebuilding the form is a sequence of awaits, and the reply is "

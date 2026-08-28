@@ -137,7 +137,6 @@ SERVER_MAPPING: dict[str, str] = {
     "task_start": "task.indicator",
     "task_end": "task.indicator",
     "resume_thread": "thread.resume",
-    "resume_thread_error": "thread.resume_error",
     "first_interaction": "thread.first_interaction",
     "parent_thread": "thread.parent",
     "open_thread": "thread.open",
@@ -146,24 +145,11 @@ SERVER_MAPPING: dict[str, str] = {
     # successor id, which "set_chat_profile" did not say and which made it
     # one letter away from the in-place switch_chat_profile.
     "set_chat_profile": "session.handoff",
-    "chat_settings": "settings.set",
-    "set_commands": "commands.set",
-    "set_modes": "modes.set",
-    "set_favorites": "favorites.set",
     # Collapsed pair: the client reconciled both into one sideView atom,
     # each event reading the other's half out of the previous state.
     "set_sidebar_title": "sidebar.set",
     "set_sidebar_elements": "sidebar.set",
-    "audio_connection": "audio.connection",
-    "audio_chunk": "audio.out",
-    "audio_interrupt": "audio.interrupt",
-    "call_fn": "rpc.call",
-    # Collapsed pair, now addressed by call_id.
-    "clear_call_fn": "rpc.cancel",
-    "call_fn_timeout": "rpc.cancel",
     "toast": "toast",
-    "token_usage": "token.usage",
-    "window_message": "window.message",
     "reload": "reload",
 }
 
@@ -177,27 +163,58 @@ CLIENT_MAPPING: dict[str, str] = {
     "stop": "stop",
     "ask_reply": "ask.reply",
     "client_message": "message.send",
-    "edit_message": "message.edit",
-    "message_favorite": "message.favorite",
-    "fetch_favorites": "favorites.fetch",
-    "window_message": "window.message",
-    "audio_start": "audio.start",
-    "audio_chunk": "audio.in",
-    "audio_end": "audio.end",
-    "chat_settings_change": "settings.change",
-    "chat_settings_edit": "settings.edit",
 }
 
+# Dropped with the feature behind them. Each name here was a tag in the
+# first draft of this protocol, and each was cut once the consumer audit
+# showed the feature is off or unreachable. The reason is the evidence:
+# these are deletions, not oversights, and a future reader who wants one
+# back is being told what has to become true first.
 INTENTIONALLY_DROPPED: dict[str, str] = {
     # socket.io synthesises this one; a raw websocket signals it with the
     # close frame, which the transport already handles. Nothing in the
     # message vocabulary needs a name for it.
     "disconnect": "transport-level: the websocket close frame replaces it",
+    # Audio: `[features.audio] enabled = false`, no on_audio_* handler and
+    # no cl.Audio anywhere in the consumer. Dropping the four names is what
+    # takes the last bytes off this wire and makes the codec JSON-only.
+    "audio_connection": "audio is disabled; no on_audio_* handler exists",
+    "audio_chunk": "audio is disabled; the wire carries no binary frames",
+    "audio_interrupt": "audio is disabled",
+    "audio_start": "audio is disabled",
+    "audio_end": "audio is disabled",
+    # Chat settings: no @on_settings_update, no cl.ChatSettings.
+    "chat_settings": "chat settings are unused; no cl.ChatSettings instance",
+    "chat_settings_change": "chat settings are unused",
+    "chat_settings_edit": "chat settings are unused",
+    # Commands and modes: no cl.Command; the one cl.Mode call site is
+    # commented out in the consumer.
+    "set_commands": "commands are unused; no cl.Command instance",
+    "set_modes": "modes are unused; the only call site is commented out",
+    # Favorites: `favorites = false`. The abstract get_favorite_steps goes
+    # with them, or the feature is deleted and its tax is not.
+    "set_favorites": "`favorites = false`; the feature is off",
+    "message_favorite": "`favorites = false`",
+    "fetch_favorites": "`favorites = false`",
+    # Message editing: `edit_message = false`.
+    "edit_message": "`edit_message = false`; the feature is off",
+    # RPC into the host page: a copilot/embedding facility. The consumer
+    # imports no copilot and declares no CopilotFunction.
+    "call_fn": "no copilot embedding; nothing calls into the host page",
+    "clear_call_fn": "no copilot embedding",
+    "call_fn_timeout": "no copilot embedding",
+    "window_message": "no host-page integration; postMessage is unused",
+    # Token usage: the client atom was written and never read -- no
+    # component, no test, no export consumer.
+    "token_usage": "the client atom it fed is written and never read",
+    # Resume errors are errors. A second name for one failure meant the
+    # client kept a whole atom to distinguish it from `error`.
+    "resume_thread_error": "folded into `error` with a code",
 }
 
 # Tags with no counterpart in today's protocol — additions, not renames.
 NEW_SERVER_TAGS: frozenset[str] = frozenset({"session.ready", "error", "hb"})
-NEW_CLIENT_TAGS: frozenset[str] = frozenset({"hb.ack", "rpc.result"})
+NEW_CLIENT_TAGS: frozenset[str] = frozenset({"hb.ack"})
 
 
 def _parse(pattern: re.Pattern[str]) -> set[str]:

@@ -8,7 +8,7 @@ import msgspec
 import pytest
 
 from chainlit.protocol import client as c, server as s
-from chainlit.protocol.codec import FrameKind, decode_client, decode_server
+from chainlit.protocol.codec import decode_client, decode_server
 from chainlit.protocol.payloads import (
     AskActionReply,
     AskActionSpec,
@@ -181,35 +181,3 @@ def test_ask_spec_union_decodes_each_branch_by_its_tag() -> None:
     for tag, expected in cases:
         payload = json.dumps({"type": tag, "stepId": "s"}).encode()
         assert isinstance(msgspec.json.decode(payload, type=AskSpec), expected)
-
-
-# --------------------------------------------------------------------------
-# Binary frames
-# --------------------------------------------------------------------------
-
-_PCM = bytes(range(256)) * 32  # 8 KiB of "audio"
-
-
-def test_audio_in_carries_raw_bytes_without_base64_inflation() -> None:
-    msg = c.AudioIn(data=_PCM, mime_type="pcm16", is_start=True, elapsed_time=1.0)
-    packed = msgspec.msgpack.encode(msg)
-    as_json = msgspec.json.encode(msg)
-
-    # msgpack carries the payload verbatim, JSON base64s it (+33%).
-    assert _PCM in packed
-    assert len(packed) < len(_PCM) + 128
-    assert len(as_json) > len(_PCM) * 4 / 3
-
-    assert decode_client(packed, FrameKind.BINARY) == msg
-
-
-def test_audio_out_carries_raw_bytes_without_base64_inflation() -> None:
-    msg = s.AudioOut(track="voice", mime_type="pcm16", data=_PCM)
-    packed = msgspec.msgpack.encode(msg)
-    as_json = msgspec.json.encode(msg)
-
-    assert _PCM in packed
-    assert len(packed) < len(_PCM) + 128
-    assert len(as_json) > len(_PCM) * 4 / 3
-
-    assert decode_server(packed, FrameKind.BINARY) == msg

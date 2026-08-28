@@ -115,3 +115,75 @@ def test_without_a_built_frontend_a_browser_path_404s(tmp_path: Path):
         plugins=[ChainlitPlugin(frontend_dir=tmp_path / "nothing")], debug=False
     ) as client:
         assert client.get("/thread/abc", headers=BROWSER).status_code == 404
+
+
+def test_a_page_that_shares_its_path_with_a_post_route_still_loads(
+    frontend_dir: Path,
+):
+    """``/login`` is a POST endpoint and a client-side page at once.
+
+    A browser navigating there does not miss the router -- it hits the route
+    with the wrong method -- so the SPA fallback has to answer 405 as well
+    as 404, or the login page is a "Method Not Allowed" body.
+    """
+    with _client(frontend_dir) as client:
+        page = client.get("/login", headers=BROWSER)
+        api = client.get("/login")
+
+    assert page.status_code == 200
+    assert INDEX_MARKER in page.text
+    # A non-browser GET keeps the honest answer.
+    assert api.status_code == 405
+
+
+def test_the_index_is_rendered_for_this_deployment(frontend_dir: Path, tmp_path: Path):
+    """The built shell carries placeholders; the app's identity fills them.
+
+    Title and Open Graph tags from the config, the favicon link, the theme
+    variables from ``public/theme.json`` -- the old server injected all of
+    it, and a raw copy of the shell gave the browser an untitled tab and a
+    link preview with nothing in it.
+    """
+    from types import SimpleNamespace
+    from typing import Any
+
+    (frontend_dir / "index.html").write_text(
+        "<html><head><!-- TAG INJECTION PLACEHOLDER -->"
+        "<!-- JS INJECTION PLACEHOLDER --><!-- CSS INJECTION PLACEHOLDER --></head>"
+        f"<body>{INDEX_MARKER}</body></html>"
+    )
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "theme.json").write_text('{"variables": {"light": {"--primary": "red"}}}')
+    config: Any = SimpleNamespace(
+        ui=SimpleNamespace(
+            name="PANDA",
+            description="Поиск товаров",
+            custom_meta_url=None,
+            custom_meta_image_url="https://x/img.png",
+            custom_css="/public/site.css",
+            custom_css_attributes="",
+            custom_js=None,
+            custom_js_attributes="",
+        ),
+        run=SimpleNamespace(root_path=""),
+        project=None,
+        features=None,
+        code=None,
+        root=None,
+    )
+
+    with create_test_client(
+        route_handlers=[],
+        plugins=[ChainlitPlugin(config, frontend_dir=frontend_dir, public_dir=public)],
+        debug=False,
+    ) as client:
+        page = client.get("/thread/abc", headers=BROWSER).text
+
+    assert "<title>PANDA</title>" in page
+    assert '<meta property="og:description" content="Поиск товаров">' in page
+    assert '<meta property="og:image" content="https://x/img.png">' in page
+    assert 'href="/favicon"' in page
+    assert 'window.theme = {"light": {"--primary": "red"}};' in page
+    assert 'href="/public/site.css"' in page
+    assert "PLACEHOLDER" not in page

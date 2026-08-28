@@ -47,10 +47,13 @@ from litestar import Litestar, Request, Response, Router
 from litestar.config.app import AppConfig
 from litestar.di import Provide
 from litestar.enums import MediaType
-from litestar.exceptions import NotFoundException, ServiceUnavailableException
+from litestar.exceptions import (
+    MethodNotAllowedException,
+    NotFoundException,
+    ServiceUnavailableException,
+)
 from litestar.exceptions.responses import create_exception_response
 from litestar.plugins import InitPlugin
-from litestar.response import File
 from litestar.static_files import create_static_files_router
 from litestar.stores.registry import StoreRegistry
 from litestar.types import Empty, EmptyType
@@ -64,6 +67,7 @@ from chainlit.controllers.auth import (
     security_provider,
 )
 from chainlit.controllers.files import FilesController
+from chainlit.controllers.index import render_index
 from chainlit.controllers.project import ProjectController
 from chainlit.runner import (
     DEFAULT_SESSION_TIMEOUT,
@@ -162,33 +166,38 @@ def _not_found(request: Request[Any, Any, Any], exc: Exception) -> Response[Any]
 
 def make_spa_fallback(
     dist: Path,
+    *,
+    config: Optional[ChainlitConfig] = None,
+    public_dir: Optional[Path] = None,
 ) -> Callable[[Request[Any, Any, Any], Exception], Response[Any]]:
-    """Build the ``NotFoundException`` handler that serves the SPA.
+    """Build the handler that serves the SPA where the router found nothing.
 
     A client-side route (``/thread/<id>``, ``/element/<id>``) matches no
-    handler on the server, so it arrives here. ``html_mode=True`` on a static
-    files router is *not* this: it serves ``index.html`` only when the path
-    resolves to a *directory*, and otherwise looks for a ``404.html``
-    (``litestar/static_files/base.py:111-142``). An exception handler on
-    ``NotFoundException`` is the working recipe.
+    handler on the server, so it arrives here as a 404 -- or, where the path
+    is also an endpoint of another method (``/login``), as a 405.
+    ``html_mode=True`` on a static files router is *not* this: it serves
+    ``index.html`` only when the path resolves to a *directory*, and
+    otherwise looks for a ``404.html`` (``litestar/static_files/base.py``).
 
-    The other half matters as much: a genuine 404 from an API route must stay
-    a 404 with a JSON body. A fallback that answers every miss with the SPA
-    turns every client bug into a silent 200 of HTML.
+    The other half matters as much: a genuine miss from an API route must
+    stay what it is, with a JSON body. A fallback that answers every miss
+    with the SPA turns every client bug into a silent 200 of HTML.
+
+    The document is rendered, not copied: the built shell carries
+    placeholders for the app's title, favicon, Open Graph tags, theme and
+    custom assets (see ``controllers/index.py``).
     """
     index = dist / INDEX_HTML
 
     def spa_fallback(request: Request[Any, Any, Any], exc: Exception) -> Response[Any]:
         if _wants_html(request) and index.is_file():
-            return File(
-                path=index,
-                media_type=MediaType.HTML,
-                content_disposition_type="inline",
-                # The document that bootstraps the app must not be a 404: the
-                # browser is at a real client-side route.
-                status_code=200,
-            )
-        return _not_found(request, exc)
+            shell = index.read_text(encoding="utf-8")
+            live = config if config is not None else chainlit.config.config
+            body = render_index(shell, live, public_dir or Path(APP_ROOT) / "public")
+            # The document that bootstraps the app must not be a 404: the
+            # browser is at a real client-side route.
+            return Response(body, media_type=MediaType.HTML, status_code=200)
+        return create_exception_response(request=request, exc=exc)
 
     return spa_fallback
 
@@ -470,8 +479,17 @@ class ChainlitPlugin(InitPlugin):
 
         # setdefault, not assignment: a host that wants its own 404 page keeps
         # it, and re-registering the plugin cannot clobber it either.
+        #
+        # 405 as well as 404: ``/login`` is both a POST endpoint and a page,
+        # so a browser navigating to it does not miss the router -- it hits
+        # the route with the wrong method. Without this, the login page was
+        # a "Method Not Allowed" body.
+        spa_fallback = make_spa_fallback(
+            self._frontend_dir, config=self._config, public_dir=self._public_dir
+        )
+        app_config.exception_handlers.setdefault(NotFoundException, spa_fallback)
         app_config.exception_handlers.setdefault(
-            NotFoundException, make_spa_fallback(self._frontend_dir)
+            MethodNotAllowedException, spa_fallback
         )
 
         self._register_transit_store(app_config)

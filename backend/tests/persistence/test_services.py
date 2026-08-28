@@ -1,7 +1,7 @@
 """The service surface the rest of the rebuild talks to."""
 
 import pytest
-from advanced_alchemy.exceptions import IntegrityError
+from advanced_alchemy.exceptions import IntegrityError, MultipleResultsFoundError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -315,3 +315,65 @@ async def test_a_malformed_id_is_a_typed_error_not_a_bare_value_error(
     """
     with pytest.raises(InvalidIdError):
         await uow.threads.fetch("not-a-uuid")
+
+
+async def test_reading_a_result_is_translated_too(uow: UnitOfWork) -> None:
+    """The wrap has to cover the read, not just the statement.
+
+    ``NoResultFound`` / ``MultipleResultsFound`` come from consuming the
+    result, not from executing it, so a service that executes inside the wrap
+    and unwraps outside leaks raw SQLAlchemy errors -- and Litestar's handler,
+    which branches on advanced_alchemy's classes, would turn a 404 into a 500.
+    """
+    thread_id = await make_thread(uow)
+    for index in range(2):
+        await uow.steps.save(
+            StepRecord(
+                id=new_id(),
+                thread_id=thread_id,
+                name=f"step-{index}",
+                type="user_message",
+            )
+        )
+
+    with pytest.raises(MultipleResultsFoundError):
+        await uow.steps.fetch_one_or_none(select(*STEPS.c))
+
+
+async def test_a_step_has_one_feedback_however_many_times_it_is_given(
+    uow: UnitOfWork,
+) -> None:
+    """A client that lost the id must update the feedback, not add a second.
+
+    Both readers outer-join on ``forId``: a second row multiplies the step,
+    so ``get_detail`` returns it twice and ``fetch`` raises. The upsert keys
+    on the step for that reason, and hands back the row that survived --
+    which is not the id the second caller proposed.
+    """
+    thread_id = await make_thread(uow)
+    step_id = new_id()
+    await uow.steps.save(
+        StepRecord(
+            id=step_id, thread_id=thread_id, name="answer", type="assistant_message"
+        )
+    )
+
+    first = await uow.feedbacks.save(
+        FeedbackRecord(for_id=step_id, thread_id=thread_id, value=1)
+    )
+    second = await uow.feedbacks.save(
+        FeedbackRecord(for_id=step_id, thread_id=thread_id, value=0, comment="changed")
+    )
+
+    assert second == first
+
+    detail = await uow.threads.get_detail(thread_id)
+    assert detail is not None
+    assert [step.id for step in detail.steps] == [step_id]
+    feedback = detail.steps[0].feedback
+    assert isinstance(feedback, FeedbackRecord)
+    assert feedback.value == 0
+    assert feedback.comment == "changed"
+
+    step = await uow.steps.fetch(step_id)
+    assert step is not None

@@ -312,7 +312,9 @@ class Element(Base):
 class Feedback(Base):
     __tablename__ = "feedbacks"
     __table_args__ = (
-        Index("feedbacks_for_id_idx", "forId"),
+        # Unique: a step has one piece of feedback, and both readers join on
+        # this column expecting exactly that. See migration 0003.
+        Index("feedbacks_for_id_idx", "forId", unique=True),
         Index("feedbacks_thread_id_idx", "threadId"),
     )
 

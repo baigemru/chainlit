@@ -465,16 +465,24 @@ def upsert_element(values: Mapping[str, Any], dialect_name: str) -> DialectInser
     )
 
 
-def upsert_feedback(values: Mapping[str, Any], dialect_name: str) -> DialectInsert:
-    """Store a feedback, keyed on its own id."""
+def upsert_feedback(
+    values: Mapping[str, Any], dialect_name: str
+) -> ReturningInsert[Any]:
+    """Store a feedback, keyed on the step it is about.
+
+    Not on the feedback's own id: a client that has lost the id would then
+    write a second row for the same step, and every reader joins on ``forId``
+    expecting one. The returned id is the row that actually survived, which
+    is not the id the caller proposed when a feedback was already there.
+    """
     statement = insert_for(dialect_name)(FEEDBACKS).values(**values)
     return statement.on_conflict_do_update(
-        index_elements=[FEEDBACKS.c["id"]],
+        index_elements=[FEEDBACKS.c["forId"]],
         set_={
             "value": statement.excluded["value"],
             "comment": statement.excluded["comment"],
         },
-    )
+    ).returning(FEEDBACKS.c["id"])
 
 
 def cursor_for(row: Any) -> str:

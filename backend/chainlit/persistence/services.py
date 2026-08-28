@@ -167,6 +167,27 @@ class ChainlitService:
         with wrap_sqlalchemy_exception(dialect_name=self.dialect):
             return await self.repository.session.execute(statement)
 
+    # Reading the result is inside the wrap too, and that is the whole point
+    # of these three. `NoResultFound` and `MultipleResultsFound` are raised by
+    # `.one()` / `.one_or_none()`, not by `execute`, so a caller that executes
+    # here and then unwraps outside gets the raw SQLAlchemy error back --
+    # exactly the taxonomy this class exists to close.
+
+    async def fetch_one(self, statement: Executable) -> Any:
+        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+            result = await self.repository.session.execute(statement)
+            return result.one()
+
+    async def fetch_one_or_none(self, statement: Executable) -> Optional[Any]:
+        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+            result = await self.repository.session.execute(statement)
+            return result.one_or_none()
+
+    async def fetch_scalar(self, statement: Executable) -> Any:
+        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+            result = await self.repository.session.execute(statement)
+            return result.scalar_one_or_none()
+
 
 class UserService(
     ChainlitService, SQLAlchemyAsyncRepositoryService[User, UserRepository]
@@ -194,8 +215,7 @@ class UserService(
             created_at=now(),
             dialect_name=self.dialect,
         )
-        result = await self.execute(statement)
-        return self.row_to_record(result.one())
+        return self.row_to_record(await self.fetch_one(statement))
 
     def to_record(self, model: User) -> UserRecord:
         return UserRecord(
@@ -241,8 +261,7 @@ class StepService(
     async def fetch(self, step_id: str) -> Optional[StepRecord]:
         identifier = to_uuid(step_id)
         assert identifier is not None
-        result = await self.execute(statements.step_query(identifier))
-        row = result.one_or_none()
+        row = await self.fetch_one_or_none(statements.step_query(identifier))
         return None if row is None else row_to_step(row)
 
     async def remove(self, step_id: str) -> None:
@@ -266,13 +285,12 @@ class ElementService(
 
     async def fetch(self, thread_id: str, element_id: str) -> Optional[ElementRecord]:
         table = ELEMENTS
-        result = await self.execute(
+        row = await self.fetch_one_or_none(
             select(*table.c).where(
                 table.c["id"] == to_uuid(element_id),
                 table.c["threadId"] == to_uuid(thread_id),
             )
         )
-        row = result.one_or_none()
         return None if row is None else row_to_element(row)
 
     async def remove(self, element_id: str, thread_id: Optional[str] = None) -> None:
@@ -299,8 +317,10 @@ class FeedbackService(
             "value": record.value,
             "comment": record.comment,
         }
-        await self.execute(statements.upsert_feedback(values, self.dialect))
-        return feedback_id
+        surviving = await self.fetch_scalar(
+            statements.upsert_feedback(values, self.dialect)
+        )
+        return str(surviving)
 
     async def remove(self, feedback_id: str) -> bool:
         table = FEEDBACKS
@@ -321,18 +341,16 @@ class ThreadService(
 
     async def fetch(self, thread_id: str) -> Optional[ThreadRecord]:
         table = THREADS
-        result = await self.execute(
+        row = await self.fetch_one_or_none(
             select(*table.c).where(table.c["id"] == to_uuid(thread_id))
         )
-        row = result.one_or_none()
         return None if row is None else row_to_thread(row)
 
     async def get_author(self, thread_id: str) -> Optional[str]:
         table = THREADS
-        result = await self.execute(
+        return await self.fetch_scalar(
             select(table.c["userIdentifier"]).where(table.c["id"] == to_uuid(thread_id))
         )
-        return result.scalar_one_or_none()
 
     async def patch(self, thread_id: str, patch: ThreadPatch) -> None:
         """Create the thread if it is new, then apply the provided fields.

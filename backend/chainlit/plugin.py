@@ -56,7 +56,7 @@ from litestar.stores.registry import StoreRegistry
 from litestar.types import Empty, EmptyType
 
 import chainlit.config
-from chainlit.config import APP_ROOT, FILES_DIRECTORY
+from chainlit.config import APP_ROOT, FILES_DIRECTORY, ChainlitConfig, CodeSettings
 from chainlit.controllers import FRONTEND_DIST
 from chainlit.controllers.auth import (
     AuthController,
@@ -97,7 +97,7 @@ __all__ = (
 INDEX_HTML = "index.html"
 
 # The value the shipped ``config.toml`` template writes under
-# ``[features.spontaneous_file_upload]``. The pydantic model defaults
+# ``[features.spontaneous_file_upload]``. The settings type defaults
 # ``max_size_mb`` to ``None`` rather than to this, so an app whose config
 # predates the key resolves to it here.
 DEFAULT_MAX_UPLOAD_MB = 500
@@ -117,7 +117,7 @@ def frontend_dist() -> Path:
     return FRONTEND_DIST
 
 
-def max_request_body_size(config: Optional[Any] = None) -> int:
+def max_request_body_size(config: Optional[ChainlitConfig] = None) -> int:
     """The request body limit Chainlit's own routes run under, in bytes.
 
     Litestar caps request bodies at 10MB by default
@@ -134,9 +134,9 @@ def max_request_body_size(config: Optional[Any] = None) -> int:
     ``AppConfig.request_max_body_size`` (``litestar/app.py:374`` vs
     ``:479``), so no plugin can raise the app-wide limit.
     """
-    features = getattr(config, "features", None)
-    upload = getattr(features, "spontaneous_file_upload", None)
-    max_size_mb = getattr(upload, "max_size_mb", None) or DEFAULT_MAX_UPLOAD_MB
+    features = config.features if config else None
+    upload = features.spontaneous_file_upload if features else None
+    max_size_mb = (upload.max_size_mb if upload else None) or DEFAULT_MAX_UPLOAD_MB
     return max_size_mb * 1024 * 1024 + MULTIPART_HEADROOM_BYTES
 
 
@@ -237,7 +237,7 @@ class ChainlitPlugin(InitPlugin):
 
     def __init__(
         self,
-        config: Optional[Any] = None,
+        config: Optional[ChainlitConfig] = None,
         *,
         persistence: Optional["Persistence"] = None,
         auth: Union[ChainlitAuth, EmptyType, None] = Empty,
@@ -267,7 +267,7 @@ class ChainlitPlugin(InitPlugin):
             persistence=persistence,
             transit=self._transit,
             session_timeout=float(
-                getattr(getattr(config, "project", None), "session_timeout", None)
+                (config.project.session_timeout if config and config.project else None)
                 or DEFAULT_SESSION_TIMEOUT
             ),
         )
@@ -281,15 +281,15 @@ class ChainlitPlugin(InitPlugin):
 
     @staticmethod
     def _resolve_auth(
-        auth: Union[ChainlitAuth, EmptyType, None], config: Optional[Any]
+        auth: Union[ChainlitAuth, EmptyType, None], config: Optional[ChainlitConfig]
     ) -> Optional[ChainlitAuth]:
         """``Empty`` means "on when the deployment has a secret"; ``None``, off."""
         if auth is not Empty:
             return auth  # type: ignore[return-value]
         if not get_auth_secret():
             return None
-        project = getattr(config, "project", None)
-        timeout = getattr(project, "user_session_timeout", None)
+        project = config.project if config else None
+        timeout = project.user_session_timeout if project else None
         return chainlit_auth(
             default_token_expiration=timedelta(seconds=timeout) if timeout else None
         )
@@ -534,8 +534,8 @@ class ChainlitPlugin(InitPlugin):
         self._assert_auth_secret()
         self._init_markdown()
 
-    def _code(self) -> Optional[Any]:
-        return getattr(self._config, "code", None)
+    def _code(self) -> Optional[CodeSettings]:
+        return self._config.code if self._config else None
 
     def _assert_app(self) -> None:
         """An app with no entry point serves a chat window that does nothing."""
@@ -584,7 +584,7 @@ class ChainlitPlugin(InitPlugin):
             )
 
     def _init_markdown(self) -> None:
-        if (root := getattr(self._config, "root", None)) is None:
+        if self._config is None or (root := self._config.root) is None:
             return
         from chainlit.markdown import init_markdown
 

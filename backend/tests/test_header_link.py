@@ -1,3 +1,5 @@
+import msgspec
+
 from chainlit.config import HeaderLink, UISettings, UserMenuLink
 
 
@@ -75,18 +77,27 @@ class TestHeaderLink:
         assert UserMenuLink(name="x", url="y").icon_mask is False
 
     def test_ui_settings_parses_header_links(self):
-        ui = UISettings(
-            name="test",
-            header_links=[
-                {"name": "Buy", "url": "https://example.com/buy"},
-                {
-                    "name": "Issues",
-                    "icon_url": "https://example.com/icon.svg",
-                    "url": "https://example.com/issues",
-                    "icon_mask": True,
-                    "authenticated_only": True,
-                },
-            ],
+        """``[[UI.header_links]]`` tables decode the way ``load_settings`` does.
+
+        Through ``msgspec.convert``, not the constructor: a Struct's
+        ``__init__`` stores what it is given, so only the decode path turns
+        the TOML tables into ``HeaderLink``.
+        """
+        ui = msgspec.convert(
+            {
+                "name": "test",
+                "header_links": [
+                    {"name": "Buy", "url": "https://example.com/buy"},
+                    {
+                        "name": "Issues",
+                        "icon_url": "https://example.com/icon.svg",
+                        "url": "https://example.com/issues",
+                        "icon_mask": True,
+                        "authenticated_only": True,
+                    },
+                ],
+            },
+            type=UISettings,
         )
 
         assert ui.header_links is not None

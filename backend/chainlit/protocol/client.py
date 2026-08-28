@@ -20,7 +20,6 @@ __all__ = [
     "HeartbeatAck",
     "Hello",
     "MessageSend",
-    "ProfileSwitch",
     "SessionClear",
     "Stop",
 ]
@@ -98,22 +97,6 @@ class AskReply(_Msg, tag="ask.reply"):
     value: AskReplyValue
 
 
-# --------------------------------------------------------------------------
-# Profiles
-# --------------------------------------------------------------------------
-
-
-class ProfileSwitch(_Msg, tag="profile.switch"):
-    """Ask the server to hot-swap the profile in place.
-
-    The counterpart of the server's ``profile.changed``, which is the only
-    writer of the client's profile atom. Distinct from the server's
-    ``session.handoff``, which tears the session down instead.
-    """
-
-    chat_profile: str
-
-
 ClientMsg = Union[
     Hello,
     HeartbeatAck,
@@ -121,7 +104,6 @@ ClientMsg = Union[
     Stop,
     MessageSend,
     AskReply,
-    ProfileSwitch,
 ]
 
 CLIENT_TAGS: frozenset[str] = frozenset(

@@ -115,9 +115,6 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
     ),
     "thread.parent": s.ThreadParent(parent_thread_id="thread-0"),
     "thread.open": s.ThreadOpen(thread_id="thread-0", keep_transcript=False),
-    "profile.changed": s.ProfileChanged(
-        chat_profile="fast", previous="default", sync=True
-    ),
     "session.handoff": s.SessionHandoff(
         chat_profile="fast",
         next_session_id="session-2",
@@ -152,5 +149,4 @@ CLIENT_SAMPLES: dict[str, c.ClientMsg] = {
         step_id=SAMPLE_STEP.id,
         value=AskElementReply(submitted=True, props={"choice": "b"}),
     ),
-    "profile.switch": c.ProfileSwitch(chat_profile="fast"),
 }

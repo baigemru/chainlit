@@ -2,8 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from chainlit.data.storage_clients.base import storage_expiry_time
-from chainlit.data.storage_clients.gcs import GCSStorageClient
+from chainlit.persistence.storage.base import storage_expiry_time
+from chainlit.persistence.storage.gcs import GCSStorageClient
 
 
 @pytest.fixture
@@ -11,7 +11,7 @@ def mock_gcs_client():
     """Create a mock Google Cloud Storage client."""
     # First mock the service_account
     with patch(
-        "chainlit.data.storage_clients.gcs.service_account"
+        "chainlit.persistence.storage.gcs.service_account"
     ) as mock_service_account:
         mock_credentials = MagicMock()
         mock_service_account.Credentials.from_service_account_info.return_value = (
@@ -19,7 +19,7 @@ def mock_gcs_client():
         )
 
         # Then mock the storage client
-        with patch("chainlit.data.storage_clients.gcs.storage") as mock_storage:
+        with patch("chainlit.persistence.storage.gcs.storage") as mock_storage:
             mock_client = MagicMock()
             mock_storage.Client.return_value = mock_client
             mock_bucket = MagicMock()

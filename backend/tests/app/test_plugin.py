@@ -9,6 +9,7 @@ uses rather than a parallel one.
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from litestar import Litestar, Request, get, post
@@ -45,12 +46,13 @@ def start(app: Litestar) -> None:
         raise errors[0] from None
 
 
-def _config(**kwargs) -> SimpleNamespace:
+def _config(**kwargs) -> Any:
     """A stand-in for ``ChainlitConfig``.
 
-    The real one is pydantic and reads ``.chainlit/config.toml`` from disk on
-    import; the plugin only ever reads attributes off it, so a namespace says
-    what the test is about without dragging a file tree in.
+    The real one reads ``.chainlit/config.toml`` from disk on import; the
+    plugin only ever reads attributes off it, so a namespace says what the
+    test is about without dragging a file tree in. Typed ``Any`` for the
+    same reason: the plugin's signature names the real class.
     """
     defaults = dict(
         code=SimpleNamespace(on_message=lambda m: None),

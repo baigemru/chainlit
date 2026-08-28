@@ -226,7 +226,6 @@ class Session:
 
         self.current_task: Optional["asyncio.Task[Any]"] = None
         self.thread_ready_task: Optional["asyncio.Task[Any]"] = None
-        self.profile_start_task: Optional["asyncio.Task[Any]"] = None
 
         self.transcript: List[TranscriptEntry] = []
 
@@ -282,11 +281,7 @@ class Session:
     def has_live_task(self) -> bool:
         return any(
             task is not None and not task.done()
-            for task in (
-                self.current_task,
-                self.thread_ready_task,
-                self.profile_start_task,
-            )
+            for task in (self.current_task, self.thread_ready_task)
         )
 
     @property
@@ -377,11 +372,7 @@ class Session:
         between deciding to evict and the eviction taking effect is a window
         another connection can arrive in.
         """
-        for task in (
-            self.current_task,
-            self.thread_ready_task,
-            self.profile_start_task,
-        ):
+        for task in (self.current_task, self.thread_ready_task):
             if task is not None and not task.done():
                 task.cancel()
         if self.pending_ask is not None:

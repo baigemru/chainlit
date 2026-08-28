@@ -117,7 +117,6 @@ SERVER_MAPPING: dict[str, str] = {
     "first_interaction": "thread.first_interaction",
     "parent_thread": "thread.parent",
     "open_thread": "thread.open",
-    "chat_profile_changed": "profile.changed",
     # Renamed as well as retagged: it tears the session down and mints a
     # successor id, which "set_chat_profile" did not say and which made it
     # one letter away from the in-place switch_chat_profile.
@@ -136,7 +135,6 @@ CLIENT_MAPPING: dict[str, str] = {
     "connect": "hello",
     "connection_successful": "hello",
     "clear_session": "session.clear",
-    "switch_chat_profile": "profile.switch",
     "stop": "stop",
     "ask_reply": "ask.reply",
     "client_message": "message.send",
@@ -184,6 +182,13 @@ INTENTIONALLY_DROPPED: dict[str, str] = {
     # Token usage: the client atom was written and never read -- no
     # component, no test, no export consumer.
     "token_usage": "the client atom it fed is written and never read",
+    # In-place profile hot swap: the consumer registers no
+    # @cl.on_profile_start and its live config leaves
+    # `hot_swap_chat_profile` off (both verified by grep). Profiles are
+    # still chosen at session start (`hello`) and changed server-side by
+    # `session.handoff`; only the in-place switch had no user.
+    "chat_profile_changed": "hot swap is off; no on_profile_start hook exists",
+    "switch_chat_profile": "hot swap is off; the selector reconnects instead",
     # Resume errors are errors. A second name for one failure meant the
     # client kept a whole atom to distinguish it from `error`.
     "resume_thread_error": "folded into `error` with a code",

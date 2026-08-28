@@ -102,7 +102,6 @@ export interface IChainlitConfig {
     assistant_message_autoscroll?: boolean;
     latex?: boolean;
     user_message_markdown?: boolean;
-    hot_swap_chat_profile?: boolean;
   };
   debugUrl?: string;
   userEnv: string[];

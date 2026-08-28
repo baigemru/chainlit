@@ -4,8 +4,8 @@ from typing import Any, Dict, Union
 import boto3  # type: ignore
 from litestar.concurrency import sync_to_thread
 
-from chainlit.data.storage_clients.base import BaseStorageClient, storage_expiry_time
 from chainlit.logger import logger
+from chainlit.persistence.storage.base import BaseStorageClient, storage_expiry_time
 
 
 class S3StorageClient(BaseStorageClient):

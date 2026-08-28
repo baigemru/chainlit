@@ -6,8 +6,6 @@ import uuid
 from abc import ABC
 from typing import Dict, List, Literal, Optional, Union, cast
 
-from literalai.observability.step import MessageStepType
-
 from chainlit import persist
 from chainlit.action import Action
 from chainlit.chat_context import chat_context
@@ -20,7 +18,7 @@ from chainlit.protocol.payloads import (
     AskFileSpec,
     AskTextSpec,
 )
-from chainlit.step import StepDict, WaitDict
+from chainlit.step import MessageStepType, StepDict, WaitDict
 from chainlit.types import (
     AskActionResponse,
     AskElementResponse,

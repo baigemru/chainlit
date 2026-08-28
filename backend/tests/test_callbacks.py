@@ -326,21 +326,6 @@ async def test_on_feedback(test_config):
     assert seen is feedback
 
 
-async def test_on_profile_start_is_registered(test_config):
-    from chainlit.types import ProfileStartInfo
-
-    seen = None
-
-    @callbacks.on_profile_start
-    async def handle(info: ProfileStartInfo):
-        nonlocal seen
-        seen = info
-
-    info = ProfileStartInfo(profile="b", previous="a", source="server")
-    await _hook(test_config.code.on_profile_start)(info)
-    assert seen is info
-
-
 def test_chat_profile_with_config_overrides():
     from chainlit.config import ChainlitConfigOverrides, UISettings
 

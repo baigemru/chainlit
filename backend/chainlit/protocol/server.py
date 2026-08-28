@@ -34,7 +34,6 @@ __all__ = [
     "ElementUpsert",
     "Error",
     "Heartbeat",
-    "ProfileChanged",
     "Reload",
     "ServerMsg",
     "SessionHandoff",
@@ -245,20 +244,8 @@ class ThreadOpen(_Msg, tag="thread.open"):
 
 
 # --------------------------------------------------------------------------
-# Profiles and sidebar
+# Profile handoff and sidebar
 # --------------------------------------------------------------------------
-
-
-class ProfileChanged(_Msg, tag="profile.changed"):
-    """The profile changed in place — same session, same thread.
-
-    ``sync=True`` means "adopt this value" after a reconnect rather than
-    "a switch happened".
-    """
-
-    chat_profile: str
-    previous: str | None = None
-    sync: bool = False
 
 
 class SessionHandoff(_Msg, tag="session.handoff"):
@@ -327,7 +314,6 @@ ServerMsg = Union[
     ThreadFirstInteraction,
     ThreadParent,
     ThreadOpen,
-    ProfileChanged,
     SessionHandoff,
     SidebarSet,
     Toast,

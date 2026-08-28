@@ -274,10 +274,6 @@ class ApplicationRunner:
         assert session is not None
         emitter = self._bind(session)
 
-        if getattr(self.config.features, "hot_swap_chat_profile", False):
-            if session.chat_profile:
-                emitter.profile_changed(session.chat_profile, sync=True)
-
         resumed = session.state.pop("__resumed_thread", None)
         if resumed is not None:
             self._launch(session, self._resume_hooks(session, resumed))
@@ -484,11 +480,7 @@ class ApplicationRunner:
             session.pending_ask = None
             emitter.end_ask(ask.step_id, "cancelled")
 
-        for task in (
-            session.current_task,
-            session.thread_ready_task,
-            session.profile_start_task,
-        ):
+        for task in (session.current_task, session.thread_ready_task):
             if task is not None and not task.done():
                 task.cancel()
 

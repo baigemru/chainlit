@@ -45,6 +45,7 @@ from chainlit.persistence.services import (
     ThreadService,
     UserService,
 )
+from chainlit.persistence.storage.base import BaseStorageClient
 
 MIGRATIONS_PATH = Path(__file__).parent / "migrations"
 VERSION_TABLE = "alembic_version"
@@ -153,9 +154,9 @@ class Persistence:
     config: SQLAlchemyAsyncConfig
     #: Where element blobs go. ``None`` writes the element row without a
     #: blob -- the element is still shown, from the session's spool, but
-    #: does not survive the session. The clients live under
-    #: ``chainlit.data.storage_clients`` until they move here.
-    storage: Optional[Any] = None
+    #: does not survive the session. ``persist.py`` is the one caller; it
+    #: reads this through the session writer.
+    storage: Optional[BaseStorageClient] = None
     user_service: Type[UserService] = UserService
     thread_service: Type[ThreadService] = ThreadService
     step_service: Type[StepService] = StepService
@@ -164,13 +165,21 @@ class Persistence:
 
     @classmethod
     def from_url(
-        cls, url: str, *, storage: Optional[Any] = None, **engine_kwargs: Any
+        cls,
+        url: str,
+        *,
+        storage: Optional[BaseStorageClient] = None,
+        **engine_kwargs: Any,
     ) -> "Persistence":
         return cls(config=sqlalchemy_config(url=url, **engine_kwargs), storage=storage)
 
     @classmethod
     def from_engine(
-        cls, engine: AsyncEngine, *, storage: Optional[Any] = None, **engine_kwargs: Any
+        cls,
+        engine: AsyncEngine,
+        *,
+        storage: Optional[BaseStorageClient] = None,
+        **engine_kwargs: Any,
     ) -> "Persistence":
         return cls(
             config=sqlalchemy_config(engine=engine, **engine_kwargs), storage=storage

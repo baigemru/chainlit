@@ -442,8 +442,8 @@ class ProjectController(Controller):
                 effective_config = config.with_overrides(selected.config_overrides)
 
         return {
-            "ui": effective_config.ui.model_dump(mode="json"),
-            "features": effective_config.features.model_dump(mode="json"),
+            "ui": msgspec.to_builtins(effective_config.ui),
+            "features": msgspec.to_builtins(effective_config.features),
             "userEnv": effective_config.project.user_env,
             "maskUserEnv": effective_config.project.mask_user_env,
             "dataPersistence": persistence_enabled,

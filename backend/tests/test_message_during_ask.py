@@ -51,9 +51,7 @@ def code():
 @pytest.fixture
 def runner(code, monkeypatch):
     runner = ApplicationRunner(
-        SimpleNamespace(
-            code=code, features=SimpleNamespace(hot_swap_chat_profile=False)
-        ),
+        SimpleNamespace(code=code, features=SimpleNamespace()),
         registry=SessionRegistry(),
     )
     return runner

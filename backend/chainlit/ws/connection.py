@@ -27,7 +27,6 @@ from chainlit.protocol.client import (
     HeartbeatAck,
     Hello,
     MessageSend,
-    ProfileSwitch,
     SessionClear,
     Stop,
 )
@@ -303,10 +302,6 @@ async def _dispatch(session: Session, message: ClientMsg) -> None:
     if isinstance(message, SessionClear):
         session.cancel_work()
         session.transcript.clear()
-        return
-
-    if isinstance(message, ProfileSwitch):
-        session.chat_profile = message.chat_profile
         return
 
 

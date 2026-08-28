@@ -116,3 +116,16 @@ def test_sigterm_to_the_process_group_frees_the_port(chainlit_process):
             return
         time.sleep(0.1)
     raise AssertionError(f"port {PORT} still bound after the process exited")
+
+
+def test_uvicorn_has_a_websocket_implementation() -> None:
+    """The socket is the product; uvicorn serves it only with an extra.
+
+    ``uvicorn`` alone ships no websocket protocol -- ``ws="auto"`` silently
+    resolves to nothing and every upgrade fails. The implementation used
+    to arrive transitively through socket.io's ``simple-websocket``; with
+    that gone it has to be a dependency of our own (``uvicorn[standard]``).
+    """
+    from uvicorn.protocols.websockets.auto import AutoWebSocketsProtocol
+
+    assert AutoWebSocketsProtocol is not None

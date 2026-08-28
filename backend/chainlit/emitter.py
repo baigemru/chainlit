@@ -47,7 +47,6 @@ from chainlit.protocol.server import (
     ElementRemove,
     ElementUpsert,
     Error,
-    ProfileChanged,
     SessionHandoff,
     SidebarSet,
     StepDelete,
@@ -371,13 +370,6 @@ class Emitter:
                 keep_transcript=keep_transcript,
                 has_transit_message=transit_message is not None,
             )
-        )
-
-    def profile_changed(
-        self, name: str, *, previous: Optional[str] = None, sync: bool = False
-    ) -> None:
-        self.session.send(
-            ProfileChanged(chat_profile=name, previous=previous, sync=sync)
         )
 
     def open_thread(self, thread_id: str, *, keep_transcript: bool = True) -> None:

@@ -11,15 +11,13 @@ from typing import (
     Coroutine,
     Dict,
     List,
+    Literal,
     NotRequired,
     Optional,
     TypedDict,
     Union,
     cast,
 )
-
-from literalai import BaseGeneration
-from literalai.observability.step import StepType, TrueStepType
 
 from chainlit import persist
 from chainlit.config import config
@@ -28,6 +26,16 @@ from chainlit.element import Element
 from chainlit.logger import logger
 from chainlit.types import FeedbackDict
 from chainlit.utils import utc_now
+
+# The step kinds, spelled locally: they used to be imported from literalai,
+# whose only purpose here was these three aliases. They must agree with the
+# wire type ``chainlit.protocol.payloads.StepType``, which the frontend
+# renders on; ``tests/test_public_api.py`` pins that.
+TrueStepType = Literal[
+    "run", "tool", "llm", "embedding", "retrieval", "rerank", "undefined"
+]
+MessageStepType = Literal["user_message", "assistant_message", "system_message"]
+StepType = Union[TrueStepType, MessageStepType]
 
 # Tasks the synchronous context manager launches. Held here because a task
 # nothing references can be collected mid-flight; dropped by the callback
@@ -224,7 +232,9 @@ class Step:
     created_at: Union[str, None]
     start: Union[str, None]
     end: Union[str, None]
-    generation: Optional[BaseGeneration]
+    # A dict, as on the wire: the typed literalai generation classes left
+    # with that dependency, and nothing in the package read their fields.
+    generation: Optional[Dict[str, Any]]
     language: Optional[str]
     icon: Optional[str]
     default_open: Optional[bool]
@@ -360,7 +370,7 @@ class Step:
             "defaultOpen": self.default_open,
             "autoCollapse": self.auto_collapse,
             "showInput": self.show_input,
-            "generation": self.generation.to_dict() if self.generation else None,
+            "generation": self.generation,
         }
         return _dict
 

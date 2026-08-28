@@ -261,18 +261,6 @@ export interface PlotlyElement {
   mime?: string | null;
 }
 
-export interface ProfileChanged {
-  t: 'profile.changed';
-  chatProfile: string;
-  previous?: string | null;
-  sync?: boolean;
-}
-
-export interface ProfileSwitch {
-  t: 'profile.switch';
-  chatProfile: string;
-}
-
 export interface Reload {
   t: 'reload';
 }
@@ -554,7 +542,6 @@ export type ServerMsg =
   | ThreadFirstInteraction
   | ThreadParent
   | ThreadOpen
-  | ProfileChanged
   | SessionHandoff
   | SidebarSet
   | Toast;
@@ -580,7 +567,6 @@ export type ServerMsgTag =
   | 'thread.first_interaction'
   | 'thread.parent'
   | 'thread.open'
-  | 'profile.changed'
   | 'session.handoff'
   | 'sidebar.set'
   | 'toast';
@@ -596,8 +582,7 @@ export type ClientMsg =
   | SessionClear
   | Stop
   | MessageSend
-  | AskReply
-  | ProfileSwitch;
+  | AskReply;
 
 export type ClientMsgTag =
   | 'hello'
@@ -605,8 +590,7 @@ export type ClientMsgTag =
   | 'session.clear'
   | 'stop'
   | 'message.send'
-  | 'ask.reply'
-  | 'profile.switch';
+  | 'ask.reply';
 
 /** Exhaustive handler table: omitting a message is a compile error. */
 export type ClientMsgHandlers = {

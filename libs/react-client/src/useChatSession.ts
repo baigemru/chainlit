@@ -12,7 +12,6 @@ import {
   actionState,
   askUserState,
   chatProfileState,
-  configState,
   currentThreadIdState,
   elementState,
   firstUserInteraction,
@@ -111,16 +110,6 @@ const useChatSession = () => {
   // profile it is actually generated under.
   const chatProfileRef = useRef(chatProfile);
   chatProfileRef.current = chatProfile;
-  // Hot-swap flag, latched. It cannot be read straight from the config:
-  // useConfig blanks the config on every profile change to re-fetch it for
-  // the new profile, so during the switch itself the flag would read
-  // undefined, the dep below would fall back to chatProfile and the socket
-  // would reconnect — exactly what the feature exists to avoid. The flag is
-  // server-side and profile-independent, so latching it is correct.
-  const config = useRecoilValue(configState);
-  const hotSwapRef = useRef(false);
-  if (config?.features?.hot_swap_chat_profile) hotSwapRef.current = true;
-  const hotSwap = hotSwapRef.current;
   const idToResume = useRecoilValue(threadIdToResumeState);
 
   const [currentThreadId, setCurrentThreadId] =
@@ -426,15 +415,7 @@ const useChatSession = () => {
           // Router-dependent: ThreadReturnListener subscribes to this one.
         },
 
-        // ---- profiles and sidebar --------------------------------------
-        'profile.changed': ({ chatProfile: name }) => {
-          // The only writer of the profile atom on the hot-swap path.
-          // `sync` tells a post-reconnect "adopt this value" apart from a
-          // real switch; both land the same way here.
-          if (!name) return;
-          setChatProfile(name);
-        },
-
+        // ---- profile handoff and sidebar -------------------------------
         'session.handoff': () => {
           // Tears the session down and adopts a server-minted successor id.
           // Router-dependent: ChatProfileSwitchListener owns it.
@@ -555,10 +536,9 @@ const useChatSession = () => {
 
       socket.connect();
     },
-    // Stable length: React forbids a dep array that changes size between
-    // renders, so the hot-swap case neutralizes the value instead of
-    // dropping the entry.
-    [setSession, sessionId, idToResume, hotSwap ? null : chatProfile]
+    // A profile change rebuilds the socket: the profile travels in `hello`
+    // and is fixed for the session's life.
+    [setSession, sessionId, idToResume, chatProfile]
   );
 
   const connect = useCallback(debounce(_connect, 200), [_connect]);
@@ -567,19 +547,6 @@ const useChatSession = () => {
     session?.socket.close();
   }, [session]);
 
-  // Ask the server to switch in place. The atom is NOT updated
-  // optimistically: it follows `profile.changed` only, so a refusal leaves
-  // nothing to roll back and the client can never show a profile the server
-  // is not running.
-  const switchChatProfile = useCallback(
-    (name: string) => {
-      if (!session?.socket?.connected) return false;
-      session.socket.send({ t: 'profile.switch', chatProfile: name });
-      return true;
-    },
-    [session]
-  );
-
   return {
     connect,
     disconnect,
@@ -587,9 +554,7 @@ const useChatSession = () => {
     sessionId,
     chatProfile,
     idToResume,
-    setChatProfile,
-    switchChatProfile,
-    hotSwapChatProfile: hotSwap
+    setChatProfile
   };
 };
 

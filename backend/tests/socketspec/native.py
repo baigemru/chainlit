@@ -706,7 +706,6 @@ class _Run:
             for task in (
                 session.current_task,
                 session.thread_ready_task,
-                session.profile_start_task,
                 session.reaper,
             ):
                 if task is not None and not task.done():

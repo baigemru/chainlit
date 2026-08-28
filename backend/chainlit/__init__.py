@@ -14,8 +14,6 @@ if env_found:
 
 import asyncio
 
-from literalai import ChatGeneration, CompletionGeneration, GenerationMessage
-
 import chainlit.input_widget as input_widget
 from chainlit.action import Action
 from chainlit.chat_context import chat_context
@@ -67,7 +65,6 @@ from .callbacks import (
     on_chat_start,
     on_feedback,
     on_message,
-    on_profile_start,
     on_shared_thread_view,
     on_stop,
     on_thread_ready,
@@ -95,15 +92,12 @@ __all__ = [
     "AskSlotBusyError",
     "AskUserMessage",
     "Audio",
-    "ChatGeneration",
     "ChatProfile",
-    "CompletionGeneration",
     "CustomElement",
     "Dataframe",
     "ElementSidebar",
     "ErrorMessage",
     "File",
-    "GenerationMessage",
     "Image",
     "Message",
     "Mode",
@@ -136,7 +130,6 @@ __all__ = [
     "on_chat_start",
     "on_feedback",
     "on_message",
-    "on_profile_start",
     "on_shared_thread_view",
     "on_stop",
     "on_thread_ready",

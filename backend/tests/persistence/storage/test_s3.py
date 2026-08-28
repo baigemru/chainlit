@@ -4,7 +4,7 @@ import boto3  # type: ignore
 import pytest
 from moto import mock_aws
 
-from chainlit.data.storage_clients.s3 import S3StorageClient
+from chainlit.persistence.storage.s3 import S3StorageClient
 
 
 # Fixtures for the mocked S3 bucket

@@ -30,21 +30,14 @@ classifiers = [
 
 dependencies = [
     "httpx>=0.28.1",
-    "literalai==0.1.201",
-    "dataclasses_json>=0.6.7,<0.7.0",
-    # ``config.py`` still types the header-auth callback with starlette's
-    # ``Headers`` (the public-API test pins that signature); it goes with it.
-    "starlette>=1.6.0",
-    "uvicorn>=0.52.4",
+    "uvicorn[standard]>=0.52.4",
     "aiofiles>=25.1.0",
     "click>=8.4.2,<9.0.0",
-    "pydantic>=2.13.4,<3",
     "python-dotenv>=1.2.3,<2.0.0",
     "watchfiles>=1.2.0,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
     "packaging>=26.3",
     "pyjwt>=2.13.0,<3.0.0",
-    "pydantic-settings>=2.15.0",
     "litestar>=2.24.0",
     "msgspec>=0.19",
     "advanced-alchemy>=1.11",
@@ -89,9 +82,6 @@ custom-data = [
     "asyncpg>=0.31.0,<1.0.0",
     "SQLAlchemy>=2.0.52,<3.0.0",
     "boto3>=1.43.79,<2.0.0",
-    "azure-identity>=1.25.3,<2.0.0",
-    "azure-storage-file-datalake>=12.25.0,<13.0.0",
-    "azure-storage-blob>=12.30.0,<13.0.0",
     "google-cloud-storage>=3.13.1,<4.0.0",
 ]
 

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from chainlit.data.storage_clients.base import BaseStorageClient
+from chainlit.persistence.storage.base import BaseStorageClient
 from chainlit.user import User
 
 

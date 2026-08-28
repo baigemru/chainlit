@@ -1,8 +1,24 @@
+"""Application configuration: ``.chainlit/config.toml`` plus what the CLI
+and the ``@cl.*`` decorators register at runtime.
+
+The TOML sections are ``msgspec.Struct`` types, decoded with
+``msgspec.convert`` so a value of the wrong type or a literal outside its
+choices is refused at startup, where a misspelled config is cheapest to fix.
+Unknown keys are ignored on purpose: a ``config.toml`` written by an older
+release still carries retired tables (``[features.mcp]``, ``[features.slack]``,
+``hot_swap_chat_profile``) and must keep loading.
+
+``ChainlitConfig`` itself is a plain class, not a Struct: it is never decoded,
+the CLI and ``reload_config`` reassign its sections, and tests patch methods
+on it.
+"""
+
 import json
 import os
 import site
 import sys
 import tomllib
+from dataclasses import dataclass, field
 from importlib import util
 from pathlib import Path
 from typing import (
@@ -17,8 +33,8 @@ from typing import (
     Union,
 )
 
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+import msgspec
+from msgspec import NODEFAULT, Struct, structs
 
 from chainlit.logger import logger
 from chainlit.translations import lint_translation_json
@@ -32,17 +48,11 @@ if TYPE_CHECKING:
     from chainlit.types import (
         ChatProfile,
         Feedback,
-        ProfileStartInfo,
         Starter,
         StarterCategory,
         ThreadDict,
     )
     from chainlit.user import User
-else:
-    # Pydantic needs to resolve forward annotations. Because all of these are used
-    # within `typing.Callable`, alias to `Any` as Pydantic does not perform validation
-    # of callable argument/return types anyway.
-    Action = Message = ChatProfile = ProfileStartInfo = Starter = StarterCategory = ThreadDict = User = Feedback = Any  # fmt: off
 
 BACKEND_ROOT = os.path.dirname(__file__)
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(BACKEND_ROOT))
@@ -113,10 +123,6 @@ allow_thread_sharing = false
 
 # Enable favorite messages
 favorites = false
-
-# Switch chat profiles in place: same session, same thread, transcript kept.
-# The app's @cl.on_profile_start hook runs instead of on_chat_start.
-hot_swap_chat_profile = false
 
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
@@ -260,7 +266,18 @@ DEFAULT_PORT = 8000
 DEFAULT_ROOT_PATH = ""
 
 
-class RunSettings(BaseModel):
+class Settings(Struct, kw_only=True):
+    """Base of every TOML section.
+
+    ``kw_only`` because the sections are built from tables, never
+    positionally, and a positional constructor would silently bind a value
+    to the wrong field when one is added.
+    """
+
+
+class RunSettings(Settings):
+    """What the ``chainlit run`` command line sets; never read from TOML."""
+
     # Name of the module (python file) used in the run command
     module_name: Optional[str] = None
     host: str = DEFAULT_HOST
@@ -275,39 +292,21 @@ class RunSettings(BaseModel):
     ci: bool = False
 
 
-class PaletteOptions(BaseModel):
-    main: Optional[str] = ""
-    light: Optional[str] = ""
-    dark: Optional[str] = ""
-
-
-class TextOptions(BaseModel):
-    primary: Optional[str] = ""
-    secondary: Optional[str] = ""
-
-
-class Palette(BaseModel):
-    primary: Optional[PaletteOptions] = None
-    background: Optional[str] = ""
-    paper: Optional[str] = ""
-    text: Optional[TextOptions] = None
-
-
-class SpontaneousFileUploadFeature(BaseModel):
+class SpontaneousFileUploadFeature(Settings):
     enabled: Optional[bool] = None
     accept: Optional[Union[List[str], Dict[str, List[str]]]] = None
     max_files: Optional[int] = None
     max_size_mb: Optional[int] = None
 
 
-class AudioFeature(BaseModel):
+class AudioFeature(Settings):
     sample_rate: int = 24000
     enabled: bool = False
 
 
-class FeaturesSettings(BaseModel):
+class FeaturesSettings(Settings):
     spontaneous_file_upload: Optional[SpontaneousFileUploadFeature] = None
-    audio: Optional[AudioFeature] = Field(default_factory=AudioFeature)
+    audio: Optional[AudioFeature] = msgspec.field(default_factory=AudioFeature)
     latex: bool = False
     user_message_markdown: bool = True
     user_message_autoscroll: bool = True
@@ -317,14 +316,13 @@ class FeaturesSettings(BaseModel):
     edit_message: bool = True
     allow_thread_sharing: bool = False
     favorites: bool = False
-    hot_swap_chat_profile: bool = False
     # Turn the "ask slot is busy" refusal into AskSlotBusyError instead of
     # a None return. Off by default: None is also what a timeout and an
     # empty answer produce, and existing apps branch on it.
     strict_ask_slot: bool = False
 
 
-class HeaderLink(BaseModel):
+class HeaderLink(Settings):
     name: str
     url: str
     icon_url: Optional[str] = None
@@ -346,7 +344,7 @@ class HeaderLink(BaseModel):
     label_refresh_interval: Optional[int] = None
 
 
-class UserMenuLink(BaseModel):
+class UserMenuLink(Settings):
     name: str
     url: str
     icon_url: Optional[str] = None
@@ -360,7 +358,7 @@ class UserMenuLink(BaseModel):
     target: Optional[Literal["_blank", "_self", "_parent", "_top", "iframe"]] = None
 
 
-class UISettings(BaseModel):
+class UISettings(Settings):
     name: str
     description: str = ""
     cot: Literal["hidden", "tool_call", "full"] = "full"
@@ -397,9 +395,17 @@ class UISettings(BaseModel):
     user_menu_links: Optional[List[UserMenuLink]] = None
 
 
-class CodeSettings(BaseModel):
+@dataclass
+class CodeSettings:
+    """The callbacks the ``@cl.*`` decorators register.
+
+    A dataclass rather than a Struct: it is filled in one attribute at a
+    time as the app module imports, holds callables no codec has any
+    business seeing, and is replaced wholesale on ``reload_config``.
+    """
+
     # App action functions
-    action_callbacks: Dict[str, Callable[["Action"], Any]]
+    action_callbacks: Dict[str, Callable[["Action"], Any]] = field(default_factory=dict)
 
     # Module object loaded from the module_name
     module: Any = None
@@ -414,7 +420,6 @@ class CodeSettings(BaseModel):
     on_chat_end: Optional[Callable[[], Any]] = None
     on_chat_resume: Optional[Callable[["ThreadDict"], Any]] = None
     on_thread_ready: Optional[Callable[["ThreadDict"], Any]] = None
-    on_profile_start: Optional[Callable[["ProfileStartInfo"], Any]] = None
     on_message: Optional[Callable[["Message"], Any]] = None
     on_feedback: Optional[Callable[["Feedback"], Any]] = None
     set_chat_profiles: Optional[
@@ -444,15 +449,12 @@ class CodeSettings(BaseModel):
     author_rename: Optional[Callable[[str], Awaitable[str]]] = None
 
 
-class ProjectSettings(BaseModel):
-    allow_origins: List[str] = Field(default_factory=lambda: ["*"])
-    # Socket.io client transports option
-    transports: Optional[List[str]] = None
+class ProjectSettings(Settings):
+    allow_origins: List[str] = msgspec.field(default_factory=lambda: ["*"])
     # List of environment variables to be provided by each user to use the app. If empty, no environment variables will be asked to the user.
     user_env: Optional[List[str]] = None
     # Path to the local langchain cache database
     lc_cache_path: Optional[str] = None
-    # Path to the local chat db
     # Duration (in seconds) during which the session is saved when the connection is lost
     session_timeout: int = 300
     # Duration (in seconds) of the user session expiry
@@ -465,22 +467,74 @@ class ProjectSettings(BaseModel):
     mask_user_env: Optional[bool] = False
 
 
-class ChainlitConfigOverrides(BaseModel):
-    """Configuration overrides that can be applied to specific chat profiles."""
+class ChainlitConfigOverrides(Settings):
+    """What a chat profile changes in the config the UI is handed.
+
+    Each section is the ordinary settings type, so an app writes
+    ``UISettings(name="...")`` and only ``name`` overrides; see
+    :meth:`ChainlitConfig.with_overrides` for what "only" means.
+    """
 
     ui: Optional[UISettings] = None
     features: Optional[FeaturesSettings] = None
     project: Optional[ProjectSettings] = None
 
 
-class ChainlitConfig(BaseSettings):
-    root: str = APP_ROOT
-    chainlit_server: str = Field(default="")
-    run: RunSettings = Field(default_factory=RunSettings)
-    features: FeaturesSettings
-    ui: UISettings
-    project: ProjectSettings
-    code: CodeSettings
+def _overlay(base: Struct, override: Struct) -> Struct:
+    """``base`` with the fields ``override`` sets, recursing into sections.
+
+    A field counts as set when it differs from its class default. Pydantic
+    tracked which keyword arguments were passed; a Struct does not, and the
+    override is built with the plain settings types, so the default is the
+    only baseline there is. The hole this leaves -- overriding a field back
+    to its own default is a no-op -- is accepted: a required field (a
+    profile's ``name``) has no default and is always applied, and nested
+    sections merge rather than replace, so ``SpontaneousFileUploadFeature(
+    enabled=False)`` keeps the base ``accept`` and ``max_files``.
+    """
+    changes: Dict[str, Any] = {}
+    for spec in structs.fields(type(override)):
+        value = getattr(override, spec.name)
+        if spec.default is not NODEFAULT:
+            default = spec.default
+        elif spec.default_factory is not NODEFAULT:
+            default = spec.default_factory()
+        else:
+            default = NODEFAULT
+        if default is not NODEFAULT and value == default:
+            continue
+        current = getattr(base, spec.name)
+        if isinstance(value, Struct) and isinstance(current, Struct):
+            value = _overlay(current, value)
+        changes[spec.name] = value
+    return structs.replace(base, **changes)
+
+
+class ChainlitConfig:
+    """The whole runtime configuration, one instance per process.
+
+    The TOML sections are decoded once by :func:`load_config`; ``run`` is
+    written by the CLI and ``code`` by the decorators as the app imports.
+    """
+
+    __slots__ = ("code", "features", "project", "root", "run", "ui")
+
+    def __init__(
+        self,
+        *,
+        features: FeaturesSettings,
+        ui: UISettings,
+        project: ProjectSettings,
+        code: Optional[CodeSettings] = None,
+        run: Optional[RunSettings] = None,
+        root: str = APP_ROOT,
+    ) -> None:
+        self.root = root
+        self.run = run if run is not None else RunSettings()
+        self.features = features
+        self.ui = ui
+        self.project = project
+        self.code = code if code is not None else CodeSettings()
 
     def load_translation(self, language: str):
         translation = {}
@@ -543,21 +597,21 @@ class ChainlitConfig(BaseSettings):
         return translation
 
     def with_overrides(
-        self, overrides: "ChainlitConfigOverrides | None"
+        self, overrides: Optional[ChainlitConfigOverrides]
     ) -> "ChainlitConfig":
-        base = self.model_dump()
-        patch = overrides.model_dump(exclude_unset=True) if overrides else {}
+        """A copy with a profile's overrides applied; ``self`` is untouched.
 
-        def _merge(a, b):
-            if isinstance(a, dict) and isinstance(b, dict):
-                out = dict(a)
-                for k, v in b.items():
-                    out[k] = _merge(out.get(k), v)
-                return out
-            return b
-
-        merged = _merge(base, patch) if patch else base
-        return type(self).model_validate(merged)
+        ``code`` and ``run`` are shared, not copied: the callbacks and the
+        command line are per process, not per profile.
+        """
+        if overrides is None:
+            return self
+        sections: Dict[str, Any] = {}
+        for name in ("ui", "features", "project"):
+            patch = getattr(overrides, name)
+            current = getattr(self, name)
+            sections[name] = _overlay(current, patch) if patch else current
+        return ChainlitConfig(root=self.root, run=self.run, code=self.code, **sections)
 
 
 def init_config(log: bool = False):
@@ -629,58 +683,61 @@ def load_module(target: str, force_refresh: bool = False):
     sys.path.pop(0)
 
 
-def load_settings():
-    with open(config_file, "rb") as f:
-        toml_dict = tomllib.load(f)
-        # Load project settings
-        project_config = toml_dict.get("project", {})
-        features_settings = toml_dict.get("features", {})
-        ui_settings = toml_dict.get("UI", {})
-        meta = toml_dict.get("meta")
+def decode_settings(toml_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """The sections of a parsed ``config.toml``, as the settings types.
 
-        if not meta or meta.get("generated_by") <= "0.3.0":
-            raise ValueError(
-                f"Your config file '{config_file}' is outdated. Please delete it and restart the app to regenerate it."
-            )
+    Separate from :func:`load_settings` so a config can be checked without a
+    file on disk. Keys the sections do not declare are dropped by
+    ``msgspec.convert`` -- that is what lets a config from an older release
+    keep loading -- while a wrong type or an unknown literal raises
+    ``msgspec.ValidationError`` naming the key.
+    """
+    project_config = dict(toml_dict.get("project", {}))
+    features_config = toml_dict.get("features", {})
+    ui_config = toml_dict.get("UI", {})
+    meta = toml_dict.get("meta")
 
-        lc_cache_path = os.path.join(config_dir, ".langchain.db")
-
-        project_settings = ProjectSettings(
-            lc_cache_path=lc_cache_path,
-            **project_config,
+    if not meta or meta.get("generated_by") <= "0.3.0":
+        raise ValueError(
+            f"Your config file '{config_file}' is outdated. Please delete it and restart the app to regenerate it."
         )
 
-        features_settings = FeaturesSettings(**features_settings)
+    project_config["lc_cache_path"] = os.path.join(config_dir, ".langchain.db")
 
-        ui_settings = UISettings(**ui_settings)
+    return {
+        "features": msgspec.convert(features_config, type=FeaturesSettings),
+        "ui": msgspec.convert(ui_config, type=UISettings),
+        "project": msgspec.convert(project_config, type=ProjectSettings),
+        "code": CodeSettings(),
+    }
 
-        code_settings = CodeSettings(action_callbacks={})
 
-        return {
-            "features": features_settings,
-            "ui": ui_settings,
-            "project": project_settings,
-            "code": code_settings,
-        }
+def load_settings() -> Dict[str, Any]:
+    """The TOML sections of ``config_file``, decoded and validated."""
+    with open(config_file, "rb") as f:
+        toml_dict = tomllib.load(f)
+    return decode_settings(toml_dict)
 
 
 def reload_config():
-    """Reload the configuration from the config file."""
+    """Reload the configuration from the config file.
+
+    Everything but ``run.module_name`` starts over: the watcher re-imports
+    the app module right after, which re-registers ``code``, and it needs
+    the module name to do so.
+    """
     global config
     if config is None:
         return
 
-    # Preserve the module_name during config reload to ensure hot reload works
     original_module_name = config.run.module_name if config.run else None
 
     new_cfg = ChainlitConfig(**load_settings())
     config.root = new_cfg.root
-    config.chainlit_server = new_cfg.chainlit_server
     config.run = new_cfg.run
     config.features = new_cfg.features
     config.ui = new_cfg.ui
 
-    # Restore the preserved module_name
     if original_module_name and config.run:
         config.run.module_name = original_module_name
     config.project = new_cfg.project

@@ -15,9 +15,6 @@ The package is layered bottom-up:
 ``writer``
     the ordered per-session writer everything above is driven through.
 
-Nothing here imports from ``chainlit.data``: the two live side by side until
-the rebuild lands.
-
 The re-exports below are a convenience for tests and host apps; the package's
 own modules and the controllers import from the submodules directly.
 """

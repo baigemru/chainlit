@@ -5,14 +5,12 @@ The Modes system allows developers to define multiple picker categories
 in the chat composer.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional
-
-from dataclasses_json import DataClassJsonMixin
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class ModeOption(DataClassJsonMixin):
+class ModeOption:
     """A single selectable option within a Mode.
 
     Attributes:
@@ -29,9 +27,12 @@ class ModeOption(DataClassJsonMixin):
     icon: Optional[str] = None
     default: bool = False
 
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
 
 @dataclass
-class Mode(DataClassJsonMixin):
+class Mode:
     """A category of options the user can select from.
 
     Each Mode represents a picker dropdown in the chat composer.
@@ -46,6 +47,9 @@ class Mode(DataClassJsonMixin):
     id: str
     name: str
     options: List[ModeOption] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
     def get_default_option(self) -> Optional[ModeOption]:
         """Get the default option for this mode, or the first option if none is default."""

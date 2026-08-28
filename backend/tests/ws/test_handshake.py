@@ -17,7 +17,13 @@ from typing import Any, List, Sequence, Set
 from chainlit.protocol.codec import encode_server
 from chainlit.protocol.payloads import AskActionSpec, Step as StepPayload, TextElement
 from chainlit.protocol.server import AskStart, StepUpsert
-from chainlit.ws.handshake import arrive, restore, sweep_superseded
+from chainlit.ws.handshake import (
+    RESUME_POLICY_DELETE,
+    RESUME_POLICY_KEY,
+    arrive,
+    restore,
+    sweep_superseded,
+)
 from chainlit.ws.registry import ClaimOutcome, SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 
@@ -323,7 +329,6 @@ async def test_a_live_memory_is_not_overwritten_by_storage() -> None:
 
 async def test_the_steps_a_resume_may_delete_go_with_their_children() -> None:
     """Deleting a parent and orphaning its children reads worse than either."""
-    from chainlit.resume_policy import RESUME_POLICY_DELETE, RESUME_POLICY_KEY
 
     session = make("s1")
     session.thread_id = "t1"
@@ -346,7 +351,6 @@ async def test_the_steps_a_resume_may_delete_go_with_their_children() -> None:
 
 
 async def test_a_step_a_live_question_is_waiting_on_is_never_deleted() -> None:
-    from chainlit.resume_policy import RESUME_POLICY_DELETE, RESUME_POLICY_KEY
 
     session = make("s1")
     session.thread_id = "t1"

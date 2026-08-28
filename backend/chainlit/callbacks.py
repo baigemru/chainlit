@@ -1,14 +1,18 @@
+"""The decorators an application registers its hooks with.
+
+Each one stores a wrapped function on ``config.code``; nothing here runs
+them. Who runs what -- and on which task -- is ``chainlit.runner``, which
+also owns the task indicator. That is why no decorator asks for a task any
+more: the hook is launched as the session's task by whoever launches it,
+and a second counter inside the wrapper would be the old socket.io
+bookkeeping under a new name.
+"""
+
 import inspect
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload
 
-from fastapi import Request, Response
-from fastapi.routing import iter_route_contexts
-from starlette.datastructures import Headers
-
 from chainlit.action import Action
 from chainlit.config import config
-from chainlit.context import context
-from chainlit.data.base import BaseDataLayer
 from chainlit.message import Message
 from chainlit.oauth_providers import get_configured_oauth_providers
 from chainlit.step import Step, step
@@ -21,84 +25,6 @@ from chainlit.types import (
 )
 from chainlit.user import User
 from chainlit.utils import wrap_user_function
-
-_CATCH_ALL_SUFFIX = "/{full_path:path}"
-
-
-def _holds_catch_all(route: Any) -> bool:
-    """Whether ``route`` is the SPA catch-all, or the object that holds it.
-
-    Since FastAPI 0.137 an included router stays a single object in
-    ``app.router.routes`` and the catch-all lives inside it, so that object is
-    what a custom route has to precede — anything after it is shadowed by the
-    SPA. ``iter_route_contexts`` (0.137.2) flattens one entry's subtree, which
-    is what makes the enclosing object findable.
-    """
-    return any(
-        (context.path or "").endswith(_CATCH_ALL_SUFFIX)
-        for context in iter_route_contexts([route])
-    )
-
-
-def server_route(
-    path: str, methods: Optional[List[str]] = None, **route_kwargs
-) -> Callable:
-    """
-    Register a custom FastAPI route on the Chainlit app.
-
-    The route is inserted before the SPA catch-all route, so it takes
-    precedence over the UI for its path. Re-registering the same path and
-    methods (e.g. on file-watch reload) replaces the previous route.
-
-    Args:
-        path (str): The route path, e.g. "/billing/buy". If a --root-path is
-            configured it is prepended automatically.
-        methods (Optional[List[str]]): HTTP methods, defaults to ["GET"].
-        **route_kwargs: Extra keyword arguments forwarded to fastapi's APIRoute.
-
-    Example:
-        @cl.server_route("/billing/buy", methods=["GET"])
-        async def buy(request: Request):
-            user = await cl.current_user(request)
-            ...
-
-    Returns:
-        Callable: The decorated route handler.
-    """
-
-    def decorator(func: Callable) -> Callable:
-        from fastapi.routing import APIRoute
-
-        # Lazy import to avoid a circular import at module load time.
-        from chainlit.server import app
-
-        methods_ = [method.upper() for method in (methods or ["GET"])]
-        route_path = path if path.startswith("/") else f"/{path}"
-        if config.run.root_path:
-            route_path = config.run.root_path.rstrip("/") + route_path
-
-        routes = app.router.routes
-        # Watch-mode reloads re-execute the user module on the same app:
-        # replace any route previously registered for the same path/methods.
-        routes[:] = [
-            route
-            for route in routes
-            if not (
-                isinstance(route, APIRoute)
-                and route.path == route_path
-                and set(route.methods or ()) & set(methods_)
-            )
-        ]
-
-        new_route = APIRoute(route_path, func, methods=methods_, **route_kwargs)
-        catch_all_index = next(
-            (index for index, route in enumerate(routes) if _holds_catch_all(route)),
-            len(routes),
-        )
-        routes.insert(catch_all_index, new_route)
-        return func
-
-    return decorator
 
 
 def on_app_startup(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
@@ -119,7 +45,7 @@ def on_app_startup(func: Callable[[], Union[Awaitable[None], None]]) -> Callable
     Returns:
         Callable[[], Union[Awaitable[None], None]]: The decorated startup hook.
     """
-    config.code.on_app_startup = wrap_user_function(func, with_task=False)
+    config.code.on_app_startup = wrap_user_function(func)
     return func
 
 
@@ -141,7 +67,7 @@ def on_app_shutdown(func: Callable[[], Union[Awaitable[None], None]]) -> Callabl
     Returns:
         Callable[[], Union[Awaitable[None], None]]: The decorated shutdown hook.
     """
-    config.code.on_app_shutdown = wrap_user_function(func, with_task=False)
+    config.code.on_app_shutdown = wrap_user_function(func)
     return func
 
 
@@ -163,27 +89,6 @@ def password_auth_callback(
     """
 
     config.code.password_auth_callback = wrap_user_function(func)
-    return func
-
-
-def header_auth_callback(
-    func: Callable[[Headers], Awaitable[Optional[User]]],
-) -> Callable:
-    """
-    Framework agnostic decorator to authenticate the user via a header
-
-    Args:
-        func (Callable[[Headers], Awaitable[Optional[User]]]): The authentication callback to execute.
-
-    Example:
-        @cl.header_auth_callback
-        async def header_auth_callback(headers: Headers) -> Optional[User]:
-
-    Returns:
-        Callable[[Headers], Awaitable[Optional[User]]]: The decorated authentication callback.
-    """
-
-    config.code.header_auth_callback = wrap_user_function(func)
     return func
 
 
@@ -215,16 +120,6 @@ def oauth_callback(
     return func
 
 
-def on_logout(func: Callable[[Request, Response], Any]) -> Callable:
-    """
-    Function called when the user logs out.
-    Takes the FastAPI request and response as parameters.
-    """
-
-    config.code.on_logout = wrap_user_function(func)
-    return func
-
-
 def on_message(func: Callable) -> Callable:
     """
     Framework agnostic decorator to react to messages coming from the UI.
@@ -249,31 +144,6 @@ def on_message(func: Callable) -> Callable:
     return func
 
 
-async def send_window_message(data: Any):
-    """
-    Send custom data to the host window via a window.postMessage event.
-
-    Args:
-        data (Any): The data to send with the event.
-    """
-    await context.emitter.send_window_message(data)
-
-
-def on_window_message(func: Callable[[str], Any]) -> Callable:
-    """
-    Hook to react to javascript postMessage events coming from the UI.
-
-    Args:
-        func (Callable[[str], Any]): The function to be called when a window message is received.
-                                     Takes the message content as a string parameter.
-
-    Returns:
-        Callable[[str], Any]: The decorated on_window_message function.
-    """
-    config.code.on_window_message = wrap_user_function(func)
-    return func
-
-
 def on_chat_start(func: Callable) -> Callable:
     """
     Hook to react to the user websocket connection event.
@@ -286,7 +156,7 @@ def on_chat_start(func: Callable) -> Callable:
     """
 
     config.code.on_chat_start = wrap_user_function(
-        step(func, name="on_chat_start", type="run"), with_task=True
+        step(func, name="on_chat_start", type="run")
     )
     return func
 
@@ -302,7 +172,7 @@ def on_chat_resume(func: Callable[[ThreadDict], Any]) -> Callable:
         Callable[], Any]: The decorated hook.
     """
 
-    config.code.on_chat_resume = wrap_user_function(func, with_task=True)
+    config.code.on_chat_resume = wrap_user_function(func)
     return func
 
 
@@ -311,11 +181,11 @@ def on_thread_ready(func: Callable[[ThreadDict], Any]) -> Callable:
     Hook running as a background task once a thread resume has completed.
 
     on_chat_resume stays the fast inline handshake stage; this hook gets
-    the on_chat_start physics: launched via create_task (the handshake
-    never waits for it), owns the task indicator, is cancelled by the stop
-    button and keeps the session alive across page reloads. Runs at most
-    once per session. Requires blocking work (long asks, pipelines) to
-    live here instead of a bare asyncio.create_task.
+    the on_chat_start physics: launched as the session's own task (the
+    handshake never waits for it), shows the task indicator, is cancelled
+    by the stop button and keeps the session alive across page reloads.
+    Runs at most once per session. Requires blocking work (long asks,
+    pipelines) to live here instead of a bare asyncio.create_task.
 
     Registered like on_chat_resume — without a step() wrapper on purpose:
     "on_thread_ready" is not in CL_RUN_NAMES (backend and frontend), so a
@@ -329,7 +199,7 @@ def on_thread_ready(func: Callable[[ThreadDict], Any]) -> Callable:
         Callable[[ThreadDict], Any]: The decorated hook.
     """
 
-    config.code.on_thread_ready = wrap_user_function(func, with_task=True)
+    config.code.on_thread_ready = wrap_user_function(func)
     return func
 
 
@@ -343,10 +213,10 @@ def on_profile_start(func: Callable[[ProfileStartInfo], Any]) -> Callable:
     all survive — so blocking work belongs here: AskUserMessage,
     AskActionMessage and AskFileMessage all work inside it.
 
-    Gets the on_chat_start physics via with_task=True: owns the task
-    indicator, is cancelled by the stop button, keeps the session alive
-    across page reloads. The switch procedure cancels a previous instance
-    before launching a new one, so at most one is live per session.
+    Gets the on_chat_start physics: shows the task indicator, is cancelled
+    by the stop button, keeps the session alive across page reloads. The
+    switch procedure cancels a previous instance before launching a new
+    one, so at most one is live per session.
 
     Registered without a step() wrapper for the same reason as
     on_thread_ready: "on_profile_start" is not in CL_RUN_NAMES.
@@ -358,7 +228,7 @@ def on_profile_start(func: Callable[[ProfileStartInfo], Any]) -> Callable:
         Callable[[ProfileStartInfo], Any]: The decorated hook.
     """
 
-    config.code.on_profile_start = wrap_user_function(func, with_task=True)
+    config.code.on_profile_start = wrap_user_function(func)
     return func
 
 
@@ -470,48 +340,7 @@ def on_chat_end(func: Callable) -> Callable:
         Callable[], Any]: The decorated hook.
     """
 
-    config.code.on_chat_end = wrap_user_function(func, with_task=True)
-    return func
-
-
-def on_audio_start(func: Callable) -> Callable:
-    """
-    Hook to react to the user initiating audio.
-
-    Returns:
-        Callable[], Any]: The decorated hook.
-    """
-
-    config.code.on_audio_start = wrap_user_function(func, with_task=False)
-    return func
-
-
-def on_audio_chunk(func: Callable) -> Callable:
-    """
-    Hook to react to the audio chunks being sent.
-
-    Args:
-        chunk (InputAudioChunk): The audio chunk being sent.
-
-    Returns:
-        Callable[], Any]: The decorated hook.
-    """
-
-    config.code.on_audio_chunk = wrap_user_function(func, with_task=False)
-    return func
-
-
-def on_audio_end(func: Callable) -> Callable:
-    """
-    Hook to react to the audio stream ending. This is called after the last audio chunk is sent.
-
-    Returns:
-        Callable[], Any]: The decorated hook.
-    """
-
-    config.code.on_audio_end = wrap_user_function(
-        step(func, name="on_audio_end", type="run"), with_task=True
-    )
+    config.code.on_chat_end = wrap_user_function(func)
     return func
 
 
@@ -555,56 +384,19 @@ def action_callback(name: str) -> Callable:
     """
 
     def decorator(func: Callable[[Action], Any]):
-        config.code.action_callbacks[name] = wrap_user_function(func, with_task=False)
+        config.code.action_callbacks[name] = wrap_user_function(func)
         return func
 
     return decorator
 
 
-def on_settings_update(
-    func: Callable[[Dict[str, Any]], Any],
-) -> Callable[[Dict[str, Any]], Any]:
-    """
-    Hook to react to the user changing any settings.
-
-    Args:
-        func (Callable[], Any]): The hook to execute after settings were changed.
-
-    Returns:
-        Callable[], Any]: The decorated hook.
-    """
-
-    config.code.on_settings_update = wrap_user_function(func, with_task=True)
-    return func
-
-
-def on_settings_edit(
-    func: Callable[[Dict[str, Any]], Any],
-) -> Callable[[Dict[str, Any]], Any]:
-    """
-    Hook to react to the user editing any settings (on the fly).
-
-    Args:
-        func (Callable[], Any]): The hook to execute while settings are being edited.
-
-    Returns:
-        Callable[], Any]: The decorated hook.
-    """
-
-    config.code.on_settings_edit = wrap_user_function(func, with_task=True)
-    return func
-
-
-def data_layer(
-    func: Callable[[], BaseDataLayer],
-) -> Callable[[], BaseDataLayer]:
+def data_layer(func: Callable[[], Any]) -> Callable[[], Any]:
     """
     Hook to configure custom data layer.
-    """
 
-    # We don't use wrap_user_function here because:
-    # 1. We don't need to support async here and;
-    # 2. We don't want to change the API for get_data_layer() to be async, everywhere (at this point).
+    Not wrapped: the factory is called synchronously by whoever builds the
+    persistence, and a wrapper would make it a coroutine.
+    """
     config.code.data_layer = func
     return func
 

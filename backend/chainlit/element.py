@@ -1,6 +1,17 @@
+"""Files, images and widgets the application attaches to a step.
+
+Plain dataclasses. The wire shape is the tagged ``Element`` union in
+``chainlit.protocol.payloads`` and the emitter converts ``to_dict()`` into
+it; the row shape is ``ElementRecord`` and ``chainlit.persist`` converts the
+same dict into that. This module therefore only has to produce the dict,
+spool the blob into the session so the client can fetch it, and say which
+local source the persistence layer should upload.
+"""
+
 import json
 import mimetypes
 import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 from io import BytesIO
 from typing import (
@@ -16,13 +27,10 @@ from typing import (
 )
 
 import filetype
-from pydantic import Field
-from pydantic.dataclasses import dataclass
 
+# Aliased: ``send(persist=...)`` is a public keyword and would shadow it.
+from chainlit import persist as persistence
 from chainlit.context import context
-from chainlit.data import get_data_layer
-from chainlit.logger import logger
-from chainlit.persist_barrier import create_persist_task
 
 mime_types = {
     "text": "text/plain",
@@ -66,16 +74,20 @@ class ElementDict(TypedDict, total=False):
     mime: Optional[str]
 
 
+def _current_thread_id() -> str:
+    return context.session.thread_id  # type: ignore[return-value]
+
+
 @dataclass
 class Element:
     # Thread id
-    thread_id: str = Field(default_factory=lambda: context.session.thread_id)
+    thread_id: str = field(default_factory=_current_thread_id)
     # The type of the element. This will be used to determine how to display the element in the UI.
     type: ClassVar[ElementType]
     # Name of the element, this will be used to reference the element in the UI.
     name: str = ""
     # The ID of the element. This is set automatically when the element is sent to the UI.
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     # The key of the element hosted on Chainlit.
     chainlit_key: Optional[str] = None
     # The URL of the element if already hosted somewhere else.
@@ -87,7 +99,7 @@ class Element:
     # The byte content of the element.
     content: Optional[Union[bytes, str]] = None
     # Controls how the image element should be displayed in the UI. Choices are “side” (default), “inline”, or “page”.
-    display: ElementDisplay = Field(default="inline")
+    display: ElementDisplay = "inline"
     # Controls element size
     size: Optional[ElementSize] = None
     # The ID of the message this element is associated with.
@@ -206,37 +218,47 @@ class Element:
         else:
             return "file"
 
-    async def _create(self, persist=True) -> bool:
+    async def _create(self, persist: bool = True) -> bool:
+        """Spool the blob, then queue the row.
+
+        Spool first: the row carries the ``chainlitKey`` the client fetches
+        by, and the persistence layer converts the dict the moment it is
+        handed over, so the key has to exist before that.
+        """
         if self.persisted and not self.updatable:
             return True
 
-        if (data_layer := get_data_layer()) and persist:
-            try:
-                create_persist_task(
-                    data_layer.create_element(self), thread_id=self.thread_id
-                )
-            except Exception as e:
-                logger.error(f"Failed to create element: {e!s}")
         if not self.url and (not self.chainlit_key or self.updatable):
+            content = self.content
+            if isinstance(content, str):
+                content = content.encode("utf-8")
             file_dict = await context.session.persist_file(
                 name=self.name,
                 path=self.path,
-                content=self.content,
+                content=content,
                 mime=self.mime or "",
             )
             self.chainlit_key = file_dict["id"]
+
+        if persist:
+            has_blob = not self.url and (
+                self.path is not None or self.content is not None
+            )
+            persistence.save_element(
+                self.to_dict(),
+                path=self.path if has_blob else None,
+                content=self.content if has_blob and self.path is None else None,
+            )
 
         self.persisted = True
 
         return True
 
     async def remove(self):
-        data_layer = get_data_layer()
-        if data_layer:
-            await data_layer.delete_element(self.id, self.thread_id)
-        await context.emitter.emit("remove_element", {"id": self.id})
+        persistence.delete_element(self.id, self.thread_id)
+        context.emitter.remove_element(self.id)
 
-    async def send(self, for_id: str, persist=True):
+    async def send(self, for_id: str, persist: bool = True):
         self.for_id = for_id
 
         if not self.mime:
@@ -260,7 +282,7 @@ class Element:
         if not self.url and not self.chainlit_key:
             raise ValueError("Must provide url or chainlit key to send element")
 
-        await context.emitter.send_element(self.to_dict())
+        context.emitter.send_element(self.to_dict())
 
 
 ElementBased = TypeVar("ElementBased", bound=Element)
@@ -330,21 +352,11 @@ class Task:
     status: TaskStatus = TaskStatus.READY
     forId: Optional[str] = None
 
-    def __init__(
-        self,
-        title: str,
-        status: TaskStatus = TaskStatus.READY,
-        forId: Optional[str] = None,
-    ):
-        self.title = title
-        self.status = status
-        self.forId = forId
-
 
 @dataclass
 class TaskList(Element):
     type: ClassVar[ElementType] = "tasklist"
-    tasks: List[Task] = Field(default_factory=list, exclude=True)
+    tasks: List[Task] = field(default_factory=list)
     status: str = "Ready"
     name: str = "tasklist"
     content: str = "dummy content to pass validation"
@@ -481,7 +493,7 @@ class CustomElement(Element):
 
     type: ClassVar[ElementType] = "custom"
     mime: str = "application/json"
-    props: Dict = Field(default_factory=dict)
+    props: Dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.content = json.dumps(self.props)

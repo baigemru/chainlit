@@ -39,7 +39,9 @@ import msgspec
 from litestar.stores.base import Store
 from litestar.stores.memory import MemoryStore
 
-from chainlit.transit import TRANSIT_TTL_SECONDS
+# A record that was never claimed (dead socket, outdated frontend bundle)
+# must not survive long enough to leak into an unrelated future session.
+TRANSIT_TTL_SECONDS = 120
 
 __all__ = (
     "TRANSIT_STORE_NAME",

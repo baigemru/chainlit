@@ -1,33 +1,38 @@
-from typing import TYPE_CHECKING, Dict, List
+"""The messages of the current conversation, as ``cl.chat_context`` sees them.
+
+Kept on the session's own state dict rather than in a module-level table
+keyed by session id: the session is what lives and dies, and a table that
+outlives it is a leak that has to be swept by whoever tears the session
+down. The key is private so it is not confused with what the application
+stores through ``cl.user_session``.
+"""
+
+from typing import TYPE_CHECKING, List
 
 from chainlit.context import context
 
 if TYPE_CHECKING:
     from chainlit.message import Message
 
-chat_contexts: Dict[str, List["Message"]] = {}
+MESSAGES_KEY = "__chat_messages"
 
 
 class ChatContext:
+    def _messages(self) -> List["Message"]:
+        return context.session.state.setdefault(MESSAGES_KEY, [])
+
     def get(self) -> List["Message"]:
         if not context.session:
             return []
-
-        if context.session.id not in chat_contexts:
-            # Create a new chat context
-            chat_contexts[context.session.id] = []
-
-        return chat_contexts[context.session.id].copy()
+        return self._messages().copy()
 
     def add(self, message: "Message"):
         if not context.session:
             return
 
-        if context.session.id not in chat_contexts:
-            chat_contexts[context.session.id] = []
-
-        if message not in chat_contexts[context.session.id]:
-            chat_contexts[context.session.id].append(message)
+        messages = self._messages()
+        if message not in messages:
+            messages.append(message)
 
         return message
 
@@ -35,18 +40,16 @@ class ChatContext:
         if not context.session:
             return False
 
-        if context.session.id not in chat_contexts:
-            return False
-
-        if message in chat_contexts[context.session.id]:
-            chat_contexts[context.session.id].remove(message)
+        messages = self._messages()
+        if message in messages:
+            messages.remove(message)
             return True
 
         return False
 
     def clear(self) -> None:
-        if context.session and context.session.id in chat_contexts:
-            chat_contexts[context.session.id] = []
+        if context.session:
+            context.session.state[MESSAGES_KEY] = []
 
     def to_openai(self):
         messages = []

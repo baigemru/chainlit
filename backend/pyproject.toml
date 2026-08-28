@@ -32,23 +32,17 @@ dependencies = [
     "httpx>=0.28.1",
     "literalai==0.1.201",
     "dataclasses_json>=0.6.7,<0.7.0",
-    # 0.137.2 for fastapi.routing.iter_route_contexts, which cl.server_route
-    # needs to find the SPA catch-all inside an included router.
-    "fastapi>=0.141.1",
+    # ``config.py`` still types the header-auth callback with starlette's
+    # ``Headers`` (the public-API test pins that signature); it goes with it.
     "starlette>=1.6.0",
     "uvicorn>=0.52.4",
-    "python-socketio>=5.16.4,<6.0.0",
     "aiofiles>=25.1.0",
-    "syncer>=2.0.3,<3.0.0",
-    "asyncer>=0.0.18,<0.1.0",
     "click>=8.4.2,<9.0.0",
     "pydantic>=2.13.4,<3",
     "python-dotenv>=1.2.3,<2.0.0",
     "watchfiles>=1.2.0,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
-    "lazify>=0.4.0,<0.5.0",
     "packaging>=26.3",
-    "python-multipart>=0.0.32,<1.0.0",
     "pyjwt>=2.13.0,<3.0.0",
     "pydantic-settings>=2.15.0",
     "litestar>=2.24.0",

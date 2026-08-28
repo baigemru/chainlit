@@ -1,20 +1,61 @@
-import asyncio
+"""Fixtures shared by the ``cl.*`` API tests.
+
+A real ``Session`` and a real ``Emitter`` rather than mocks: what the API
+does is put frames on the session's queue and rows on its writer, and both
+are observable -- ``session.outbound.pending_frames`` and ``writer.held``.
+Asserting on those is asserting on what the client and the database would
+see, which a mock of the emitter never was.
+"""
+
 import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable
-from unittest.mock import AsyncMock, Mock
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 import pytest
 import pytest_asyncio
 
 from chainlit import config
-from chainlit.callbacks import data_layer
 from chainlit.context import ChainlitContext, context_var
-from chainlit.data.base import BaseDataLayer
-from chainlit.session import HTTPSession, WebsocketSession
+from chainlit.emitter import Emitter
+from chainlit.protocol.payloads import FileRef, Step as StepPayload
 from chainlit.user import PersistedUser
 from chainlit.user_session import UserSession
+from chainlit.ws.session import Session
+
+
+class RecordingRunner:
+    """A ``CallbackRunner`` that only remembers what it was asked."""
+
+    def __init__(self) -> None:
+        self.user_messages: List[StepPayload] = []
+        self.ask_files: List[Sequence[Mapping[str, Any]]] = []
+        self.actions: List[Mapping[str, Any]] = []
+        self.stops = 0
+
+    async def call_action(self, session: Session, action: Mapping[str, Any]) -> Any:
+        self.actions.append(action)
+        return None
+
+    async def on_message(
+        self,
+        session: Session,
+        message: StepPayload,
+        file_references: Sequence[FileRef] = (),
+    ) -> None:
+        self.user_messages.append(message)
+
+    async def on_stop(self, session: Session) -> None:
+        self.stops += 1
+
+    async def record_user_message(self, session: Session, message: StepPayload) -> Any:
+        self.user_messages.append(message)
+        return message
+
+    async def record_ask_files(
+        self, session: Session, files: Sequence[Mapping[str, Any]], *, for_id: str
+    ) -> None:
+        self.ask_files.append(files)
 
 
 @pytest.fixture
@@ -27,142 +68,67 @@ def persisted_test_user():
 
 
 @pytest.fixture
-def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mock]:
-    def create_mock_session(**kwargs) -> Mock:
-        mock = Mock(spec=WebsocketSession)
-        mock.user = kwargs.get("user", persisted_test_user)
-        mock.id = kwargs.get("id", "test_session_id")
-        mock.user_env = kwargs.get("user_env", {"test_env": "value"})
-        mock.chat_settings = kwargs.get("chat_settings", {})
-        mock.chat_profile = kwargs.get("chat_profile", None)
-        mock.environ = kwargs.get("environ", None)
-        mock.client_type = kwargs.get("client_type", "webapp")
-        mock.thread_id = kwargs.get("thread_id", "test_thread_id")
-        mock.parent_thread_id = kwargs.get("parent_thread_id", None)
-        mock.emit = AsyncMock()
-        mock.emit_call = AsyncMock()
-        # Present on every real WebsocketSession; tests exercising the
-        # legacy-free fallback delete the attribute explicitly.
-        mock.emit_ask = AsyncMock()
-        mock.has_first_interaction = kwargs.get("has_first_interaction", True)
-        mock.files = kwargs.get("files", {})
-        mock.files_spec = kwargs.get("files_spec", {})
-        mock.pending_ask = kwargs.get("pending_ask", None)
-        # Declared on the class, so Mock(spec=...) would hand out a truthy
-        # child Mock and quietly pass any "current_task untouched" assert.
-        mock.current_task = kwargs.get("current_task", None)
-        mock.thread_ready_task = kwargs.get("thread_ready_task", None)
-        mock.profile_start_task = kwargs.get("profile_start_task", None)
-        mock.profile_switch_lock = asyncio.Lock()
-        mock.pending_transit_id = kwargs.get("pending_transit_id", None)
-        mock.resume_task_started = kwargs.get("resume_task_started", False)
-        mock.task_counter = kwargs.get("task_counter", 0)
-        mock.restored = kwargs.get("restored", False)
-        mock.fresh_page_load = kwargs.get("fresh_page_load", True)
-        mock.resume_processed = kwargs.get("resume_processed", False)
-        mock.resume_delete_retry = kwargs.get("resume_delete_retry", ([], []))
-        mock.transcript_element_dicts = kwargs.get("transcript_element_dicts", {})
-        mock.last_resolved_ask_step_id = kwargs.get("last_resolved_ask_step_id", None)
-        # Default: the connection handshake has finished (the common state
-        # outside reconnect tests). Tests of the parked-conversion path pass
-        # their own cleared event.
-        if "connection_inited" in kwargs:
-            mock.connection_inited = kwargs["connection_inited"]
-        else:
-            mock.connection_inited = asyncio.Event()
-            mock.connection_inited.set()
-        mock.deferred_ask_reply_tasks = kwargs.get("deferred_ask_reply_tasks", [])
+def session_factory(
+    persisted_test_user: PersistedUser, tmp_path: Path
+) -> Callable[..., Session]:
+    def create(**kwargs: Any) -> Session:
+        session = Session(
+            id=kwargs.get("id", "test_session_id"),
+            runner=kwargs.get("runner", RecordingRunner()),
+            user=kwargs.get("user", persisted_test_user),
+            thread_id=kwargs.get("thread_id", "test_thread_id"),
+            chat_profile=kwargs.get("chat_profile"),
+            client_type=kwargs.get("client_type", "webapp"),
+            user_env=kwargs.get("user_env", {"test_env": "value"}),
+            files_root=tmp_path,
+        )
+        session.writer = kwargs.get("writer")
+        return session
 
-        return mock
-
-    return create_mock_session
+    return create
 
 
 @pytest.fixture
-def mock_session(mock_session_factory) -> Mock:
-    return mock_session_factory()
+def session(session_factory) -> Session:
+    return session_factory()
 
 
 @asynccontextmanager
-async def create_chainlit_context(mock_session):
-    from chainlit.emitter import BaseChainlitEmitter
-
-    # Create a mock emitter with all necessary methods
-    mock_emitter = Mock(spec=BaseChainlitEmitter)
-    mock_emitter.send_step = AsyncMock()
-    mock_emitter.update_step = AsyncMock()
-    mock_emitter.delete_step = AsyncMock()
-    mock_emitter.stream_start = AsyncMock()
-    mock_emitter.send_element = AsyncMock()
-    mock_emitter.send_action = AsyncMock()
-    mock_emitter.remove_action = AsyncMock()
-    mock_emitter.emit = AsyncMock()
-    mock_emitter.set_chat_settings = Mock()  # Sync method, not async
-
-    context = ChainlitContext(mock_session, emitter=mock_emitter)
-    token = context_var.set(context)
+async def bind_context(session: Session):
+    """Bind the current task to ``session`` for the duration of the block."""
+    ctx = ChainlitContext(session, Emitter(session))
+    token = context_var.set(ctx)
     try:
-        yield context
+        yield ctx
     finally:
         context_var.reset(token)
 
 
 @pytest_asyncio.fixture
-async def mock_chainlit_context(persisted_test_user, mock_session):
-    mock_session.user = persisted_test_user
-    return create_chainlit_context(mock_session)
+async def mock_chainlit_context(session: Session):
+    """An ``async with`` block inside which ``cl.context`` is ``session``.
+
+    The name is historical; nothing in it is a mock any more.
+    """
+    return bind_context(session)
+
+
+@pytest.fixture
+def frames() -> Callable[..., List[Any]]:
+    """The frames a session has queued, optionally only one kind of them."""
+
+    def read(session: Session, kind: Optional[type] = None) -> List[Any]:
+        pending = list(session.outbound.pending_frames)
+        if kind is None:
+            return pending
+        return [frame for frame in pending if isinstance(frame, kind)]
+
+    return read
 
 
 @pytest.fixture
 def user_session():
     return UserSession()
-
-
-@pytest.fixture
-def mock_websocket_session():
-    session = Mock(spec=WebsocketSession)
-    session.id = "test_session_id"
-    session.emit = AsyncMock()
-    session.emit_call = AsyncMock()
-    # Present on every real WebsocketSession; tests exercising the
-    # legacy-free fallback delete the attribute explicitly.
-    session.emit_ask = AsyncMock()
-    session.files = {}
-    session.files_spec = {}
-    session.pending_ask = None
-    session.thread_ready_task = None
-    session.profile_start_task = None
-    session.profile_switch_lock = asyncio.Lock()
-    session.resume_task_started = False
-    session.task_counter = 0
-    session.has_first_interaction = True
-    session.last_resolved_ask_step_id = None
-    session.connection_inited = asyncio.Event()
-    session.connection_inited.set()
-    session.deferred_ask_reply_tasks = []
-
-    return session
-
-
-@pytest.fixture
-def mock_http_session():
-    return Mock(spec=HTTPSession)
-
-
-@pytest.fixture
-def mock_data_layer(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    mock_data_layer = AsyncMock(spec=BaseDataLayer)
-
-    return mock_data_layer
-
-
-@pytest.fixture
-def mock_get_data_layer(mock_data_layer: AsyncMock, test_config: config.ChainlitConfig):
-    # Instantiate mock data layer
-    mock_get_data_layer = Mock(return_value=mock_data_layer)
-
-    # Configure it using @data_layer decorator
-    return data_layer(mock_get_data_layer)
 
 
 @pytest.fixture
@@ -172,7 +138,11 @@ def test_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     test_config = config.load_config()
 
     monkeypatch.setattr("chainlit.callbacks.config", test_config)
-    monkeypatch.setattr("chainlit.server.config", test_config)
     monkeypatch.setattr("chainlit.config.config", test_config)
 
     return test_config
+
+
+@pytest.fixture
+def state_of(session: Session) -> Dict[str, Any]:
+    return session.state

@@ -8,32 +8,35 @@ from typing import Dict, List, Literal, Optional, Union, cast
 
 from literalai.observability.step import MessageStepType
 
+from chainlit import persist
 from chainlit.action import Action
 from chainlit.chat_context import chat_context
 from chainlit.config import config
 from chainlit.context import context, local_steps
-from chainlit.data import get_data_layer
 from chainlit.element import CustomElement, ElementBased
-from chainlit.logger import logger
-from chainlit.persist_barrier import create_persist_task
-from chainlit.resume_policy import (
-    RESUME_POLICY_DELETE,
-    RESUME_POLICY_KEEP,
-    RESUME_POLICY_KEY,
+from chainlit.protocol.payloads import (
+    AskActionSpec,
+    AskElementSpec,
+    AskFileSpec,
+    AskTextSpec,
 )
 from chainlit.step import StepDict, WaitDict
 from chainlit.types import (
     AskActionResponse,
-    AskActionSpec,
     AskElementResponse,
-    AskElementSpec,
     AskFileResponse,
-    AskFileSpec,
     AskSlotBusyError,
-    AskSpec,
     FileDict,
 )
 from chainlit.utils import utc_now
+
+# The step-metadata flag a resume of a dead session reads. ``"delete"`` marks
+# a step -- and the elements under it -- as not surviving that resume. The
+# reader is ``controllers.project.is_resume_delete``; the two agree on the
+# key by convention, since neither may import the other.
+RESUME_POLICY_KEY = "resume_policy"
+RESUME_POLICY_KEEP = "keep"
+RESUME_POLICY_DELETE = "delete"
 
 
 class MessageBase(ABC):
@@ -44,7 +47,6 @@ class MessageBase(ABC):
     type: MessageStepType = "assistant_message"
     streaming = False
     created_at: Union[str, None] = None
-    fail_on_persist_error: bool = False
     persisted = False
     is_error = False
     command: Optional[str] = None
@@ -67,7 +69,8 @@ class MessageBase(ABC):
     wait_loop: bool = False
 
     def __post_init__(self) -> None:
-        self.thread_id = context.session.thread_id
+        # Minted with the session; Optional only on the bare constructor.
+        self.thread_id = cast(str, context.session.thread_id)
 
         previous_steps = local_steps.get() or []
         parent_step = previous_steps[-1] if previous_steps else None
@@ -82,7 +85,7 @@ class MessageBase(ABC):
 
         ``"keep"`` (the default) is a strict no-op: the metadata is left
         untouched. ``"delete"`` marks the step as not surviving a thread
-        resume of a dead session — see ``chainlit.resume_policy``. Written
+        resume of a dead session — see ``RESUME_POLICY_KEY``. Written
         into ``self.metadata`` at construction time so every persist path
         (``_create``, ``update``, favorite toggles) carries the flag.
         """
@@ -100,12 +103,16 @@ class MessageBase(ABC):
 
     @classmethod
     def from_dict(self, _dict: StepDict):
+        """Rebuild from a step dict, including one straight off the wire.
+
+        The wire omits defaults, so anything but ``id`` may be absent.
+        """
         type = _dict.get("type", "assistant_message")
         return Message(
             id=_dict["id"],
             parent_id=_dict.get("parentId"),
-            created_at=_dict["createdAt"],
-            content=_dict["output"],
+            created_at=_dict.get("createdAt"),
+            content=_dict.get("output", ""),
             author=_dict.get("name", config.ui.name),
             command=_dict.get("command"),
             modes=_dict.get("modes"),
@@ -179,27 +186,19 @@ class MessageBase(ABC):
 
         step_dict = self.to_dict()
         chat_context.add(self)
-
-        data_layer = get_data_layer()
-        if data_layer:
-            try:
-                create_persist_task(data_layer.update_step(step_dict))
-            except Exception as e:
-                if self.fail_on_persist_error:
-                    raise e
-                logger.error(f"Failed to persist message update: {e!s}")
+        persist.save_step(step_dict)
 
         wait_payload = self._wait_payload()
         # A plain update ends the wait mode; a wait update renews it — the
         # reconnect replay mirrors whatever the last emit carried.
         self._active_wait_payload = wait_payload
         if wait_payload is not None:
-            # Transient field for the emitter only; the data layer above got
-            # the original dict without it. Consumed on emit.
-            await context.emitter.update_step({**step_dict, "wait": wait_payload})
+            # Transient field for the emitter only; the row above got the
+            # original dict without it. Consumed on emit.
+            context.emitter.update_step({**step_dict, "wait": wait_payload})
             self.wait = False
         else:
-            await context.emitter.update_step(step_dict)
+            context.emitter.update_step(step_dict)
 
         return True
 
@@ -208,31 +207,17 @@ class MessageBase(ABC):
         Remove a message already sent to the UI.
         """
         chat_context.remove(self)
-        step_dict = self.to_dict()
-        data_layer = get_data_layer()
-        if data_layer:
-            try:
-                create_persist_task(data_layer.delete_step(step_dict["id"]))
-            except Exception as e:
-                if self.fail_on_persist_error:
-                    raise e
-                logger.error(f"Failed to persist message deletion: {e!s}")
-
-        await context.emitter.delete_step(step_dict)
+        persist.delete_step(self.id)
+        context.emitter.delete_step(self.id)
 
         return True
 
     async def _create(self):
+        """Queue the row once. Returns the dict the wire gets."""
         step_dict = self.to_dict()
-        data_layer = get_data_layer()
-        if data_layer and not self.persisted:
-            try:
-                create_persist_task(data_layer.create_step(step_dict))
-                self.persisted = True
-            except Exception as e:
-                if self.fail_on_persist_error:
-                    raise e
-                logger.error(f"Failed to persist message creation: {e!s}")
+        if not self.persisted:
+            persist.save_step(step_dict)
+            self.persisted = True
 
         return step_dict
 
@@ -255,12 +240,12 @@ class MessageBase(ABC):
         # Remembered for the reconnect replay (see _active_wait_payload).
         self._active_wait_payload = wait_payload
         if wait_payload is not None:
-            # Transient field for the emitter only; the data layer (via
-            # _create) got the original dict without it. Consumed on emit.
-            await context.emitter.send_step({**step_dict, "wait": wait_payload})
+            # Transient field for the emitter only; the row (via _create)
+            # got the original dict without it. Consumed on emit.
+            context.emitter.send_step({**step_dict, "wait": wait_payload})
             self.wait = False
         else:
-            await context.emitter.send_step(step_dict)
+            context.emitter.send_step(step_dict)
 
         return self
 
@@ -282,11 +267,9 @@ class MessageBase(ABC):
         if not self.streaming:
             self.streaming = True
             step_dict = self.to_dict()
-            await context.emitter.stream_start(step_dict)
+            context.emitter.stream_start(step_dict)
         else:
-            await context.emitter.send_token(
-                id=self.id, token=token, is_sequence=is_sequence
-            )
+            context.emitter.send_token(id=self.id, token=token, is_sequence=is_sequence)
 
 
 class Message(MessageBase):
@@ -424,17 +407,11 @@ class ErrorMessage(MessageBase):
         author (str, optional): The author of the message, this will be used in the UI. Defaults to the assistant name (see config).
     """
 
-    def __init__(
-        self,
-        content: str,
-        author: str = config.ui.name,
-        fail_on_persist_error: bool = False,
-    ):
+    def __init__(self, content: str, author: str = config.ui.name):
         self.content = content
         self.author = author
         self.type = "assistant_message"
         self.is_error = True
-        self.fail_on_persist_error = fail_on_persist_error
 
         super().__post_init__()
 
@@ -447,10 +424,12 @@ class ErrorMessage(MessageBase):
 
 
 class AskMessageBase(MessageBase):
-    async def remove(self):
-        removed = await super().remove()
-        if removed:
-            await context.emitter.clear("clear_ask")
+    """A message that waits for the user.
+
+    Nothing to add over ``MessageBase``: the emitter ends the ask itself
+    (``ask.end``) on answer, timeout and cancellation, so removing the
+    question no longer has to clear the form by hand.
+    """
 
 
 class AskUserMessage(AskMessageBase):
@@ -463,7 +442,7 @@ class AskUserMessage(AskMessageBase):
         content (str): The content of the prompt.
         author (str, optional): The author of the message, this will be used in the UI. Defaults to the assistant name (see config).
         timeout (int, optional): The number of seconds to wait for an answer before raising a TimeoutError.
-        raise_on_timeout (bool, optional): Whether to raise a socketio TimeoutError if the user does not answer in time.
+        raise_on_timeout (bool, optional): Whether to raise a TimeoutError if the user does not answer in time.
         resume (Literal["keep", "delete"], optional): "delete" — the step does not survive a thread resume of a dead session (a live pending ask is untouched). Defaults to "keep".
     """
 
@@ -503,7 +482,7 @@ class AskUserMessage(AskMessageBase):
 
         step_dict = await self._create()
 
-        spec = AskSpec(type="text", step_id=step_dict["id"], timeout=self.timeout)
+        spec = AskTextSpec(step_id=step_dict["id"], timeout=self.timeout)
 
         # In the transcript BEFORE the wait: a reconnect replay must show
         # the question above its answer, not below it.
@@ -542,7 +521,7 @@ class AskFileMessage(AskMessageBase):
         max_files (int, optional): Maximum number of files to upload. Maximum value is 10.
         author (str, optional): The author of the message, this will be used in the UI. Defaults to the assistant name (see config).
         timeout (int, optional): The number of seconds to wait for an answer before raising a TimeoutError.
-        raise_on_timeout (bool, optional): Whether to raise a socketio TimeoutError if the user does not answer in time.
+        raise_on_timeout (bool, optional): Whether to raise a TimeoutError if the user does not answer in time.
         resume (Literal["keep", "delete"], optional): "delete" — the step does not survive a thread resume of a dead session (a live pending ask is untouched). Defaults to "keep".
     """
 
@@ -589,7 +568,6 @@ class AskFileMessage(AskMessageBase):
         step_dict = await self._create()
 
         spec = AskFileSpec(
-            type="file",
             step_id=step_dict["id"],
             accept=self.accept,
             max_size_mb=self.max_size_mb,
@@ -678,7 +656,6 @@ class AskActionMessage(AskMessageBase):
             await action.send(for_id=str(step_dict["id"]))
 
         spec = AskActionSpec(
-            type="action",
             step_id=step_dict["id"],
             timeout=self.timeout,
             keys=action_keys,
@@ -711,7 +688,8 @@ class AskActionMessage(AskMessageBase):
         if res is None:
             self.content = "Timed out: no action was taken"
         else:
-            self.content = f"**Selected:** {res['label']}"
+            # The wire omits defaults; a label of "" is an absent key.
+            self.content = f"**Selected:** {res.get('label', '')}"
 
         self.wait_for_answer = False
 
@@ -760,7 +738,6 @@ class AskElementMessage(AskMessageBase):
         await self.element.send(for_id=str(step_dict["id"]))
 
         spec = AskElementSpec(
-            type="element",
             step_id=step_dict["id"],
             timeout=self.timeout,
             element_id=self.element.id,
@@ -774,10 +751,9 @@ class AskElementMessage(AskMessageBase):
                     spec,
                     self.raise_on_timeout,
                     # The client loses the element on refresh; it is re-emitted
-                    # alongside the ask on reconnect. Passed as the live object
-                    # and serialized at restore time, so updates made while the
-                    # ask is pending are not rolled back.
-                    restore_element=self.element,
+                    # alongside the ask on reconnect. A snapshot on purpose:
+                    # the form the user saw is the form to put back.
+                    restore_element=self.element.to_dict(),
                 ),
             )
         except AskSlotBusyError:

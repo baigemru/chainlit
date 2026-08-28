@@ -80,7 +80,7 @@ from chainlit.persistence.services import (
     from_datetime,
     now,
 )
-from chainlit.resume_policy import RESUME_POLICY_DELETE, RESUME_POLICY_KEY
+from chainlit.ws.handshake import RESUME_POLICY_DELETE, RESUME_POLICY_KEY
 
 __all__ = (
     "ElementPayload",

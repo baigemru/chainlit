@@ -151,6 +151,11 @@ class Persistence:
     """
 
     config: SQLAlchemyAsyncConfig
+    #: Where element blobs go. ``None`` writes the element row without a
+    #: blob -- the element is still shown, from the session's spool, but
+    #: does not survive the session. The clients live under
+    #: ``chainlit.data.storage_clients`` until they move here.
+    storage: Optional[Any] = None
     user_service: Type[UserService] = UserService
     thread_service: Type[ThreadService] = ThreadService
     step_service: Type[StepService] = StepService
@@ -158,12 +163,18 @@ class Persistence:
     feedback_service: Type[FeedbackService] = FeedbackService
 
     @classmethod
-    def from_url(cls, url: str, **engine_kwargs: Any) -> "Persistence":
-        return cls(config=sqlalchemy_config(url=url, **engine_kwargs))
+    def from_url(
+        cls, url: str, *, storage: Optional[Any] = None, **engine_kwargs: Any
+    ) -> "Persistence":
+        return cls(config=sqlalchemy_config(url=url, **engine_kwargs), storage=storage)
 
     @classmethod
-    def from_engine(cls, engine: AsyncEngine, **engine_kwargs: Any) -> "Persistence":
-        return cls(config=sqlalchemy_config(engine=engine, **engine_kwargs))
+    def from_engine(
+        cls, engine: AsyncEngine, *, storage: Optional[Any] = None, **engine_kwargs: Any
+    ) -> "Persistence":
+        return cls(
+            config=sqlalchemy_config(engine=engine, **engine_kwargs), storage=storage
+        )
 
     def dependencies(self) -> Dict[str, Provide]:
         """The services a route handler can ask for by name.

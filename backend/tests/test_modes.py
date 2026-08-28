@@ -1,12 +1,18 @@
 """Tests for Modes system functionality."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
+import pytest_asyncio
 
 import chainlit as cl
-from chainlit.emitter import ChainlitEmitter
 from chainlit.mode import Mode, ModeOption
+from chainlit.protocol.server import StepUpsert
+from tests.conftest import bind_context
+
+
+@pytest_asyncio.fixture
+async def ctx(session):
+    async with bind_context(session) as bound:
+        yield bound
 
 
 @pytest.fixture
@@ -148,120 +154,38 @@ class TestMode:
         assert default_option.id == "opt1"
 
 
-@pytest.mark.asyncio
 class TestMessageWithModes:
     """Test suite for Message with modes field."""
 
-    async def test_message_with_modes(self, mock_chainlit_context):
-        """Test that Message can be created with modes field."""
-        async with mock_chainlit_context:
-            modes = {"model": "gpt-4", "reasoning": "high"}
-            message = cl.Message(content="Test message", modes=modes)
+    async def test_message_with_modes(self, ctx):
+        modes = {"model": "gpt-4", "reasoning": "high"}
+        message = cl.Message(content="Test message", modes=modes)
+        assert message.modes == modes
+        assert message.to_dict()["modes"] == modes
 
-            assert message.modes == modes
-            assert message.content == "Test message"
-
-    async def test_message_to_dict_includes_modes(self, mock_chainlit_context):
-        """Test that Message.to_dict() includes the modes field."""
-        async with mock_chainlit_context:
-            modes = {"model": "gpt-4", "reasoning": "medium"}
-            message = cl.Message(content="Test", modes=modes)
-            message_dict = message.to_dict()
-
-            assert "modes" in message_dict
-            assert message_dict["modes"] == modes
-
-    async def test_message_from_dict_with_modes(self, mock_chainlit_context):
-        """Test that Message.from_dict() correctly handles modes field."""
-        async with mock_chainlit_context:
-            message_dict = {
+    async def test_message_from_dict_with_modes(self, ctx):
+        message = cl.Message.from_dict(
+            {
                 "id": "test-id",
-                "content": "Test message",
                 "modes": {"model": "gpt-3.5-turbo", "reasoning": "low"},
                 "type": "user_message",
                 "createdAt": "2024-01-01T00:00:00",
                 "output": "Test message",
             }
-            message = cl.Message.from_dict(message_dict)
-
-            assert message.modes == {"model": "gpt-3.5-turbo", "reasoning": "low"}
-            assert message.content == "Test message"
-
-    async def test_message_without_modes(self, mock_chainlit_context):
-        """Test that Message works without modes field (backward compatibility)."""
-        async with mock_chainlit_context:
-            message = cl.Message(content="Test message")
-
-            assert message.modes is None
-            message_dict = message.to_dict()
-            assert message_dict.get("modes") is None
-
-    async def test_message_send_with_modes(self, mock_chainlit_context):
-        """Test that sending a message with modes works."""
-        async with mock_chainlit_context as ctx:
-            modes = {"model": "gpt-4", "reasoning": "high"}
-            message = cl.Message(content="Test", modes=modes)
-
-            with patch("chainlit.message.chat_context") as mock_chat_ctx:
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
-
-                        result = await message.send()
-
-                        assert result == message
-                        assert message.modes == modes
-                        mock_chat_ctx.add.assert_called_once_with(message)
-                        ctx.emitter.send_step.assert_called_once()
-
-                        # Verify the dict sent to emitter includes modes
-                        call_args = ctx.emitter.send_step.call_args[0][0]
-                        assert call_args["modes"] == modes
-
-
-@pytest.mark.asyncio
-class TestEmitterSetModes:
-    """Test suite for emitter set_modes functionality."""
-
-    async def test_set_modes(
-        self, mock_modes, mock_websocket_session: MagicMock
-    ) -> None:
-        """Test set_modes emits correct event."""
-        emitter = ChainlitEmitter(mock_websocket_session)
-        modes_dicts = [mode.to_dict() for mode in mock_modes]
-
-        await emitter.set_modes(mock_modes)
-
-        mock_websocket_session.emit.assert_called_once_with("set_modes", modes_dicts)
-
-    async def test_set_modes_empty_list(
-        self, mock_websocket_session: MagicMock
-    ) -> None:
-        """Test set_modes with empty list."""
-        emitter = ChainlitEmitter(mock_websocket_session)
-
-        await emitter.set_modes([])
-
-        mock_websocket_session.emit.assert_called_once_with("set_modes", [])
-
-    async def test_set_modes_single_mode(
-        self, mock_websocket_session: MagicMock
-    ) -> None:
-        """Test set_modes with single mode."""
-        emitter = ChainlitEmitter(mock_websocket_session)
-        mode = Mode(
-            id="model",
-            name="Model",
-            options=[ModeOption(id="gpt-4", name="GPT-4", default=True)],
         )
+        assert message.modes == {"model": "gpt-3.5-turbo", "reasoning": "low"}
 
-        await emitter.set_modes([mode])
+    async def test_message_without_modes(self, ctx):
+        message = cl.Message(content="Test message")
+        assert message.modes is None
+        assert message.to_dict()["modes"] is None
 
-        mock_websocket_session.emit.assert_called_once()
-        call_args = mock_websocket_session.emit.call_args
-        assert call_args[0][0] == "set_modes"
-        assert len(call_args[0][1]) == 1
-        assert call_args[0][1][0]["id"] == "model"
+    async def test_message_send_with_modes(self, ctx, session, frames, monkeypatch):
+        monkeypatch.setattr("chainlit.message.config.code.author_rename", None)
+        modes = {"model": "gpt-4", "reasoning": "high"}
+        message = cl.Message(content="Test", modes=modes)
+        assert await message.send() is message
+        assert frames(session, StepUpsert)[0].step.modes == modes
 
 
 @pytest.mark.asyncio

@@ -170,8 +170,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
 def _no_callbacks(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(config.code, "password_auth_callback", None, raising=False)
     monkeypatch.setattr(config.code, "oauth_callback", None, raising=False)
-    monkeypatch.setattr(config.code, "on_logout", None, raising=False)
-    monkeypatch.setattr(config.code, "header_auth_callback", None, raising=False)
 
 
 def use_provider(monkeypatch: pytest.MonkeyPatch, provider: OAuthProvider) -> None:
@@ -278,18 +276,6 @@ def test_auth_config_advertises_password_auth_only_for_direct_grant(
     use_provider(monkeypatch, FakeProvider(direct_grant=True))
     with client() as c:
         assert c.get("/auth/config").json()["passwordAuth"] is True
-
-
-def test_auth_config_never_advertises_header_auth(monkeypatch: pytest.MonkeyPatch):
-    """The route is not ported, so the flag that would trigger it is off."""
-
-    async def header_auth(headers):  # pragma: no cover - must not be reached
-        return User(identifier="ada")
-
-    monkeypatch.setattr(config.code, "header_auth_callback", header_auth)
-    with client() as c:
-        assert c.get("/auth/config").json()["headerAuth"] is False
-        assert c.post("/auth/header", json={}).status_code == 404
 
 
 def test_auth_config_is_public():
@@ -973,57 +959,7 @@ def test_logout_works_without_a_credential():
     assert any(header.startswith(f"{COOKIE}=") for header in set_cookies(response))
 
 
-def test_logout_hands_the_response_to_the_on_logout_callback(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    seen = []
-
-    async def on_logout(request, response):
-        seen.append((request, response))
-        return response
-
-    monkeypatch.setattr(config.code, "on_logout", on_logout)
-
-    with client() as c:
-        c.cookies.set(COOKIE, "whatever")
-        response = c.post("/logout")
-
-    assert seen, "the callback was not called"
-    assert any(
-        header.startswith(f"{COOKIE}=") and "Max-Age=0" in header
-        for header in set_cookies(response)
-    )
-
-
 # --- /set-session-cookie ----------------------------------------------------
-
-
-def test_logout_clears_the_cookie_when_on_logout_returns_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A callback used as a notification hook returns ``None``.
-
-    The old stack merged the injected response's headers in whatever the
-    callback returned; here the return value is the response, so a ``None``
-    that replaced it would silently leave the browser logged in.
-    """
-    called = []
-
-    async def on_logout(request, response):
-        called.append(True)
-
-    monkeypatch.setattr(config.code, "on_logout", on_logout)
-
-    with client() as c:
-        c.cookies.set(COOKIE, "whatever")
-        response = c.post("/logout")
-
-    assert called
-    assert response.status_code == 200
-    assert any(
-        header.startswith(f"{COOKIE}=") and "Max-Age=0" in header
-        for header in set_cookies(response)
-    )
 
 
 def test_set_session_cookie():

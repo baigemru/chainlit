@@ -13,35 +13,12 @@ rots — the old code emits four of these through ``clear()`` and
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from chainlit.protocol.client import CLIENT_TAGS
 from chainlit.protocol.server import SERVER_TAGS
 
 CHAINLIT_ROOT = Path(__file__).resolve().parents[2] / "chainlit"
-
-# Every module that names a socket event. socket.py and emitter.py carry
-# most of them, but `reload`, `action`, `remove_action`, `remove_element`,
-# `chat_settings` and the two `set_sidebar_*` live elsewhere.
-SOURCE_FILES = (
-    "socket.py",
-    "emitter.py",
-    "action.py",
-    "element.py",
-    "sidebar.py",
-    "chat_settings.py",
-    "server.py",
-)
-
-# Server -> client. `emit(...)` is the common form; `clear(...)` and
-# `send_timeout(...)` are thin wrappers around it that take the event name
-# as their only argument, and `emit_call(...)` is the request/response one.
-_SERVER_EVENT_RE = re.compile(
-    r"\b(?:emit|emit_call|clear|send_timeout)\(\s*(?:\n\s*)?[\"']([a-z_]+)[\"']"
-)
-# Client -> server.
-_CLIENT_EVENT_RE = re.compile(r"@sio\.on\(\s*[\"']([a-z_]+)[\"']\s*\)")
 
 
 # --------------------------------------------------------------------------
@@ -215,32 +192,6 @@ INTENTIONALLY_DROPPED: dict[str, str] = {
 # Tags with no counterpart in today's protocol — additions, not renames.
 NEW_SERVER_TAGS: frozenset[str] = frozenset({"session.ready", "error", "hb"})
 NEW_CLIENT_TAGS: frozenset[str] = frozenset({"hb.ack"})
-
-
-def _parse(pattern: re.Pattern[str]) -> set[str]:
-    found: set[str] = set()
-    for name in SOURCE_FILES:
-        path = CHAINLIT_ROOT / name
-        assert path.is_file(), f"{path} moved; this parser needs updating"
-        found.update(pattern.findall(path.read_text(encoding="utf-8")))
-    return found
-
-
-def test_parser_still_sees_every_event_the_old_code_emits() -> None:
-    """Pin the parse. A silently shrinking parse would void every test below."""
-    parsed = _parse(_SERVER_EVENT_RE)
-    assert parsed == set(TODAYS_SERVER_EVENTS), {
-        "missed_by_parser": sorted(TODAYS_SERVER_EVENTS - parsed),
-        "new_in_the_old_code": sorted(parsed - TODAYS_SERVER_EVENTS),
-    }
-
-
-def test_parser_still_sees_every_handler_the_old_code_registers() -> None:
-    parsed = _parse(_CLIENT_EVENT_RE)
-    assert parsed == set(TODAYS_CLIENT_EVENTS), {
-        "missed_by_parser": sorted(TODAYS_CLIENT_EVENTS - parsed),
-        "new_in_the_old_code": sorted(parsed - TODAYS_CLIENT_EVENTS),
-    }
 
 
 def test_every_old_server_event_is_mapped_or_dropped() -> None:

@@ -9,8 +9,18 @@ import inspect
 
 import chainlit
 
-# Frozen 2026-08-27, before the Litestar rebuild. Names scheduled for removal
-# carry a comment; remove them from this list in the commit that removes them.
+# Frozen 2026-08-28, the surface after the Litestar rebuild of the ``cl.*``
+# API. Removed in that rebuild, with the reason:
+#   CopilotFunction, InputAudioChunk, OutputAudioChunk, on_audio_* --
+#     audio and the copilot call channel have no message on the new wire;
+#   ChatSettings, on_settings_edit, on_settings_update -- no wire message;
+#   cache -- a bare memo dict, functools.cache exists;
+#   current_user -- replaced by request.user on Litestar;
+#   header_auth_callback, on_logout, server_route -- FastAPI-typed;
+#   make_async, run_sync -- zero callers;
+#   on_window_message, send_window_message -- no wire message;
+#   switch_chat_profile -- built on the socket.io profile switch.
+# Added: ``logger``, which applications already reached as an attribute.
 EXPECTED_EXPORTS = {
     "Action",
     "AskActionMessage",
@@ -21,9 +31,7 @@ EXPECTED_EXPORTS = {
     "Audio",
     "ChatGeneration",
     "ChatProfile",
-    "ChatSettings",
     "CompletionGeneration",
-    "CopilotFunction",  # rebuild: delete (unused, undocumented)
     "CustomElement",
     "Dataframe",
     "ElementSidebar",
@@ -31,11 +39,9 @@ EXPECTED_EXPORTS = {
     "File",
     "GenerationMessage",
     "Image",
-    "InputAudioChunk",
     "Message",
     "Mode",
     "ModeOption",
-    "OutputAudioChunk",
     "Pdf",
     "PersistedUser",
     "Plotly",
@@ -52,44 +58,64 @@ EXPECTED_EXPORTS = {
     "__version__",
     "action_callback",
     "author_rename",
-    "cache",  # rebuild: delete (a bare memo dict, functools.cache exists)
     "chat_context",
     "context",
-    "current_user",  # rebuild: delete (replaced by request.user)
-    "data_layer",  # rebuild: renamed to `persistence`
-    "header_auth_callback",
+    "data_layer",
     "input_widget",
-    "make_async",  # rebuild: delete (one line of anyio.to_thread.run_sync)
+    "logger",
     "oauth_callback",
     "on_app_shutdown",
     "on_app_startup",
-    "on_audio_chunk",
-    "on_audio_end",
-    "on_audio_start",
     "on_chat_end",
     "on_chat_resume",
     "on_chat_start",
     "on_feedback",
-    "on_logout",  # rebuild: delete (FastAPI-typed signature)
     "on_message",
     "on_profile_start",
-    "on_settings_edit",
-    "on_settings_update",
     "on_shared_thread_view",
     "on_stop",
     "on_thread_ready",
-    "on_window_message",
     "password_auth_callback",
-    "run_sync",  # rebuild: delete (zero callers; _reentrant_loop.py exists for it)
-    "send_window_message",
-    "server_route",  # rebuild: replaced by register_routes + litestar decorators
     "set_chat_profiles",
     "set_starter_categories",
     "set_starters",
     "sleep",
     "step",
-    "switch_chat_profile",
     "user_session",
+}
+
+# What chainlit-panda calls, measured in its source. Every name here must
+# stay exported; the snapshot above may shrink around it, never through it.
+CONSUMER_SURFACE = {
+    "Message",
+    "user_session",
+    "Action",
+    "context",
+    "CustomElement",
+    "AskActionMessage",
+    "AskUserMessage",
+    "AskFileMessage",
+    "AskElementMessage",
+    "Step",
+    "Starter",
+    "Image",
+    "ElementSidebar",
+    "chat_context",
+    "User",
+    "ChatProfile",
+    "logger",
+    "on_chat_start",
+    "on_message",
+    "on_chat_resume",
+    "on_chat_end",
+    "on_stop",
+    "on_thread_ready",
+    "set_chat_profiles",
+    "set_starters",
+    "oauth_callback",
+    "password_auth_callback",
+    "action_callback",
+    "data_layer",
 }
 
 
@@ -103,6 +129,10 @@ def test_exports_match_the_snapshot():
         f"exports removed without updating the snapshot: {sorted(missing)}"
     )
     assert not added, f"exports added without updating the snapshot: {sorted(added)}"
+
+
+def test_the_consumer_surface_is_exported():
+    assert CONSUMER_SURFACE <= set(chainlit.__all__)
 
 
 def test_every_export_resolves():
@@ -120,9 +150,6 @@ def test_callable_signatures_are_snapshotted():
     """Guards against a silent signature change on the hooks apps implement."""
     expected = {
         "password_auth_callback": "(func: Callable[[str, str], Awaitable[chainlit.user.User | None]]) -> Callable",
-        # Starlette-typed on purpose: this is one of the documented breaks of the
-        # Litestar rebuild. When it changes, the migration guide changes with it.
-        "header_auth_callback": "(func: Callable[[starlette.datastructures.Headers], Awaitable[chainlit.user.User | None]]) -> Callable",
         "on_message": "(func: Callable) -> Callable",
         "on_chat_start": "(func: Callable) -> Callable",
     }
@@ -132,3 +159,42 @@ def test_callable_signatures_are_snapshotted():
     }
 
     assert actual == expected
+
+
+def test_no_old_stack_imports_in_the_api_modules():
+    """The ``cl.*`` modules must not reach the deleted transport.
+
+    In a subprocess: the test session has other suites' imports in
+    ``sys.modules``, and what those pulled in is not what these modules do.
+    """
+    import subprocess
+    import sys
+
+    modules = (
+        "chainlit.message",
+        "chainlit.step",
+        "chainlit.element",
+        "chainlit.action",
+        "chainlit.sidebar",
+        "chainlit.user_session",
+        "chainlit.chat_context",
+        "chainlit.callbacks",
+        "chainlit.types",
+        "chainlit.user",
+    )
+    forbidden = (
+        "chainlit.server",
+        "chainlit.socket",
+        "chainlit.session",
+        "chainlit.persist_barrier",
+        "chainlit.resume_policy",
+        "chainlit.data",
+        "chainlit.auth",
+        "fastapi",
+    )
+    code = (
+        f"import sys; [__import__(m) for m in {modules!r}]; "
+        f"bad = sorted(set({forbidden!r}) & set(sys.modules)); "
+        "assert not bad, bad"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)

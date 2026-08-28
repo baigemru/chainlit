@@ -1,12 +1,21 @@
+"""``cl.Message`` and the ask messages, observed at the wire and the writer.
+
+Every test binds a real ``Session`` and reads the frames it queued; the
+persistence tests give the session an unstarted ``SessionWriter`` and read
+what it holds. Nothing here mocks the emitter, because what the emitter does
+with the dict is the thing being asserted.
+"""
+
 import asyncio
 import json
-from contextlib import contextmanager
-from unittest.mock import AsyncMock, Mock, patch
+from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+import pytest_asyncio
 
 from chainlit.action import Action
-from chainlit.context import ChainlitContext, context_var
+from chainlit.element import CustomElement
 from chainlit.message import (
     AskActionMessage,
     AskElementMessage,
@@ -16,1254 +25,787 @@ from chainlit.message import (
     Message,
     MessageBase,
 )
+from chainlit.persistence.writer import SaveStep, SessionWriter, WriterRegistry
+from chainlit.protocol.payloads import (
+    Action as ActionPayload,
+    AskActionReply,
+    AskElementReply,
+    AskFileReply,
+    AskFileSpec,
+    AskTextReply,
+    AskTextSpec,
+    FileRef,
+    Step as StepPayload,
+)
+from chainlit.protocol.server import (
+    ActionAdd,
+    ActionRemove,
+    AskEnd,
+    AskStart,
+    ElementRemove,
+    ElementUpsert,
+    StepDelete,
+    StepStreamStart,
+    StepStreamToken,
+    StepUpdate,
+    StepUpsert,
+)
 from chainlit.types import AskSlotBusyError
+from tests.conftest import bind_context
 
 
-@contextmanager
-def mock_chainlit_context(session=None):
-    """Context manager to set up and tear down Chainlit context."""
-    mock_loop = Mock(spec=asyncio.AbstractEventLoop)
-    mock_session = session or Mock()
-    mock_session.thread_id = "thread_123"
+@pytest_asyncio.fixture
+async def ctx(session):
+    async with bind_context(session) as bound:
+        yield bound
 
-    with patch("asyncio.get_running_loop", return_value=mock_loop):
-        mock_emitter = AsyncMock()
-        mock_context = ChainlitContext(session=mock_session, emitter=mock_emitter)
-        token = context_var.set(mock_context)
-        try:
-            yield mock_context
-        finally:
-            context_var.reset(token)
+
+@pytest.fixture
+def held_writer(session):
+    """An unstarted writer with its gate shut: what it holds is what was written."""
+    writer = SessionWriter(
+        Mock(),
+        session.thread_id,
+        registry=WriterRegistry(),
+        hold_until_interaction=True,
+    )
+    session.writer = writer
+    return writer
+
+
+@pytest.fixture
+def no_author_rename(monkeypatch):
+    monkeypatch.setattr("chainlit.message.config.code.author_rename", None)
+
+
+async def until_asked(session) -> None:
+    """Yield until the ask is on the session's slot."""
+    for _ in range(50):
+        if session.pending_ask is not None:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("no ask was sent")
+
+
+async def answer(session, value: Any) -> None:
+    await until_asked(session)
+    session.pending_ask.future.set_result(value)
+
+
+def saved_steps(writer: SessionWriter):
+    return [op.record for op in writer.held if isinstance(op, SaveStep)]
 
 
 class TestMessageBase:
-    """Test suite for MessageBase class."""
+    async def test_post_init_sets_thread_id(self, ctx):
+        assert Message(content="test").thread_id == "test_thread_id"
 
-    def test_post_init_sets_thread_id(self):
-        """Test that __post_init__ sets thread_id from session."""
-        with mock_chainlit_context():
-            msg = Message(content="test")
-            assert msg.thread_id == "thread_123"
+    async def test_post_init_generates_id_if_not_provided(self, ctx):
+        assert len(Message(content="test").id) == 36
 
-    def test_post_init_generates_id_if_not_provided(self):
-        """Test that __post_init__ generates UUID if id not provided."""
-        with mock_chainlit_context():
-            msg = Message(content="test")
-            assert msg.id is not None
-            assert len(msg.id) == 36
+    async def test_post_init_uses_provided_id(self, ctx):
+        assert Message(content="test", id="custom_id").id == "custom_id"
 
-    def test_post_init_uses_provided_id(self):
-        """Test that __post_init__ uses provided id."""
-        with mock_chainlit_context():
-            msg = Message(content="test", id="custom_id")
-            assert msg.id == "custom_id"
+    async def test_from_dict_creates_message(self, ctx):
+        msg = MessageBase.from_dict(
+            {
+                "id": "msg_123",
+                "parentId": "parent_123",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "output": "Hello world",
+                "name": "Assistant",
+                "command": "/test",
+                "type": "user_message",
+                "language": "python",
+                "metadata": {"key": "value"},
+            }
+        )
+        assert msg.id == "msg_123"
+        assert msg.parent_id == "parent_123"
+        assert msg.created_at == "2024-01-01T00:00:00Z"
+        assert msg.content == "Hello world"
+        assert msg.author == "Assistant"
+        assert msg.command == "/test"
+        assert msg.type == "user_message"
+        assert msg.language == "python"
+        assert msg.metadata == {"key": "value"}
 
-    def test_from_dict_creates_message(self):
-        """Test creating message from dictionary."""
-        step_dict = {
-            "id": "msg_123",
-            "parentId": "parent_123",
-            "createdAt": "2024-01-01T00:00:00Z",
-            "output": "Hello world",
-            "name": "Assistant",
-            "command": "/test",
-            "type": "user_message",
-            "language": "python",
-            "metadata": {"key": "value"},
-        }
+    async def test_from_dict_with_minimal_data(self, ctx, monkeypatch):
+        monkeypatch.setattr("chainlit.message.config.ui.name", "DefaultBot")
+        msg = MessageBase.from_dict(
+            {"id": "msg_123", "createdAt": "2024-01-01T00:00:00Z", "output": "Hello"}
+        )
+        assert msg.author == "DefaultBot"
+        assert msg.type == "assistant_message"
 
-        with mock_chainlit_context():
-            msg = MessageBase.from_dict(step_dict)
+    async def test_to_dict_returns_step_dict(self, ctx):
+        msg = Message(
+            content="Test content",
+            author="TestBot",
+            language="python",
+            type="user_message",
+            metadata={"key": "value"},
+            tags=["tag1", "tag2"],
+            id="msg_123",
+            parent_id="parent_123",
+            command="/test",
+        )
+        msg.created_at = "2024-01-01T00:00:00Z"
+        result = msg.to_dict()
+        assert result["id"] == "msg_123"
+        assert result["threadId"] == "test_thread_id"
+        assert result["parentId"] == "parent_123"
+        assert result["createdAt"] == "2024-01-01T00:00:00Z"
+        assert result["command"] == "/test"
+        assert result["output"] == "Test content"
+        assert result["name"] == "TestBot"
+        assert result["type"] == "user_message"
+        assert result["language"] == "python"
+        assert result["streaming"] is False
+        assert result["isError"] is False
+        assert result["waitForAnswer"] is False
+        assert result["metadata"] == {"key": "value"}
+        assert result["tags"] == ["tag1", "tag2"]
 
-            assert msg.id == "msg_123"
-            assert msg.parent_id == "parent_123"
-            assert msg.created_at == "2024-01-01T00:00:00Z"
-            assert msg.content == "Hello world"
-            assert msg.author == "Assistant"
-            assert msg.command == "/test"
-            assert msg.type == "user_message"
-            assert msg.language == "python"
-            assert msg.metadata == {"key": "value"}
+    async def test_update_stops_streaming_and_patches(self, ctx, session, frames):
+        msg = Message(content="test")
+        msg.streaming = True
+        assert await msg.update() is True
+        assert msg.streaming is False
+        [patch] = frames(session, StepUpdate)
+        assert patch.step.id == msg.id
+        assert patch.step.streaming is False
 
-    def test_from_dict_with_minimal_data(self):
-        """Test from_dict with minimal required fields."""
-        step_dict = {
-            "id": "msg_123",
-            "createdAt": "2024-01-01T00:00:00Z",
-            "output": "Hello",
-        }
+    async def test_update_adds_to_chat_context(self, ctx, session):
+        from chainlit.chat_context import chat_context
 
-        with mock_chainlit_context():
-            with patch("chainlit.message.config") as mock_config:
-                mock_config.ui.name = "DefaultBot"
-                msg = MessageBase.from_dict(step_dict)
+        msg = Message(content="test")
+        await msg.update()
+        assert msg in chat_context.get()
 
-                assert msg.id == "msg_123"
-                assert msg.content == "Hello"
-                assert msg.author == "DefaultBot"
-                assert msg.type == "assistant_message"
+    async def test_remove_deletes_on_the_wire_and_in_chat_context(
+        self, ctx, session, frames
+    ):
+        from chainlit.chat_context import chat_context
 
-    def test_to_dict_returns_step_dict(self):
-        """Test converting message to dictionary."""
-        with mock_chainlit_context():
-            msg = Message(
-                content="Test content",
-                author="TestBot",
-                language="python",
-                type="user_message",
-                metadata={"key": "value"},
-                tags=["tag1", "tag2"],
-                id="msg_123",
-                parent_id="parent_123",
-                command="/test",
-            )
-            msg.created_at = "2024-01-01T00:00:00Z"
-
-            result = msg.to_dict()
-
-            assert result["id"] == "msg_123"
-            assert result["threadId"] == "thread_123"
-            assert result["parentId"] == "parent_123"
-            assert result["createdAt"] == "2024-01-01T00:00:00Z"
-            assert result["command"] == "/test"
-            assert result["output"] == "Test content"
-            assert result["name"] == "TestBot"
-            assert result["type"] == "user_message"
-            assert result["language"] == "python"
-            assert result["streaming"] is False
-            assert result["isError"] is False
-            assert result["waitForAnswer"] is False
-            assert result["metadata"] == {"key": "value"}
-            assert result["tags"] == ["tag1", "tag2"]
-
-    @pytest.mark.asyncio
-    async def test_update_stops_streaming(self):
-        """Test that update stops streaming."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test")
-            msg.streaming = True
-
-            with patch("chainlit.message.chat_context") as mock_chat_ctx:
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    result = await msg.update()
-
-                    assert msg.streaming is False
-                    assert result is True
-                    mock_chat_ctx.add.assert_called_once_with(msg)
-                    ctx.emitter.update_step.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_update_with_data_layer(self):
-        """Test update with data layer."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test")
-            mock_data_layer = AsyncMock()
-
-            with patch("chainlit.message.chat_context"):
-                with patch(
-                    "chainlit.message.get_data_layer", return_value=mock_data_layer
-                ):
-                    with patch("asyncio.create_task") as mock_create_task:
-                        await msg.update()
-
-                        mock_create_task.assert_called_once()
-                        ctx.emitter.update_step.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_remove_from_chat_context(self):
-        """Test removing message from chat context."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", id="msg_123")
-
-            with patch("chainlit.message.chat_context") as mock_chat_ctx:
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    result = await msg.remove()
-
-                    assert result is True
-                    mock_chat_ctx.remove.assert_called_once_with(msg)
-                    ctx.emitter.delete_step.assert_called_once()
+        msg = Message(content="test", id="msg_123")
+        chat_context.add(msg)
+        assert await msg.remove() is True
+        assert msg not in chat_context.get()
+        assert [f.step_id for f in frames(session, StepDelete)] == ["msg_123"]
 
 
 class TestMessage:
-    """Test suite for Message class."""
+    async def test_message_with_string_content(self, ctx):
+        msg = Message(content="Hello world")
+        assert msg.content == "Hello world"
+        assert msg.language is None
 
-    def test_message_with_string_content(self):
-        """Test creating message with string content."""
-        with mock_chainlit_context():
-            msg = Message(content="Hello world")
+    async def test_message_with_dict_content(self, ctx):
+        content = {"key": "value", "number": 42}
+        msg = Message(content=content)
+        assert msg.content == json.dumps(content, indent=4, ensure_ascii=False)
+        assert msg.language == "json"
 
-            assert msg.content == "Hello world"
-            assert msg.language is None
+    async def test_message_with_non_serializable_dict(self, ctx):
+        class NonSerializable:
+            pass
 
-    def test_message_with_dict_content(self):
-        """Test creating message with dict content."""
-        with mock_chainlit_context():
-            content_dict = {"key": "value", "number": 42}
-            msg = Message(content=content_dict)
+        msg = Message(content={"obj": NonSerializable()})
+        assert msg.language == "text"
+        assert "NonSerializable" in msg.content
 
-            expected = json.dumps(content_dict, indent=4, ensure_ascii=False)
-            assert msg.content == expected
-            assert msg.language == "json"
+    async def test_message_with_non_string_content(self, ctx):
+        msg = Message(content=12345)
+        assert msg.content == "12345"
+        assert msg.language == "text"
 
-    def test_message_with_non_serializable_dict(self):
-        """Test message with non-JSON-serializable dict."""
-        with mock_chainlit_context():
+    async def test_message_with_none_content(self, ctx):
+        assert Message(content=None).content == "None"
 
-            class NonSerializable:
-                pass
+    async def test_message_with_default_author(self, ctx, monkeypatch):
+        monkeypatch.setattr("chainlit.message.config.ui.name", "DefaultBot")
+        assert Message(content="test").author == "DefaultBot"
 
-            content_dict = {"obj": NonSerializable()}
-            msg = Message(content=content_dict)
+    async def test_message_send_puts_the_step_on_the_wire(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = Message(content="test", author="Bot")
+        assert await msg.send() is msg
+        assert msg.created_at is not None
+        [upsert] = frames(session, StepUpsert)
+        assert upsert.step.id == msg.id
+        assert upsert.step.output == "test"
+        assert upsert.step.name == "Bot"
+        assert upsert.step.thread_id == "test_thread_id"
 
-            assert msg.language == "text"
-            assert "NonSerializable" in msg.content
+    async def test_message_send_with_author_rename(
+        self, ctx, session, frames, monkeypatch
+    ):
+        async def rename(name):
+            return "NewName"
 
-    def test_message_with_non_string_content(self):
-        """Test message with non-string, non-dict content."""
-        with mock_chainlit_context():
-            msg = Message(content=12345)
+        monkeypatch.setattr("chainlit.message.config.code.author_rename", rename)
+        msg = Message(content="test", author="OldName")
+        await msg.send()
+        assert msg.author == "NewName"
+        assert frames(session, StepUpsert)[0].step.name == "NewName"
 
-            assert msg.content == "12345"
-            assert msg.language == "text"
+    async def test_message_send_with_none_content(self, ctx, no_author_rename):
+        msg = Message(content="test")
+        msg.content = None
+        await msg.send()
+        assert msg.content == ""
 
-    def test_message_with_custom_author(self):
-        """Test message with custom author."""
-        with mock_chainlit_context():
-            msg = Message(content="test", author="CustomBot")
+    async def test_message_send_with_actions_and_elements(
+        self, ctx, session, frames, no_author_rename
+    ):
+        action = Action(name="go", payload={})
+        element = CustomElement(name="widget", props={"a": 1})
+        msg = Message(content="test", actions=[action], elements=[element])
+        await msg.send()
+        [added] = frames(session, ActionAdd)
+        assert added.action.for_id == msg.id
+        [shown] = frames(session, ElementUpsert)
+        assert shown.element.for_id == msg.id
 
-            assert msg.author == "CustomBot"
+    async def test_message_update_resends_only_unsent_actions(
+        self, ctx, session, frames
+    ):
+        fresh = Action(name="fresh", payload={})
+        sent = Action(name="sent", payload={}, forId="existing_id")
+        msg = Message(content="test", actions=[fresh, sent])
+        assert await msg.update() is True
+        assert [a.action.name for a in frames(session, ActionAdd)] == ["fresh"]
 
-    def test_message_with_default_author(self):
-        """Test message uses default author from config."""
-        with mock_chainlit_context():
-            with patch("chainlit.message.config") as mock_config:
-                mock_config.ui.name = "DefaultBot"
-                msg = Message(content="test")
+    async def test_message_remove_actions(self, ctx, session, frames):
+        actions = [Action(name="a", payload={}), Action(name="b", payload={})]
+        msg = Message(content="test", actions=actions)
+        await msg.remove_actions()
+        assert [r.id for r in frames(session, ActionRemove)] == [a.id for a in actions]
 
-                assert msg.author == "DefaultBot"
+    async def test_stream_token_starts_streaming(self, ctx, session, frames):
+        msg = Message(content="")
+        await msg.stream_token("Hello")
+        assert msg.streaming is True
+        assert msg.content == "Hello"
+        [start] = frames(session, StepStreamStart)
+        assert start.step.id == msg.id
 
-    def test_message_with_actions(self):
-        """Test message with actions."""
-        with mock_chainlit_context():
-            action1 = Mock(spec=Action)
-            action2 = Mock(spec=Action)
-            msg = Message(content="test", actions=[action1, action2])
+    async def test_stream_token_appends_content(self, ctx, session, frames):
+        msg = Message(content="Hello")
+        msg.streaming = True
+        await msg.stream_token(" world")
+        assert msg.content == "Hello world"
+        [token] = frames(session, StepStreamToken)
+        assert (token.id, token.token, token.is_sequence) == (msg.id, " world", False)
 
-            assert len(msg.actions) == 2
-            assert action1 in msg.actions
-            assert action2 in msg.actions
+    async def test_stream_token_with_sequence(self, ctx, session, frames):
+        msg = Message(content="Old content")
+        msg.streaming = True
+        await msg.stream_token("New content", is_sequence=True)
+        assert msg.content == "New content"
+        assert frames(session, StepStreamToken)[0].is_sequence is True
 
-    def test_message_with_elements(self):
-        """Test message with elements."""
-        with mock_chainlit_context():
-            element1 = Mock()
-            element2 = Mock()
-            msg = Message(content="test", elements=[element1, element2])
-
-            assert len(msg.elements) == 2
-            assert element1 in msg.elements
-            assert element2 in msg.elements
-
-    @pytest.mark.asyncio
-    async def test_message_send(self):
-        """Test sending a message."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test")
-
-            with patch("chainlit.message.chat_context") as mock_chat_ctx:
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
-
-                        result = await msg.send()
-
-                        assert result == msg
-                        assert msg.created_at is not None
-                        assert msg.streaming is False
-                        mock_chat_ctx.add.assert_called_once_with(msg)
-                        ctx.emitter.send_step.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_message_send_with_author_rename(self):
-        """Test sending message with author rename."""
-        with mock_chainlit_context():
-            msg = Message(content="test", author="OldName")
-
-            async def rename_author(name):
-                return "NewName"
-
-            with patch("chainlit.message.chat_context"):
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = rename_author
-
-                        await msg.send()
-
-                        assert msg.author == "NewName"
-
-    @pytest.mark.asyncio
-    async def test_message_send_with_actions_and_elements(self):
-        """Test sending message with actions and elements."""
-        with mock_chainlit_context():
-            action = AsyncMock(spec=Action)
-            element = AsyncMock()
-            msg = Message(content="test", actions=[action], elements=[element])
-
-            with patch("chainlit.message.chat_context"):
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
-
-                        await msg.send()
-
-                        action.send.assert_called_once()
-                        element.send.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_message_update_with_actions(self):
-        """Test updating message with new actions."""
-        with mock_chainlit_context():
-            action1 = AsyncMock(spec=Action)
-            action1.forId = None
-            action2 = AsyncMock(spec=Action)
-            action2.forId = "existing_id"
-
-            msg = Message(content="test", actions=[action1, action2])
-
-            with patch("chainlit.message.chat_context"):
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    result = await msg.update()
-
-                    assert result is True
-                    action1.send.assert_called_once()
-                    action2.send.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_message_remove_actions(self):
-        """Test removing all actions from message."""
-        with mock_chainlit_context():
-            action1 = AsyncMock(spec=Action)
-            action2 = AsyncMock(spec=Action)
-            msg = Message(content="test", actions=[action1, action2])
-
-            await msg.remove_actions()
-
-            action1.remove.assert_called_once()
-            action2.remove.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_stream_token_starts_streaming(self):
-        """Test that stream_token starts streaming."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="")
-
-            await msg.stream_token("Hello")
-
-            assert msg.streaming is True
-            assert msg.content == "Hello"
-            ctx.emitter.stream_start.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_stream_token_appends_content(self):
-        """Test that stream_token appends to content."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="Hello")
-            msg.streaming = True
-
-            await msg.stream_token(" world")
-
-            assert msg.content == "Hello world"
-            ctx.emitter.send_token.assert_called_once_with(
-                id=msg.id, token=" world", is_sequence=False
-            )
-
-    @pytest.mark.asyncio
-    async def test_stream_token_with_sequence(self):
-        """Test stream_token with is_sequence=True."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="Old content")
-            msg.streaming = True
-
-            await msg.stream_token("New content", is_sequence=True)
-
-            assert msg.content == "New content"
-            ctx.emitter.send_token.assert_called_once_with(
-                id=msg.id, token="New content", is_sequence=True
-            )
-
-    @pytest.mark.asyncio
-    async def test_stream_token_ignores_empty_token(self):
-        """Test that empty tokens are ignored."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test")
-
-            await msg.stream_token("")
-
-            assert msg.content == "test"
-            ctx.emitter.stream_start.assert_not_called()
+    async def test_stream_token_ignores_empty_token(self, ctx, session, frames):
+        msg = Message(content="test")
+        await msg.stream_token("")
+        assert msg.content == "test"
+        assert frames(session) == []
 
 
 class TestErrorMessage:
-    """Test suite for ErrorMessage class."""
+    async def test_error_message_initialization(self, ctx):
+        msg = ErrorMessage(content="An error occurred")
+        assert msg.type == "assistant_message"
+        assert msg.is_error is True
 
-    def test_error_message_initialization(self):
-        """Test ErrorMessage initialization."""
-        with mock_chainlit_context():
-            msg = ErrorMessage(content="An error occurred")
+    async def test_error_message_send(self, ctx, session, frames, no_author_rename):
+        msg = ErrorMessage(content="Error occurred", author="ErrorBot")
+        assert await msg.send() is msg
+        [upsert] = frames(session, StepUpsert)
+        assert upsert.step.is_error is True
+        assert upsert.step.name == "ErrorBot"
 
-            assert msg.content == "An error occurred"
-            assert msg.author is not None
-            assert msg.type == "assistant_message"
-            assert msg.is_error is True
-            assert msg.fail_on_persist_error is False
 
-    def test_error_message_with_custom_author(self):
-        """Test ErrorMessage with custom author."""
-        with mock_chainlit_context():
-            msg = ErrorMessage(content="Error", author="ErrorBot")
+class TestPersistence:
+    """The row goes to the session's writer, never to the wire."""
 
-            assert msg.author == "ErrorBot"
+    async def test_send_queues_the_step_row(
+        self, ctx, session, held_writer, no_author_rename
+    ):
+        msg = Message(content="hello", author="Bot")
+        await msg.send()
+        [record] = saved_steps(held_writer)
+        assert record.id == msg.id
+        assert record.output == "hello"
+        assert record.thread_id == "test_thread_id"
+        assert msg.persisted is True
 
-    def test_error_message_with_fail_on_persist(self):
-        """Test ErrorMessage with fail_on_persist_error=True."""
-        with mock_chainlit_context():
-            msg = ErrorMessage(content="Error", fail_on_persist_error=True)
+    async def test_send_queues_the_row_once(
+        self, ctx, session, held_writer, no_author_rename
+    ):
+        msg = Message(content="hello")
+        await msg.send()
+        await msg.send()
+        assert len(saved_steps(held_writer)) == 1
 
-            assert msg.fail_on_persist_error is True
+    async def test_update_queues_a_row_too(self, ctx, session, held_writer):
+        msg = Message(content="v1")
+        await msg.update()
+        msg.content = "v2"
+        await msg.update()
+        assert [r.output for r in saved_steps(held_writer)] == ["v1", "v2"]
 
-    @pytest.mark.asyncio
-    async def test_error_message_send(self):
-        """Test sending error message."""
-        with mock_chainlit_context() as ctx:
-            msg = ErrorMessage(content="Error occurred")
+    async def test_no_writer_means_no_row_and_no_error(
+        self, ctx, session, no_author_rename
+    ):
+        assert session.writer is None
+        await Message(content="hello").send()
 
-            with patch("chainlit.message.chat_context"):
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
+    async def test_wait_never_reaches_the_row(
+        self, ctx, session, held_writer, frames, no_author_rename
+    ):
+        msg = Message(content="loading", wait=["a", "b"])
+        await msg.send()
+        msg.wait = ["c"]
+        await msg.update()
+        assert frames(session, StepUpsert)[0].step.wait is not None
+        assert frames(session, StepUpdate)[0].step.wait is not None
+        # ``StepRecord`` has no ``wait`` field: had it leaked, the conversion
+        # would have refused the dict and no row would be held at all.
+        assert len(saved_steps(held_writer)) == 2
 
-                        result = await msg.send()
-
-                        assert result == msg
-                        ctx.emitter.send_step.assert_called_once()
+    async def test_resume_delete_flag_reaches_the_row(
+        self, ctx, session, held_writer, no_author_rename
+    ):
+        await Message(content="test", resume="delete").send()
+        [record] = saved_steps(held_writer)
+        assert record.metadata == {"resume_policy": "delete"}
 
 
 class TestAskUserMessage:
-    """Test suite for AskUserMessage class."""
+    async def test_initialization(self, ctx):
+        msg = AskUserMessage(content="What is your name?")
+        assert msg.timeout == 60
+        assert msg.raise_on_timeout is False
+        assert AskUserMessage(content="?", timeout=120).timeout == 120
 
-    def test_ask_user_message_initialization(self):
-        """Test AskUserMessage initialization."""
-        with mock_chainlit_context():
-            msg = AskUserMessage(content="What is your name?")
+    async def test_send_returns_the_answer_stamped_with_its_parent(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = AskUserMessage(content="Question?")
+        msg.parent_id = "the-parent"
+        sending = asyncio.create_task(msg.send())
+        reply = StepPayload(id="reply-1", type="user_message", output="Answer")
+        await answer(session, AskTextReply(step=reply))
+        result = await sending
 
-            assert msg.content == "What is your name?"
-            assert msg.author is not None
-            assert msg.timeout == 60
-            assert msg.raise_on_timeout is False
+        assert result["output"] == "Answer"
+        assert result["parentId"] == "the-parent"
+        assert msg.wait_for_answer is False
+        [start] = frames(session, AskStart)
+        assert start.spec.step_id == msg.id
+        assert isinstance(start.spec, AskTextSpec)
+        assert start.step.wait_for_answer is True
+        assert [e.reason for e in frames(session, AskEnd)] == ["answered"]
+        assert session.runner.user_messages == [reply]
 
-    def test_ask_user_message_with_custom_timeout(self):
-        """Test AskUserMessage with custom timeout."""
-        with mock_chainlit_context():
-            msg = AskUserMessage(content="Question?", timeout=120)
+    async def test_send_returns_none_on_timeout(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = AskUserMessage(content="Question?", timeout=0)
+        assert await msg.send() is None
+        assert [e.reason for e in frames(session, AskEnd)] == ["timeout"]
 
-            assert msg.timeout == 120
+    async def test_send_raises_on_timeout_when_asked(
+        self, ctx, session, no_author_rename
+    ):
+        msg = AskUserMessage(content="Question?", timeout=0, raise_on_timeout=True)
+        with pytest.raises(TimeoutError):
+            await msg.send()
 
-    @pytest.mark.asyncio
-    async def test_ask_user_message_send(self):
-        """Test sending AskUserMessage."""
-        with mock_chainlit_context() as ctx:
-            msg = AskUserMessage(content="Question?")
-            ctx.emitter.send_ask_user = AsyncMock(return_value={"output": "Answer"})
+    async def test_question_is_in_chat_context_before_the_answer(
+        self, ctx, session, no_author_rename
+    ):
+        from chainlit.chat_context import chat_context
 
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    result = await msg.send()
-
-                    assert result == {"output": "Answer"}
-                    assert msg.wait_for_answer is False
-                    ctx.emitter.send_ask_user.assert_called_once()
+        msg = AskUserMessage(content="Question?")
+        sending = asyncio.create_task(msg.send())
+        await until_asked(session)
+        assert msg in chat_context.get()
+        session.pending_ask.future.set_result(
+            AskTextReply(step=StepPayload(id="r", type="user_message", output="x"))
+        )
+        await sending
 
 
 class TestAskFileMessage:
-    """Test suite for AskFileMessage class."""
+    async def test_initialization(self, ctx, monkeypatch):
+        monkeypatch.setattr("chainlit.message.config.ui.name", "Bot")
+        msg = AskFileMessage(content="Upload a file", accept=["text/plain"])
+        assert msg.max_size_mb == 2
+        assert msg.max_files == 1
+        custom = AskFileMessage(
+            content="Upload", accept=["image/*"], max_size_mb=10, max_files=5
+        )
+        assert (custom.max_size_mb, custom.max_files) == (10, 5)
 
-    def test_ask_file_message_initialization(self):
-        """Test AskFileMessage initialization."""
-        with mock_chainlit_context():
-            with patch("chainlit.message.config") as mock_config:
-                mock_config.ui.name = "Bot"
-                msg = AskFileMessage(
-                    content="Upload a file", accept=["text/plain", "application/pdf"]
-                )
+    async def test_send_returns_the_spooled_files(
+        self, ctx, session, frames, no_author_rename
+    ):
+        session.files["file_123"] = {
+            "id": "file_123",
+            "name": "test.txt",
+            "path": "/path/to/test.txt",
+            "size": 1024,
+            "type": "text/plain",
+        }
+        msg = AskFileMessage(content="Upload", accept=["text/plain"], max_files=3)
+        sending = asyncio.create_task(msg.send())
+        await answer(session, AskFileReply(files=[FileRef(id="file_123")]))
+        result = await sending
 
-                assert msg.content == "Upload a file"
-                assert msg.accept == ["text/plain", "application/pdf"]
-                assert msg.max_size_mb == 2
-                assert msg.max_files == 1
+        assert [r.id for r in result] == ["file_123"]
+        assert result[0].path == "/path/to/test.txt"
+        [start] = frames(session, AskStart)
+        assert isinstance(start.spec, AskFileSpec)
+        assert start.spec.max_files == 3
+        assert start.spec.accept == ["text/plain"]
+        assert session.runner.ask_files == [[session.files["file_123"]]]
 
-    def test_ask_file_message_with_custom_limits(self):
-        """Test AskFileMessage with custom limits."""
-        with mock_chainlit_context():
-            msg = AskFileMessage(
-                content="Upload", accept=["image/*"], max_size_mb=10, max_files=5
-            )
-
-            assert msg.max_size_mb == 10
-            assert msg.max_files == 5
-
-    @pytest.mark.asyncio
-    async def test_ask_file_message_send_with_response(self):
-        """Test AskFileMessage send with file response."""
-        with mock_chainlit_context() as ctx:
-            msg = AskFileMessage(content="Upload", accept=["text/plain"])
-            file_response = [
-                {
-                    "id": "file_123",
-                    "name": "test.txt",
-                    "path": "/path/to/test.txt",
-                    "size": 1024,
-                    "type": "text/plain",
-                }
-            ]
-            ctx.emitter.send_ask_user = AsyncMock(return_value=file_response)
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    result = await msg.send()
-
-                    assert result is not None
-                    assert len(result) == 1
-                    assert result[0].id == "file_123"
-                    assert result[0].name == "test.txt"
-                    assert result[0].path == "/path/to/test.txt"
-
-    @pytest.mark.asyncio
-    async def test_ask_file_message_send_with_no_response(self):
-        """Test AskFileMessage send with no response."""
-        with mock_chainlit_context() as ctx:
-            msg = AskFileMessage(content="Upload", accept=["text/plain"])
-            ctx.emitter.send_ask_user = AsyncMock(return_value=None)
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    result = await msg.send()
-
-                    assert result is None
+    async def test_send_with_no_response(self, ctx, session, no_author_rename):
+        msg = AskFileMessage(content="Upload", accept=["text/plain"], timeout=0)
+        assert await msg.send() is None
 
 
 class TestAskActionMessage:
-    """Test suite for AskActionMessage class."""
+    async def test_send_returns_the_chosen_action(
+        self, ctx, session, frames, no_author_rename
+    ):
+        action = Action(name="confirm", payload={}, label="Confirm", id="action_123")
+        msg = AskActionMessage(content="Choose", actions=[action])
+        sending = asyncio.create_task(msg.send())
+        await answer(
+            session,
+            AskActionReply(
+                action=ActionPayload(id="action_123", name="confirm", label="Confirm")
+            ),
+        )
+        result = await sending
 
-    def test_ask_action_message_initialization(self):
-        """Test AskActionMessage initialization."""
-        with mock_chainlit_context():
-            with patch("chainlit.message.config") as mock_config:
-                mock_config.ui.name = "Bot"
-                action1 = Mock(spec=Action)
-                action2 = Mock(spec=Action)
-                msg = AskActionMessage(
-                    content="Choose an action", actions=[action1, action2]
-                )
+        assert result["id"] == "action_123"
+        assert msg.content == "**Selected:** Confirm"
+        assert [a.action.id for a in frames(session, ActionAdd)] == ["action_123"]
+        assert [r.id for r in frames(session, ActionRemove)] == ["action_123"]
+        [start] = frames(session, AskStart)
+        assert start.spec.keys == ["action_123"]
+        # Buttons were sent, the ask was asked, the answer updated the step.
+        assert [type(f).__name__ for f in frames(session)][:2] == [
+            "ActionAdd",
+            "AskStart",
+        ]
+        assert frames(session, StepUpdate)[-1].step.output == "**Selected:** Confirm"
 
-                assert msg.content == "Choose an action"
-                assert len(msg.actions) == 2
+    async def test_send_timeout(self, ctx, session, no_author_rename):
+        action = Action(name="confirm", payload={}, id="action_123")
+        msg = AskActionMessage(content="Choose", actions=[action], timeout=0)
+        assert await msg.send() is None
+        assert msg.content == "Timed out: no action was taken"
 
-    @pytest.mark.asyncio
-    async def test_ask_action_message_send_with_response(self):
-        """Test AskActionMessage send with action response."""
-        with mock_chainlit_context() as ctx:
-            action = AsyncMock(spec=Action)
-            action.id = "action_123"
-            msg = AskActionMessage(content="Choose", actions=[action])
-            ctx.emitter.send_ask_user = AsyncMock(
-                return_value={"id": "action_123", "label": "Confirm"}
-            )
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    with patch("chainlit.message.chat_context"):
-                        result = await msg.send()
-
-                        assert result == {"id": "action_123", "label": "Confirm"}
-                        assert msg.content == "**Selected:** Confirm"
-                        action.send.assert_called_once()
-                        action.remove.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_ask_action_message_send_timeout(self):
-        """Test AskActionMessage send with timeout."""
-        with mock_chainlit_context() as ctx:
-            action = AsyncMock(spec=Action)
-            action.id = "action_123"
-            msg = AskActionMessage(content="Choose", actions=[action])
-            ctx.emitter.send_ask_user = AsyncMock(return_value=None)
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    with patch("chainlit.message.chat_context"):
-                        result = await msg.send()
-
-                        assert result is None
-                        assert msg.content == "Timed out: no action was taken"
+    async def test_restore_actions_are_snapshotted_on_the_ask(
+        self, ctx, session, no_author_rename
+    ):
+        action = Action(name="confirm", payload={}, id="action_123")
+        msg = AskActionMessage(content="Choose", actions=[action])
+        sending = asyncio.create_task(msg.send())
+        await until_asked(session)
+        assert [a.id for a in session.pending_ask.restore_actions] == ["action_123"]
+        session.pending_ask.future.set_result(
+            AskActionReply(action=ActionPayload(id="action_123", name="confirm"))
+        )
+        await sending
 
 
 class TestAskElementMessage:
-    """Test suite for AskElementMessage class."""
+    async def test_send_submitted(self, ctx, session, frames, no_author_rename):
+        element = CustomElement(name="form", props={"field": ""}, id="element_123")
+        msg = AskElementMessage(content="Submit", element=element)
+        sending = asyncio.create_task(msg.send())
+        await answer(session, AskElementReply(submitted=True, props={"field": "value"}))
+        result = await sending
 
-    def test_ask_element_message_initialization(self):
-        """Test AskElementMessage initialization."""
-        with mock_chainlit_context():
-            with patch("chainlit.message.config") as mock_config:
-                mock_config.ui.name = "Bot"
-                element = Mock()
-                msg = AskElementMessage(content="Submit form", element=element)
+        assert result == {"submitted": True, "props": {"field": "value"}}
+        assert msg.content == "Thanks for submitting"
+        assert [e.element.id for e in frames(session, ElementUpsert)] == ["element_123"]
+        assert [r.id for r in frames(session, ElementRemove)] == ["element_123"]
+        [start] = frames(session, AskStart)
+        assert start.spec.element_id == "element_123"
 
-                assert msg.content == "Submit form"
-                assert msg.element == element
+    async def test_send_cancelled(self, ctx, session, no_author_rename):
+        element = CustomElement(name="form", props={})
+        msg = AskElementMessage(content="Submit", element=element)
+        sending = asyncio.create_task(msg.send())
+        await answer(session, AskElementReply(submitted=False))
+        assert (await sending) == {"submitted": False, "props": {}}
+        assert msg.content == "Cancelled"
 
-    @pytest.mark.asyncio
-    async def test_ask_element_message_send_submitted(self):
-        """Test AskElementMessage send with submitted response."""
-        with mock_chainlit_context() as ctx:
-            element = AsyncMock()
-            element.id = "element_123"
-            element.to_dict = Mock(return_value={"id": "element_123"})
-            msg = AskElementMessage(content="Submit", element=element)
-            ctx.emitter.send_ask_user = AsyncMock(
-                return_value={"submitted": True, "data": {"field": "value"}}
-            )
+    async def test_send_timeout(self, ctx, session, no_author_rename):
+        element = CustomElement(name="form", props={})
+        msg = AskElementMessage(content="Submit", element=element, timeout=0)
+        assert await msg.send() is None
+        assert msg.content == "Timed out"
 
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    with patch("chainlit.message.chat_context"):
-                        result = await msg.send()
-
-                        assert result == {"submitted": True, "data": {"field": "value"}}
-                        assert msg.content == "Thanks for submitting"
-                        element.send.assert_called_once()
-                        element.remove.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_ask_element_message_send_cancelled(self):
-        """Test AskElementMessage send with cancelled response."""
-        with mock_chainlit_context() as ctx:
-            element = AsyncMock()
-            element.id = "element_123"
-            element.to_dict = Mock(return_value={"id": "element_123"})
-            msg = AskElementMessage(content="Submit", element=element)
-            ctx.emitter.send_ask_user = AsyncMock(return_value={"submitted": False})
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    with patch("chainlit.message.chat_context"):
-                        result = await msg.send()
-
-                        assert result == {"submitted": False}
-                        assert msg.content == "Cancelled"
-
-    @pytest.mark.asyncio
-    async def test_ask_element_message_send_timeout(self):
-        """Test AskElementMessage send with timeout."""
-        with mock_chainlit_context() as ctx:
-            element = AsyncMock()
-            element.id = "element_123"
-            element.to_dict = Mock(return_value={"id": "element_123"})
-            msg = AskElementMessage(content="Submit", element=element)
-            ctx.emitter.send_ask_user = AsyncMock(return_value=None)
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-
-                    with patch("chainlit.message.chat_context"):
-                        result = await msg.send()
-
-                        assert result is None
-                        assert msg.content == "Timed out"
-
-
-class TestMessageEdgeCases:
-    """Test suite for message edge cases."""
-
-    def test_message_with_none_content(self):
-        """Test message handles None content."""
-        with mock_chainlit_context():
-            msg = Message(content=None)
-            assert msg.content == "None"
-
-    def test_message_language_override(self):
-        """Test that dict content sets language to json."""
-        with mock_chainlit_context():
-            msg = Message(content={"key": "value"}, language="python")
-            # Dict content always sets language to json, overriding the parameter
-            assert msg.language == "json"
-
-    @pytest.mark.asyncio
-    async def test_message_send_with_none_content(self):
-        """Test sending message with None content."""
-        with mock_chainlit_context():
-            msg = Message(content="test")
-            msg.content = None
-
-            with patch("chainlit.message.chat_context"):
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
-
-                        await msg.send()
-
-                        assert msg.content == ""
-
-    @pytest.mark.asyncio
-    async def test_ask_message_remove_clears_ask(self):
-        """Test that AskMessage remove clears ask state."""
-        with mock_chainlit_context() as ctx:
-            msg = AskUserMessage(content="Question?")
-
-            with patch("chainlit.message.chat_context"):
-                with patch("chainlit.message.get_data_layer", return_value=None):
-                    await msg.remove()
-
-                    ctx.emitter.clear.assert_called_once_with("clear_ask")
-
-    def test_message_metadata_and_tags(self):
-        """Test message with metadata and tags."""
-        with mock_chainlit_context():
-            metadata = {"key1": "value1", "key2": 123}
-            tags = ["important", "user-query"]
-            msg = Message(content="test", metadata=metadata, tags=tags)
-
-            assert msg.metadata == metadata
-            assert msg.tags == tags
-
-    def test_message_to_dict_with_none_metadata(self):
-        """Test to_dict with None metadata."""
-        with mock_chainlit_context():
-            msg = Message(content="test")
-            msg.metadata = None
-
-            result = msg.to_dict()
-
-            assert result["metadata"] == {}
-
-
-class TestAskRestorePayloads:
-    """Ask messages must hand the emitter what it needs to rebuild the form
-    after a reconnect."""
-
-    @pytest.mark.asyncio
-    async def test_ask_action_passes_restore_actions(self):
-        with mock_chainlit_context() as ctx:
-            action = AsyncMock(spec=Action)
-            action.id = "action_123"
-            action.to_dict = Mock(return_value={"id": "action_123"})
-            msg = AskActionMessage(content="Choose", actions=[action])
-            ctx.emitter.send_ask_user = AsyncMock(
-                return_value={"id": "action_123", "label": "Confirm"}
-            )
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-                    with patch("chainlit.message.chat_context"):
-                        await msg.send()
-
-            assert ctx.emitter.send_ask_user.await_count == 1
-            kwargs = ctx.emitter.send_ask_user.await_args.kwargs
-            assert kwargs["restore_actions"] == [{"id": "action_123"}]
-
-    @pytest.mark.asyncio
-    async def test_ask_element_passes_live_element(self):
-        with mock_chainlit_context() as ctx:
-            element = AsyncMock()
-            element.id = "element_123"
-            element.to_dict = Mock(return_value={"id": "element_123"})
-            msg = AskElementMessage(content="Submit", element=element)
-            ctx.emitter.send_ask_user = AsyncMock(return_value={"submitted": True})
-
-            with patch("chainlit.message.get_data_layer", return_value=None):
-                with patch("chainlit.message.config") as mock_config:
-                    mock_config.code.author_rename = None
-                    with patch("chainlit.message.chat_context"):
-                        await msg.send()
-
-            kwargs = ctx.emitter.send_ask_user.await_args.kwargs
-            # The live object, not a snapshot: updates made while the ask is
-            # pending must survive into the restore payload.
-            assert kwargs["restore_element"] is element
-
-
-@contextmanager
-def _patched_runtime():
-    """Patch chat_context / data layer / config for send()/update() calls."""
-    with patch("chainlit.message.chat_context"):
-        with patch("chainlit.message.get_data_layer", return_value=None):
-            with patch("chainlit.message.config") as mock_config:
-                mock_config.code.author_rename = None
-                yield
+    async def test_restore_element_is_a_snapshot(self, ctx, session, no_author_rename):
+        element = CustomElement(name="form", props={"v": 1}, id="element_123")
+        msg = AskElementMessage(content="Submit", element=element)
+        sending = asyncio.create_task(msg.send())
+        await until_asked(session)
+        restored = session.pending_ask.restore_element
+        assert restored is not None
+        assert restored.id == "element_123"
+        assert restored.props == {"v": 1}
+        session.pending_ask.future.set_result(AskElementReply(submitted=True))
+        await sending
 
 
 class TestMessageWait:
-    """Test suite for the transient `wait` presentation mode."""
+    def emitted_wait(self, frame):
+        return frame.step.wait
 
-    def test_wait_defaults(self):
-        """Test that wait attributes default to off."""
-        with mock_chainlit_context():
-            msg = Message(content="test")
+    async def test_wait_defaults(self, ctx):
+        msg = Message(content="test")
+        assert msg.wait is False
+        assert msg.wait_interval == 5.0
+        assert msg.wait_loop is False
 
-            assert msg.wait is False
-            assert msg.wait_interval == 5.0
-            assert msg.wait_loop is False
+    async def test_wait_never_in_to_dict(self, ctx):
+        assert "wait" not in Message(content="test", wait=["a", "b"]).to_dict()
 
-    def test_wait_never_in_to_dict(self):
-        """Test that to_dict never contains the wait key."""
-        with mock_chainlit_context():
-            msg = Message(content="test", wait=["a", "b"], wait_interval=8)
+    async def test_send_without_wait_has_no_wait(
+        self, ctx, session, frames, no_author_rename
+    ):
+        await Message(content="test").send()
+        assert frames(session, StepUpsert)[0].step.wait is None
 
-            assert "wait" not in msg.to_dict()
+    async def test_send_with_wait_list(self, ctx, session, frames, no_author_rename):
+        msg = Message(
+            content="step 1", wait=["step 1", "step 2"], wait_interval=8, wait_loop=True
+        )
+        await msg.send()
+        wait = frames(session, StepUpsert)[0].step.wait
+        assert (wait.texts, wait.interval_ms, wait.loop) == (
+            ["step 1", "step 2"],
+            8000,
+            True,
+        )
 
-    @pytest.mark.asyncio
-    async def test_send_without_wait_has_no_wait_key(self):
-        """Test that wait=False emits a payload identical to to_dict()."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test")
+    async def test_send_with_wait_true(self, ctx, session, frames, no_author_rename):
+        await Message(content="test", wait=True).send()
+        wait = frames(session, StepUpsert)[0].step.wait
+        assert (wait.texts, wait.interval_ms, wait.loop) == ([], 5000, False)
 
-            with _patched_runtime():
-                await msg.send()
+    async def test_send_with_empty_wait_list(
+        self, ctx, session, frames, no_author_rename
+    ):
+        await Message(content="test", wait=[]).send()
+        assert frames(session, StepUpsert)[0].step.wait.texts == []
 
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert "wait" not in emitted
-                assert emitted == msg.to_dict()
-
-    @pytest.mark.asyncio
-    async def test_send_with_wait_list(self):
-        """Test that wait=list emits the normalized wait payload."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(
-                content="step 1",
-                wait=["step 1", "step 2"],
-                wait_interval=8,
-                wait_loop=True,
-            )
-
-            with _patched_runtime():
-                await msg.send()
-
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert emitted["wait"] == {
-                    "texts": ["step 1", "step 2"],
-                    "intervalMs": 8000,
-                    "loop": True,
-                }
-                # Everything else matches the regular payload
-                without_wait = {k: v for k, v in emitted.items() if k != "wait"}
-                assert without_wait == msg.to_dict()
-
-    @pytest.mark.asyncio
-    async def test_send_with_wait_data_layer_never_sees_wait(self):
-        """Test that create_step receives a dict without the wait key."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=["a", "b"])
-            mock_data_layer = AsyncMock()
-
-            with patch("chainlit.message.chat_context"):
-                with patch(
-                    "chainlit.message.get_data_layer", return_value=mock_data_layer
-                ):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
-
-                        await msg.send()
-                        await asyncio.sleep(0)
-
-                        persisted = mock_data_layer.create_step.call_args[0][0]
-                        assert "wait" not in persisted
-
-                        emitted = ctx.emitter.send_step.call_args[0][0]
-                        assert "wait" in emitted
-
-    @pytest.mark.asyncio
-    async def test_send_with_wait_true(self):
-        """Test that wait=True emits shimmer-only payload."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=True)
-
-            with _patched_runtime():
-                await msg.send()
-
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert emitted["wait"] == {
-                    "texts": [],
-                    "intervalMs": 5000,
-                    "loop": False,
-                }
-
-    @pytest.mark.asyncio
-    async def test_send_with_empty_wait_list(self):
-        """Test that wait=[] behaves like wait=True."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=[])
-
-            with _patched_runtime():
-                await msg.send()
-
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert emitted["wait"] == {
-                    "texts": [],
-                    "intervalMs": 5000,
-                    "loop": False,
-                }
-
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "bad_interval", [None, float("inf"), float("-inf"), float("nan")]
     )
-    async def test_wait_interval_invalid_falls_back_to_default(self, bad_interval):
-        """Test that a non-finite/None wait_interval falls back to 5000ms."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=["a"])
-            msg.wait_interval = bad_interval
+    async def test_wait_interval_invalid_falls_back_to_default(
+        self, ctx, session, frames, no_author_rename, bad_interval
+    ):
+        msg = Message(content="test", wait=["a"])
+        msg.wait_interval = bad_interval
+        await msg.send()
+        assert frames(session, StepUpsert)[0].step.wait.interval_ms == 5000
 
-            with _patched_runtime():
-                await msg.send()
+    async def test_wait_interval_clamped_to_minimum(
+        self, ctx, session, frames, no_author_rename
+    ):
+        await Message(content="test", wait=["a"], wait_interval=0.5).send()
+        assert frames(session, StepUpsert)[0].step.wait.interval_ms == 2000
 
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert emitted["wait"]["intervalMs"] == 5000
+    async def test_wait_assigned_empty_list_emits_shimmer_only(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = Message(content="loading", wait=["a"])
+        await msg.send()
+        msg.wait = []
+        await msg.update()
+        assert frames(session, StepUpdate)[0].step.wait.texts == []
+        assert msg.wait is False
 
-    @pytest.mark.asyncio
-    async def test_wait_assigned_empty_list_emits_shimmer_only(self):
-        """Test that assigning wait=[] before update() emits shimmer-only."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="loading", wait=["a"])
+    async def test_wait_false_emits_no_wait_on_send_and_update(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = Message(content="test", wait=False)
+        await msg.send()
+        await msg.update()
+        assert frames(session, StepUpsert)[0].step.wait is None
+        # A patch without an opinion leaves wait alone: UNSET, not null.
+        assert frames(session, StepUpdate)[0].step.wait is not None
+        assert frames(session, StepUpdate)[0].step.wait is not None
 
-            with _patched_runtime():
-                await msg.send()
+    async def test_empty_content_takes_first_wait_text(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = Message(content="", wait=["first", "second"])
+        assert msg.content == "first"
+        await msg.send()
+        assert frames(session, StepUpsert)[0].step.output == "first"
 
-                msg.wait = []
-                await msg.update()
+    async def test_empty_content_kept_with_wait_true(self, ctx):
+        assert Message(content="", wait=True).content == ""
 
-                updated = ctx.emitter.update_step.call_args[0][0]
-                assert updated["wait"] == {
-                    "texts": [],
-                    "intervalMs": 5000,
-                    "loop": False,
-                }
-                assert msg.wait is False
+    async def test_non_empty_content_not_overridden_by_wait_texts(self, ctx):
+        assert Message(content="explicit", wait=["first"]).content == "explicit"
 
-    @pytest.mark.asyncio
-    async def test_wait_false_emits_no_wait_on_send_and_update(self):
-        """Test that wait=False emits no wait key on either send or update."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=False)
+    async def test_wait_consumed_on_send(self, ctx, session, frames, no_author_rename):
+        msg = Message(content="loading", wait=["a", "b"])
+        await msg.send()
+        assert msg.wait is False
+        msg.content = "done"
+        await msg.update()
+        from msgspec import UNSET
 
-            with _patched_runtime():
-                await msg.send()
-                await msg.update()
+        [patch] = frames(session, StepUpdate)
+        assert patch.step.wait is UNSET
+        assert patch.step.output == "done"
 
-                assert "wait" not in ctx.emitter.send_step.call_args[0][0]
-                assert "wait" not in ctx.emitter.update_step.call_args[0][0]
+    async def test_active_wait_payload_tracked_for_replay(self, ctx, no_author_rename):
+        msg = Message(content="loading", wait=["a", "b"], wait_interval=8)
+        await msg.send()
+        assert msg._active_wait_payload == {
+            "texts": ["a", "b"],
+            "intervalMs": 8000,
+            "loop": False,
+        }
+        msg.content = "done"
+        await msg.update()
+        assert msg._active_wait_payload is None
 
-    @pytest.mark.asyncio
-    async def test_wait_interval_clamped_to_minimum(self):
-        """Test that wait_interval below 2 seconds is clamped to 2000ms."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=["a"], wait_interval=0.5)
-
-            with _patched_runtime():
-                await msg.send()
-
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert emitted["wait"]["intervalMs"] == 2000
-
-    def test_empty_content_takes_first_wait_text(self):
-        """Test that empty content falls back to the first wait text."""
-        with mock_chainlit_context():
-            msg = Message(content="", wait=["first", "second"])
-
-            assert msg.content == "first"
-
-    @pytest.mark.asyncio
-    async def test_empty_content_first_wait_text_in_payload(self):
-        """Test that the fallback content lands in the emitted output."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="", wait=["first", "second"])
-
-            with _patched_runtime():
-                await msg.send()
-
-                emitted = ctx.emitter.send_step.call_args[0][0]
-                assert emitted["output"] == "first"
-
-    def test_empty_content_kept_with_wait_true(self):
-        """Test that wait=True does not touch empty content."""
-        with mock_chainlit_context():
-            msg = Message(content="", wait=True)
-
-            assert msg.content == ""
-
-    def test_non_empty_content_not_overridden_by_wait_texts(self):
-        """Test that explicit content wins over wait texts."""
-        with mock_chainlit_context():
-            msg = Message(content="explicit", wait=["first"])
-
-            assert msg.content == "explicit"
-
-    @pytest.mark.asyncio
-    async def test_wait_consumed_on_send(self):
-        """Test that update() after send() emits no wait (loader pattern)."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="loading", wait=["a", "b"])
-
-            with _patched_runtime():
-                await msg.send()
-                assert msg.wait is False
-
-                msg.content = "done"
-                await msg.update()
-
-                updated = ctx.emitter.update_step.call_args[0][0]
-                assert "wait" not in updated
-                assert updated["output"] == "done"
-
-    @pytest.mark.asyncio
-    async def test_active_wait_payload_tracked_for_replay(self):
-        """The last emitted wait payload is kept on the message (the
-        reconnect replay re-attaches it), and a plain update clears it."""
-        with mock_chainlit_context():
-            msg = Message(content="loading", wait=["a", "b"], wait_interval=8)
-
-            with _patched_runtime():
-                await msg.send()
-                assert msg._active_wait_payload == {
-                    "texts": ["a", "b"],
-                    "intervalMs": 8000,
-                    "loop": False,
-                }
-
-                msg.content = "done"
-                await msg.update()
-                assert msg._active_wait_payload is None
-
-    @pytest.mark.asyncio
-    async def test_active_wait_payload_none_for_plain_message(self):
-        with mock_chainlit_context():
-            msg = Message(content="plain")
-
-            with _patched_runtime():
-                await msg.send()
-                assert msg._active_wait_payload is None
-
-    @pytest.mark.asyncio
-    async def test_wait_reassigned_before_update(self):
-        """Test that reassigning wait restarts wait mode on update()."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="phase 1", wait=["phase 1"])
-
-            with _patched_runtime():
-                await msg.send()
-
-                msg.wait = ["phase 2a", "phase 2b"]
-                msg.wait_interval = 3
-                await msg.update()
-
-                updated = ctx.emitter.update_step.call_args[0][0]
-                assert updated["wait"] == {
-                    "texts": ["phase 2a", "phase 2b"],
-                    "intervalMs": 3000,
-                    "loop": False,
-                }
-                assert msg.wait is False
-
-    @pytest.mark.asyncio
-    async def test_update_data_layer_never_sees_wait(self):
-        """Test that update_step receives a dict without the wait key."""
-        with mock_chainlit_context() as ctx:
-            msg = Message(content="test", wait=["a"])
-            mock_data_layer = AsyncMock()
-
-            with patch("chainlit.message.chat_context"):
-                with patch(
-                    "chainlit.message.get_data_layer", return_value=mock_data_layer
-                ):
-                    await msg.update()
-                    await asyncio.sleep(0)
-
-                    persisted = mock_data_layer.update_step.call_args[0][0]
-                    assert "wait" not in persisted
-
-                    emitted = ctx.emitter.update_step.call_args[0][0]
-                    assert "wait" in emitted
+    async def test_wait_reassigned_before_update(
+        self, ctx, session, frames, no_author_rename
+    ):
+        msg = Message(content="phase 1", wait=["phase 1"])
+        await msg.send()
+        msg.wait = ["phase 2a", "phase 2b"]
+        msg.wait_interval = 3
+        await msg.update()
+        wait = frames(session, StepUpdate)[0].step.wait
+        assert (wait.texts, wait.interval_ms) == (["phase 2a", "phase 2b"], 3000)
+        assert msg.wait is False
 
 
 class TestMessageResumePolicy:
-    """Test suite for the resume="keep"/"delete" flag."""
+    async def test_resume_keep_default_leaves_metadata_untouched(self, ctx):
+        msg = Message(content="test")
+        assert msg.metadata is None
+        assert msg.to_dict()["metadata"] == {}
+        assert Message(content="test", resume="keep").metadata is None
 
-    def test_resume_keep_default_leaves_metadata_untouched(self):
-        """Default resume="keep" must be a strict no-op on metadata."""
-        with mock_chainlit_context():
-            msg = Message(content="test")
-            assert msg.metadata is None
-            assert msg.to_dict()["metadata"] == {}
+    async def test_resume_delete_sets_metadata_flag(self, ctx):
+        assert Message(content="test", resume="delete").metadata == {
+            "resume_policy": "delete"
+        }
+        assert Message(content="test", metadata={"a": 1}, resume="delete").metadata == {
+            "a": 1,
+            "resume_policy": "delete",
+        }
 
-    def test_resume_keep_explicit_leaves_metadata_untouched(self):
-        with mock_chainlit_context():
-            msg = Message(content="test", resume="keep")
-            assert msg.metadata is None
+    async def test_resume_invalid_value_raises(self, ctx):
+        with pytest.raises(ValueError, match="resume must be"):
+            Message(content="test", resume="drop")
+        with pytest.raises(ValueError, match="resume must be"):
+            AskUserMessage(content="Question?", resume="wipe")
 
-    def test_resume_delete_sets_metadata_flag(self):
-        with mock_chainlit_context():
-            msg = Message(content="test", resume="delete")
-            assert msg.metadata == {"resume_policy": "delete"}
-            assert msg.to_dict()["metadata"] == {"resume_policy": "delete"}
-
-    def test_resume_delete_preserves_existing_metadata(self):
-        with mock_chainlit_context():
-            msg = Message(content="test", metadata={"a": 1}, resume="delete")
-            assert msg.metadata == {"a": 1, "resume_policy": "delete"}
-            assert msg.to_dict()["metadata"] == {"a": 1, "resume_policy": "delete"}
-
-    def test_resume_invalid_value_raises(self):
-        with mock_chainlit_context():
-            with pytest.raises(ValueError, match="resume must be"):
-                Message(content="test", resume="drop")
-
-    def test_ask_user_message_resume_delete(self):
-        with mock_chainlit_context():
-            msg = AskUserMessage(content="Question?", resume="delete")
-            assert msg.metadata == {"resume_policy": "delete"}
-            assert msg.to_dict()["metadata"] == {"resume_policy": "delete"}
-
-    def test_ask_user_message_resume_default_keep(self):
-        with mock_chainlit_context():
-            msg = AskUserMessage(content="Question?")
-            assert msg.metadata is None
-
-    def test_ask_file_message_resume_delete(self):
-        with mock_chainlit_context():
-            msg = AskFileMessage(
-                content="Upload", accept=["text/plain"], resume="delete"
-            )
-            assert msg.metadata == {"resume_policy": "delete"}
-
-    def test_ask_action_message_resume_delete(self):
-        with mock_chainlit_context():
-            action = Mock(spec=Action)
-            msg = AskActionMessage(content="Choose", actions=[action], resume="delete")
-            assert msg.metadata == {"resume_policy": "delete"}
-
-    def test_ask_element_message_resume_delete(self):
-        with mock_chainlit_context():
-            element = Mock()
-            msg = AskElementMessage(content="Submit", element=element, resume="delete")
-            assert msg.metadata == {"resume_policy": "delete"}
-
-    def test_ask_message_resume_invalid_value_raises(self):
-        with mock_chainlit_context():
-            with pytest.raises(ValueError, match="resume must be"):
-                AskUserMessage(content="Question?", resume="wipe")
-
-    @pytest.mark.asyncio
-    async def test_resume_delete_flag_reaches_data_layer(self):
-        """The flag must be inside the dict handed to create_step."""
-        with mock_chainlit_context():
-            msg = Message(content="test", resume="delete")
-            mock_data_layer = AsyncMock()
-
-            with patch("chainlit.message.chat_context"):
-                with patch(
-                    "chainlit.message.get_data_layer", return_value=mock_data_layer
-                ):
-                    with patch("chainlit.message.config") as mock_config:
-                        mock_config.code.author_rename = None
-                        await msg.send()
-                        await asyncio.sleep(0)
-
-            persisted = mock_data_layer.create_step.call_args[0][0]
-            assert persisted["metadata"] == {"resume_policy": "delete"}
+    async def test_ask_messages_take_the_flag(self, ctx):
+        flag = {"resume_policy": "delete"}
+        assert AskUserMessage(content="?", resume="delete").metadata == flag
+        assert AskUserMessage(content="?").metadata is None
+        assert (
+            AskFileMessage(content="?", accept=["text/plain"], resume="delete").metadata
+            == flag
+        )
+        action = Action(name="a", payload={})
+        assert (
+            AskActionMessage(content="?", actions=[action], resume="delete").metadata
+            == flag
+        )
+        element = CustomElement(name="e", props={})
+        assert (
+            AskElementMessage(content="?", element=element, resume="delete").metadata
+            == flag
+        )
 
 
 class TestAskSlotBusyTeardown:
     """A refused ask must still clean up what it already sent.
 
-    The refusal returns before send_ask_user's own try/finally, so every
+    The refusal happens before send_ask_user's own try/finally, so every
     teardown below the call is skipped unless the send methods repeat it.
     """
 
-    @pytest.mark.asyncio
-    async def test_ask_action_removes_its_buttons(self):
-        """Otherwise the buttons stay clickable, wired to nothing."""
-        with mock_chainlit_context() as ctx:
-            action = AsyncMock(spec=Action)
-            action.id = "action_123"
-            msg = AskActionMessage(content="Choose", actions=[action])
-            ctx.emitter.send_ask_user = AsyncMock(
-                side_effect=AskSlotBusyError("blocking-step")
-            )
+    @pytest_asyncio.fixture
+    async def busy_slot(self, ctx, session, monkeypatch):
+        monkeypatch.setattr("chainlit.config.config.features.strict_ask_slot", True)
+        blocking = AskUserMessage(content="first")
+        sending = asyncio.create_task(blocking.send())
+        yield sending
+        sending.cancel()
 
-            with (
-                patch("chainlit.message.get_data_layer", return_value=None),
-                patch("chainlit.message.config") as mock_config,
-                patch("chainlit.message.chat_context"),
-            ):
-                mock_config.code.author_rename = None
+    async def test_ask_action_removes_its_buttons(
+        self, ctx, session, frames, no_author_rename, busy_slot
+    ):
+        await until_asked(session)
+        action = Action(name="confirm", payload={}, id="action_123")
+        msg = AskActionMessage(content="Choose", actions=[action])
+        with pytest.raises(AskSlotBusyError):
+            await msg.send()
+        assert [r.id for r in frames(session, ActionRemove)] == ["action_123"]
+        assert msg.wait_for_answer is False
+        assert msg.content == "Choose"
 
-                with pytest.raises(AskSlotBusyError):
-                    await msg.send()
+    async def test_ask_user_clears_wait_for_answer(
+        self, ctx, session, no_author_rename, busy_slot
+    ):
+        await until_asked(session)
+        msg = AskUserMessage(content="Your name?")
+        with pytest.raises(AskSlotBusyError):
+            await msg.send()
+        assert msg.wait_for_answer is False
 
-            action.remove.assert_awaited_once()
-            assert msg.wait_for_answer is False
-            # Not a timeout: the question text must stay as it was.
-            assert msg.content == "Choose"
+    async def test_ask_file_clears_wait_for_answer(
+        self, ctx, session, no_author_rename, busy_slot
+    ):
+        await until_asked(session)
+        msg = AskFileMessage(content="Upload", accept=["text/plain"])
+        with pytest.raises(AskSlotBusyError):
+            await msg.send()
+        assert msg.wait_for_answer is False
 
-    @pytest.mark.asyncio
-    async def test_ask_user_clears_wait_for_answer(self):
-        with mock_chainlit_context() as ctx:
-            msg = AskUserMessage(content="Your name?")
-            ctx.emitter.send_ask_user = AsyncMock(
-                side_effect=AskSlotBusyError("blocking-step")
-            )
+    async def test_ask_element_removes_its_element(
+        self, ctx, session, frames, no_author_rename, busy_slot
+    ):
+        await until_asked(session)
+        element = CustomElement(name="form", props={}, id="element_123")
+        msg = AskElementMessage(content="Submit", element=element)
+        with pytest.raises(AskSlotBusyError):
+            await msg.send()
+        assert [r.id for r in frames(session, ElementRemove)] == ["element_123"]
+        assert msg.content == "Submit"
 
-            with (
-                patch("chainlit.message.get_data_layer", return_value=None),
-                patch("chainlit.message.config") as mock_config,
-                patch("chainlit.message.chat_context"),
-            ):
-                mock_config.code.author_rename = None
 
-                with pytest.raises(AskSlotBusyError):
-                    await msg.send()
+class TestMockedElements:
+    """Elements and actions the message owns are told the message id."""
 
-            assert msg.wait_for_answer is False
-
-    @pytest.mark.asyncio
-    async def test_ask_file_clears_wait_for_answer(self):
-        with mock_chainlit_context() as ctx:
-            msg = AskFileMessage(content="Upload", accept=["text/plain"])
-            ctx.emitter.send_ask_user = AsyncMock(
-                side_effect=AskSlotBusyError("blocking-step")
-            )
-
-            with (
-                patch("chainlit.message.get_data_layer", return_value=None),
-                patch("chainlit.message.config") as mock_config,
-            ):
-                mock_config.code.author_rename = None
-
-                with pytest.raises(AskSlotBusyError):
-                    await msg.send()
-
-            assert msg.wait_for_answer is False
+    async def test_send_forwards_the_id(self, ctx, no_author_rename):
+        action = AsyncMock(spec=Action)
+        element = AsyncMock()
+        msg = Message(content="test", actions=[action], elements=[element])
+        await msg.send()
+        action.send.assert_awaited_once_with(for_id=msg.id)
+        element.send.assert_awaited_once_with(for_id=msg.id)

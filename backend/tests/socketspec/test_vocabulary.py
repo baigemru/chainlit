@@ -11,16 +11,18 @@ or ``ClientMsg``, and every field the row reads has to be a field of that
 branch, under the name the wire actually uses. Test modules are exempt from
 the import ban -- checking the table against the protocol is the one thing
 that requires seeing both.
+
+The matching check of the driver's own translation tables left with the
+socket.io driver; a driver that speaks the protocol natively has nothing
+to translate.
 """
 
-import inspect
 from typing import Any, Dict, List, Tuple
 
 import msgspec
 
 from chainlit.protocol.client import ClientMsg
 from chainlit.protocol.server import ServerMsg
-from tests.socketspec import legacy
 from tests.socketspec.cases import SCENARIOS
 
 
@@ -93,61 +95,4 @@ def test_every_row_speaks_the_protocol():
 
     assert not problems, "\n".join(
         ["the table does not speak the protocol:", *sorted(set(problems))]
-    )
-
-
-class _Anything(dict):
-    """Stands in for a payload whose shape the translation may read into."""
-
-    def __missing__(self, key: str) -> "_Anything":
-        return _Anything()
-
-
-def _placeholder_args(fn: Any) -> Tuple[Any, ...]:
-    return tuple(_Anything() for _ in inspect.signature(fn).parameters)
-
-
-def test_the_driver_translates_into_the_protocol():
-    """The other end of the same drift, and the one no row can catch.
-
-    A row is only wrong once it asserts on a field. The translation is wrong
-    the moment it is written, and stays invisible until someone writes that
-    row -- against the shape the driver invents, which is then wrong too. So
-    the tables are checked directly, before any row uses them.
-    """
-    problems: List[str] = []
-
-    for event, (tag, key) in legacy._WRAPPED.items():
-        problems += _check(SERVER, tag, [key], f"_WRAPPED[{event!r}]", "server")
-
-    for event, (tag, extra) in legacy._COLLAPSED.items():
-        problems += _check(
-            SERVER, tag, extra.keys(), f"_COLLAPSED[{event!r}]", "server"
-        )
-
-    for name, build in legacy._HELPER_FRAMES.items():
-        tag, body = build(*_placeholder_args(build))
-        problems += _check(
-            SERVER, tag, body.keys(), f"_HELPER_FRAMES[{name!r}]", "server"
-        )
-
-    for event, (tag, project) in legacy._EXTRACTED.items():
-        problems += _check(
-            SERVER,
-            tag,
-            project(_Anything()).keys(),
-            f"_EXTRACTED[{event!r}]",
-            "server",
-        )
-
-    tag, body = legacy.ask_start(_Anything())
-    problems += _check(SERVER, tag, body.keys(), "ask_start", "server")
-
-    # A rename passes the old payload through untouched, so its keys are only
-    # knowable at runtime. The tag is what can be checked here.
-    for event, tag in legacy._RENAMES.items():
-        problems += _check(SERVER, tag, (), f"_RENAMES[{event!r}]", "server")
-
-    assert not problems, "\n".join(
-        ["the driver does not translate into the protocol:", *sorted(set(problems))]
     )

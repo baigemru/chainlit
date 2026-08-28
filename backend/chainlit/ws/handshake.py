@@ -64,6 +64,13 @@ __all__ = [
 ]
 
 
+# The metadata flag a message sets with ``resume="delete"``. Defined where it
+# is read; ``controllers/project.py`` carries the same two literals for the
+# HTTP read path.
+RESUME_POLICY_KEY = "resume_policy"
+RESUME_POLICY_DELETE = "delete"
+
+
 @runtime_checkable
 class ThreadStore(Protocol):
     """What the handshake needs from persistence, and nothing else.
@@ -131,6 +138,11 @@ async def arrive(
         assert isinstance(held, Session)
         held.connected = True
         registry.mark_connected(held.id)
+        if held.reaper is not None and not held.reaper.done():
+            # The user is back inside the grace period. The teardown that
+            # was waiting for them is the one thing this arrival must stop.
+            held.reaper.cancel()
+            held.reaper = None
         # A page load is the client saying it lost its screen. The session
         # survives; the replay that follows is unconditional either way,
         # but only a page load means the browser is holding nothing.
@@ -142,11 +154,15 @@ async def arrive(
         registry.discard(claim.entry)
 
     session = make_session(session_id)
-    session.thread_id = thread_id
+    if thread_id:
+        # The client's choice wins over whatever the factory minted: this is
+        # a resume. Without one the session keeps the thread it was born
+        # with, so it has a thread id from its first frame onwards.
+        session.thread_id = thread_id
     registry.register(
         session,
         user_identifier=user_identifier,
-        thread_id=thread_id,
+        thread_id=session.thread_id,
         connected=True,
     )
     return Arrival(
@@ -299,7 +315,6 @@ def _doomed_step_ids(
     orphans them into a conversation with no context, which reads worse
     than either keeping or deleting the whole branch.
     """
-    from chainlit.resume_policy import RESUME_POLICY_DELETE, RESUME_POLICY_KEY
 
     doomed: Set[str] = set()
     for entry in entries:

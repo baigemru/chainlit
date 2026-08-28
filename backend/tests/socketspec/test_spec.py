@@ -1,18 +1,18 @@
 """Run the table against every driver.
 
-One driver today. The second arrives with the new transport, is added to
-``DRIVERS``, and the table does not change -- which is the point.
+The socket.io driver went with the transport it drove. The driver for the
+native websocket is added to ``DRIVERS``, and the table does not change --
+which is the point. Until then the table collects as skipped, not as green.
 """
 
 import inspect
 
 import pytest
 
-from . import legacy
 from .cases import SCENARIOS
 from .spec import Result, Scenario
 
-DRIVERS = {"socketio": legacy.build}
+DRIVERS: dict = {}
 
 
 def _ids(scenario: Scenario) -> str:

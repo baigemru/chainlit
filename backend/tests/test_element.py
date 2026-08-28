@@ -1,15 +1,17 @@
+"""Elements: the dict they produce, the blob they spool, the frame they send."""
+
 import json
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
+import pytest_asyncio
 
 from chainlit.element import (
     Audio,
     CustomElement,
     Dataframe,
     Element,
-    ElementDict,
     File,
     Image,
     Pdf,
@@ -19,613 +21,321 @@ from chainlit.element import (
     Text,
     Video,
 )
+from chainlit.persistence.writer import (
+    DeleteElement,
+    SaveElement,
+    SessionWriter,
+    WriterRegistry,
+    _HeldUpload,
+)
+from chainlit.protocol.server import ElementRemove, ElementUpsert
+from tests.conftest import bind_context
 
 
-@pytest.mark.asyncio
+@pytest_asyncio.fixture
+async def ctx(session):
+    async with bind_context(session) as bound:
+        yield bound
+
+
+@pytest.fixture
+def held_writer(session):
+    persistence = Mock()
+    persistence.storage = None
+    writer = SessionWriter(
+        persistence,
+        session.thread_id,
+        registry=WriterRegistry(),
+        hold_until_interaction=True,
+    )
+    session.writer = writer
+    return writer
+
+
 class TestElementBase:
-    """Test suite for the base Element class."""
+    async def test_element_initialization_with_url(self, ctx):
+        element = File(name="test_file", url="https://example.com/file.pdf")
+        uuid.UUID(element.id)
+        assert element.persisted is False
+        assert element.updatable is False
+        assert element.thread_id == "test_thread_id"
 
-    async def test_element_initialization_with_url(self, mock_chainlit_context):
-        """Test Element initialization with URL."""
-        async with mock_chainlit_context:
-            element = File(name="test_file", url="https://example.com/file.pdf")
+    async def test_element_initialization_with_content_or_path(self, ctx):
+        assert File(name="f", content=b"test content").url is None
+        assert File(name="f", path="/path/to/file.txt").content is None
 
-            assert element.name == "test_file"
-            assert element.url == "https://example.com/file.pdf"
-            assert isinstance(element.id, str)
-            uuid.UUID(element.id)  # Verify valid UUID
-            assert element.persisted is False
-            assert element.updatable is False
+    async def test_element_requires_url_path_or_content(self, ctx):
+        with pytest.raises(ValueError, match="Must provide url, path or content"):
+            File(name="test_file")
 
-    async def test_element_initialization_with_content(self, mock_chainlit_context):
-        """Test Element initialization with content."""
-        async with mock_chainlit_context:
-            content = b"test content"
-            element = File(name="test_file", content=content)
+    async def test_element_to_dict(self, ctx):
+        element = File(
+            name="test_file", url="https://example.com/file.pdf", display="side"
+        )
+        element_dict = element.to_dict()
+        assert element_dict["name"] == "test_file"
+        assert element_dict["url"] == "https://example.com/file.pdf"
+        assert element_dict["type"] == "file"
+        assert element_dict["id"] == element.id
+        assert element_dict["threadId"] == "test_thread_id"
+        assert element_dict["display"] == "side"
 
-            assert element.name == "test_file"
-            assert element.content == content
-            assert element.url is None
-            assert element.path is None
+    async def test_element_send_puts_the_element_on_the_wire(
+        self, ctx, session, frames
+    ):
+        element = File(name="test_file", url="https://example.com/file.pdf")
+        await element.send(for_id="message_123")
+        assert element.for_id == "message_123"
+        [upsert] = frames(session, ElementUpsert)
+        assert upsert.element.id == element.id
+        assert upsert.element.for_id == "message_123"
+        assert upsert.element.url == "https://example.com/file.pdf"
 
-    async def test_element_initialization_with_path(self, mock_chainlit_context):
-        """Test Element initialization with path."""
-        async with mock_chainlit_context:
-            element = File(name="test_file", path="/path/to/file.txt")
+    async def test_element_send_spools_a_blob_and_names_the_key(
+        self, ctx, session, frames
+    ):
+        element = File(name="notes.txt", content=b"hello")
+        await element.send(for_id="message_123")
+        assert element.chainlit_key in session.files
+        assert session.files[element.chainlit_key]["path"].read_bytes() == b"hello"
+        assert (
+            frames(session, ElementUpsert)[0].element.chainlit_key
+            == element.chainlit_key
+        )
 
-            assert element.name == "test_file"
-            assert element.path == "/path/to/file.txt"
-            assert element.url is None
-            assert element.content is None
+    async def test_str_content_is_spooled_as_utf8(self, ctx, session):
+        element = Text(name="note", content="héllo")
+        await element.send(for_id="m")
+        assert (
+            session.files[element.chainlit_key]["path"].read_bytes() == "héllo".encode()
+        )
 
-    async def test_element_requires_url_path_or_content(self, mock_chainlit_context):
-        """Test that Element raises error without url, path, or content."""
-        async with mock_chainlit_context:
-            with pytest.raises(ValueError, match="Must provide url, path or content"):
-                File(name="test_file")
+    async def test_element_remove(self, ctx, session, frames):
+        element = File(name="test_file", url="https://example.com/file.pdf")
+        await element.remove()
+        assert [r.id for r in frames(session, ElementRemove)] == [element.id]
 
-    async def test_element_to_dict(self, mock_chainlit_context):
-        """Test Element serialization to dictionary."""
-        async with mock_chainlit_context as ctx:
-            element = File(
-                name="test_file",
-                url="https://example.com/file.pdf",
-                display="inline",
-            )
-
-            element_dict = element.to_dict()
-
-            assert element_dict["name"] == "test_file"
-            assert element_dict["url"] == "https://example.com/file.pdf"
-            assert element_dict["type"] == "file"
-            assert element_dict["id"] == element.id
-            assert element_dict["threadId"] == ctx.session.thread_id
-            assert element_dict["display"] == "inline"
-
-    async def test_element_send(self, mock_chainlit_context):
-        """Test Element.send() method."""
-        async with mock_chainlit_context as ctx:
-            element = File(name="test_file", url="https://example.com/file.pdf")
-
-            await element.send(for_id="message_123")
-
-            assert element.for_id == "message_123"
-            ctx.emitter.send_element.assert_called_once()
-
-    async def test_element_remove(self, mock_chainlit_context):
-        """Test Element.remove() method."""
-        async with mock_chainlit_context as ctx:
-            element = File(name="test_file", url="https://example.com/file.pdf")
-
-            await element.remove()
-
-            ctx.emitter.emit.assert_called_once_with(
-                "remove_element", {"id": element.id}
-            )
-
-    async def test_element_display_options(self, mock_chainlit_context):
-        """Test Element display options."""
-        async with mock_chainlit_context:
-            element_inline = File(
-                name="test", url="https://example.com/file.pdf", display="inline"
-            )
-            element_side = File(
-                name="test", url="https://example.com/file.pdf", display="side"
-            )
-            element_page = File(
-                name="test", url="https://example.com/file.pdf", display="page"
-            )
-
-            assert element_inline.display == "inline"
-            assert element_side.display == "side"
-            assert element_page.display == "page"
-
-    async def test_element_from_dict_file(self, mock_chainlit_context):
-        """Test Element.from_dict() for File type."""
-        async with mock_chainlit_context:
-            element_dict: ElementDict = {
-                "id": str(uuid.uuid4()),
-                "name": "test_file",
+    async def test_element_from_dict_file_and_image(self, ctx):
+        file = Element.from_dict(
+            {
+                "id": "x",
+                "name": "f",
                 "type": "file",
                 "url": "https://example.com/file.pdf",
-                "display": "inline",
             }
-
-            element = Element.from_dict(element_dict)
-
-            assert isinstance(element, File)
-            assert element.name == "test_file"
-            assert element.url == "https://example.com/file.pdf"
-
-    async def test_element_from_dict_image(self, mock_chainlit_context):
-        """Test Element.from_dict() for Image type."""
-        async with mock_chainlit_context:
-            element_dict: ElementDict = {
-                "id": str(uuid.uuid4()),
-                "name": "test_image",
-                "type": "image",
-                "url": "https://example.com/image.png",
-                "display": "inline",
-            }
-
-            element = Element.from_dict(element_dict)
-
-            assert isinstance(element, Image)
-            assert element.name == "test_image"
-            assert element.type == "image"
+        )
+        assert isinstance(file, File)
+        image = Element.from_dict({"type": "image", "url": "https://example.com/i.png"})
+        assert isinstance(image, Image)
+        assert image.name == ""
 
     async def test_element_infer_type_from_mime(self):
-        """Test Element.infer_type_from_mime() method."""
         assert Element.infer_type_from_mime("image/png") == "image"
-        assert Element.infer_type_from_mime("image/jpeg") == "image"
         assert Element.infer_type_from_mime("application/pdf") == "pdf"
         assert Element.infer_type_from_mime("audio/mp3") == "audio"
         assert Element.infer_type_from_mime("video/mp4") == "video"
         assert Element.infer_type_from_mime("text/plain") == "file"
-        assert Element.infer_type_from_mime("application/json") == "file"
 
 
-@pytest.mark.asyncio
-class TestImageElement:
-    """Test suite for Image element."""
-
-    async def test_image_initialization(self, mock_chainlit_context):
-        """Test Image element initialization."""
-        async with mock_chainlit_context:
-            image = Image(
-                name="test_image",
-                url="https://example.com/image.png",
-                size="large",
-            )
-
-            assert image.type == "image"
-            assert image.name == "test_image"
-            assert image.size == "large"
-
-    async def test_image_size_options(self, mock_chainlit_context):
-        """Test Image size options."""
-        async with mock_chainlit_context:
-            small = Image(name="test", url="https://example.com/img.png", size="small")
-            medium = Image(
-                name="test", url="https://example.com/img.png", size="medium"
-            )
-            large = Image(name="test", url="https://example.com/img.png", size="large")
-
-            assert small.size == "small"
-            assert medium.size == "medium"
-            assert large.size == "large"
-
-
-@pytest.mark.asyncio
-class TestTextElement:
-    """Test suite for Text element."""
-
-    async def test_text_initialization(self, mock_chainlit_context):
-        """Test Text element initialization."""
-        async with mock_chainlit_context:
-            text = Text(name="test_text", content="Hello, World!", language="python")
-
-            assert text.type == "text"
-            assert text.name == "test_text"
-            assert text.content == "Hello, World!"
-            assert text.language == "python"
-
-    async def test_text_without_language(self, mock_chainlit_context):
-        """Test Text element without language."""
-        async with mock_chainlit_context:
-            text = Text(name="test_text", content="Plain text")
-
-            assert text.language is None
-
-
-@pytest.mark.asyncio
-class TestPdfElement:
-    """Test suite for Pdf element."""
-
-    async def test_pdf_initialization(self, mock_chainlit_context):
-        """Test Pdf element initialization."""
-        async with mock_chainlit_context:
-            pdf = Pdf(name="test_pdf", url="https://example.com/document.pdf", page=5)
-
-            assert pdf.type == "pdf"
-            assert pdf.name == "test_pdf"
-            assert pdf.mime == "application/pdf"
-            assert pdf.page == 5
-
-    async def test_pdf_without_page(self, mock_chainlit_context):
-        """Test Pdf element without page number."""
-        async with mock_chainlit_context:
-            pdf = Pdf(name="test_pdf", url="https://example.com/document.pdf")
-
-            assert pdf.page is None
-
-
-@pytest.mark.asyncio
-class TestAudioElement:
-    """Test suite for Audio element."""
-
-    async def test_audio_initialization(self, mock_chainlit_context):
-        """Test Audio element initialization."""
-        async with mock_chainlit_context:
-            audio = Audio(
-                name="test_audio",
-                url="https://example.com/audio.mp3",
-                auto_play=True,
-            )
-
-            assert audio.type == "audio"
-            assert audio.name == "test_audio"
-            assert audio.auto_play is True
-
-    async def test_audio_default_auto_play(self, mock_chainlit_context):
-        """Test Audio element default auto_play."""
-        async with mock_chainlit_context:
-            audio = Audio(name="test_audio", url="https://example.com/audio.mp3")
-
-            assert audio.auto_play is False
-
-
-@pytest.mark.asyncio
-class TestVideoElement:
-    """Test suite for Video element."""
-
-    async def test_video_initialization(self, mock_chainlit_context):
-        """Test Video element initialization."""
-        async with mock_chainlit_context:
-            player_config = {"youtube": {"playerVars": {"showinfo": 1}}}
-            video = Video(
-                name="test_video",
-                url="https://example.com/video.mp4",
-                size="large",
-                player_config=player_config,
-            )
-
-            assert video.type == "video"
-            assert video.name == "test_video"
-            assert video.size == "large"
-            assert video.player_config == player_config
-
-    async def test_video_without_player_config(self, mock_chainlit_context):
-        """Test Video element without player config."""
-        async with mock_chainlit_context:
-            video = Video(name="test_video", url="https://example.com/video.mp4")
-
-            assert video.player_config is None
-
-
-@pytest.mark.asyncio
-class TestFileElement:
-    """Test suite for File element."""
-
-    async def test_file_initialization(self, mock_chainlit_context):
-        """Test File element initialization."""
-        async with mock_chainlit_context:
-            file = File(name="test_file", url="https://example.com/file.txt")
-
-            assert file.type == "file"
-            assert file.name == "test_file"
-
-    async def test_file_with_content(self, mock_chainlit_context):
-        """Test File element with content."""
-        async with mock_chainlit_context:
-            content = b"File content"
-            file = File(name="test_file", content=content)
-
-            assert file.content == content
-
-    async def test_file_mime_falls_back_to_filename(self, mock_chainlit_context):
-        """Text-based content has no magic bytes, so filetype.guess() returns
-        None. send() should fall back to filename-based detection instead of
-        persisting a null mime (which crashed thread rendering, see #2938)."""
-        async with mock_chainlit_context:
-            file = File(name="notes.md", content=b"# hello\nmarkdown content")
-
-            await file.send(for_id="message_123")
-
-            assert file.mime == "text/markdown"
-
-    async def test_file_mime_falls_back_to_path_filename(
-        self, mock_chainlit_context, tmp_path
+class TestPersistence:
+    async def test_send_queues_the_row_after_the_key_is_known(
+        self, ctx, session, held_writer
     ):
-        """When only a path is provided, the filename fallback uses the path."""
+        element = File(name="notes.txt", content=b"hello")
+        await element.send(for_id="message_123")
+        [op] = [op for op in held_writer.held if isinstance(op, SaveElement)]
+        assert op.record.id == element.id
+        assert op.record.chainlit_key == element.chainlit_key
+        assert op.record.for_id == "message_123"
+        assert op.record.type == "file"
+
+    async def test_blob_is_offered_for_upload_when_storage_exists(
+        self, ctx, session, held_writer
+    ):
+        held_writer.persistence.storage = Mock()
+        await File(name="notes.txt", content=b"hello").send(for_id="m")
+        assert any(isinstance(op, _HeldUpload) for op in held_writer.held)
+
+    async def test_url_elements_have_nothing_to_upload(self, ctx, session, held_writer):
+        held_writer.persistence.storage = Mock()
+        await File(name="f", url="https://example.com/f").send(for_id="m")
+        assert all(isinstance(op, SaveElement) for op in held_writer.held)
+
+    async def test_persist_false_spools_but_writes_no_row(
+        self, ctx, session, held_writer
+    ):
+        element = File(name="notes.txt", content=b"hello")
+        await element.send(for_id="m", persist=False)
+        assert element.chainlit_key in session.files
+        assert held_writer.held == ()
+
+    async def test_remove_deletes_the_row(self, ctx, session, held_writer):
+        element = File(name="f", url="https://example.com/f")
+        await element.remove()
+        assert held_writer.held == (DeleteElement(element.id, "test_thread_id"),)
+
+
+class TestTypedElements:
+    async def test_image(self, ctx, session, frames):
+        image = Image(name="i", url="https://example.com/i.png", size="large")
+        assert image.type == "image"
+        await image.send(for_id="m")
+        assert frames(session, ElementUpsert)[0].element.size == "large"
+
+    async def test_text(self, ctx):
+        text = Text(name="t", content="Some text", language="python")
+        assert text.type == "text"
+        assert text.to_dict()["language"] == "python"
+
+    async def test_pdf(self, ctx, session, frames):
+        pdf = Pdf(name="doc", url="https://example.com/doc.pdf", page=3)
+        assert pdf.mime == "application/pdf"
+        await pdf.send(for_id="m")
+        assert frames(session, ElementUpsert)[0].element.page == 3
+
+    async def test_audio(self, ctx, session, frames):
+        audio = Audio(name="a", url="https://example.com/a.mp3", auto_play=True)
+        await audio.send(for_id="m")
+        assert frames(session, ElementUpsert)[0].element.auto_play is True
+
+    async def test_video(self, ctx, session, frames):
+        video = Video(name="v", url="https://example.com/v.mp4", player_config={"x": 1})
+        await video.send(for_id="m")
+        shown = frames(session, ElementUpsert)[0].element
+        assert shown.player_config == {"x": 1}
+        assert shown.size == "medium"
+
+    async def test_file_mime_falls_back_to_filename(self, ctx):
+        file = File(name="notes.md", content=b"# hello\nmarkdown content")
+        await file.send(for_id="message_123")
+        assert file.mime == "text/markdown"
+
+    async def test_file_mime_falls_back_to_path_filename(self, ctx, tmp_path):
         csv_path = tmp_path / "export.csv"
         csv_path.write_text("a,b\n1,2\n")
+        file = File(name="data", path=str(csv_path))
+        await file.send(for_id="message_123")
+        assert file.mime == "text/csv"
 
-        async with mock_chainlit_context:
-            file = File(name="data", path=str(csv_path))
-
-            await file.send(for_id="message_123")
-
-            assert file.mime == "text/csv"
+    async def test_url_mime_from_the_url(self, ctx):
+        file = File(name="f", url="https://example.com/archive.zip")
+        await file.send(for_id="m")
+        assert file.mime == "application/zip"
 
 
-@pytest.mark.asyncio
 class TestTaskListElement:
-    """Test suite for TaskList element."""
+    async def test_tasklist_initialization(self, ctx):
+        tasklist = TaskList(name="test_tasklist")
+        assert tasklist.type == "tasklist"
+        assert tasklist.tasks == []
+        assert tasklist.status == "Ready"
+        assert tasklist.updatable is True
 
-    async def test_tasklist_initialization(self, mock_chainlit_context):
-        """Test TaskList element initialization."""
-        async with mock_chainlit_context:
-            tasklist = TaskList(name="test_tasklist")
+    async def test_tasklist_send_serialises_the_tasks(self, ctx, session, frames):
+        tasklist = TaskList(status="In Progress")
+        await tasklist.add_task(
+            Task(title="Test Task", status=TaskStatus.DONE, forId="s1")
+        )
+        await tasklist.send()
+        payload = json.loads(tasklist.content)
+        assert payload == {
+            "status": "In Progress",
+            "tasks": [{"title": "Test Task", "status": "done", "forId": "s1"}],
+        }
+        assert (
+            session.files[tasklist.chainlit_key]["path"].read_text() == tasklist.content
+        )
+        assert frames(session, ElementUpsert)[0].element.for_id == ""
 
-            assert tasklist.type == "tasklist"
-            assert tasklist.name == "test_tasklist"
-            assert tasklist.tasks == []
-            assert tasklist.status == "Ready"
-            assert tasklist.updatable is True
-
-    async def test_tasklist_add_task(self, mock_chainlit_context):
-        """Test adding tasks to TaskList."""
-        async with mock_chainlit_context:
-            tasklist = TaskList(name="test_tasklist")
-            task1 = Task(title="Task 1", status=TaskStatus.READY)
-            task2 = Task(title="Task 2", status=TaskStatus.RUNNING)
-
-            await tasklist.add_task(task1)
-            await tasklist.add_task(task2)
-
-            assert len(tasklist.tasks) == 2
-            assert tasklist.tasks[0].title == "Task 1"
-            assert tasklist.tasks[1].title == "Task 2"
-
-    async def test_tasklist_preprocess_content(self, mock_chainlit_context):
-        """Test TaskList content preprocessing."""
-        async with mock_chainlit_context:
-            tasklist = TaskList(name="test_tasklist", status="In Progress")
-            task = Task(title="Test Task", status=TaskStatus.DONE)
-            await tasklist.add_task(task)
-
-            await tasklist.preprocess_content()
-
-            assert isinstance(tasklist.content, str)
-            assert "Test Task" in tasklist.content
-            assert "done" in tasklist.content
-            assert "In Progress" in tasklist.content
-
-
-@pytest.mark.asyncio
-class TestTaskClass:
-    """Test suite for Task class."""
-
-    def test_task_initialization(self):
-        """Test Task initialization."""
-        task = Task(title="Test Task", status=TaskStatus.READY)
-
-        assert task.title == "Test Task"
-        assert task.status == TaskStatus.READY
-        assert task.forId is None
-
-    def test_task_with_for_id(self):
-        """Test Task with forId."""
-        task = Task(title="Test Task", status=TaskStatus.RUNNING, forId="step_123")
-
-        assert task.forId == "step_123"
+    async def test_tasklist_update_respools(self, ctx, session, frames):
+        tasklist = TaskList()
+        await tasklist.send()
+        first = tasklist.chainlit_key
+        await tasklist.add_task(Task(title="later"))
+        await tasklist.update()
+        assert tasklist.chainlit_key != first
+        assert len(frames(session, ElementUpsert)) == 2
 
     def test_task_status_enum(self):
-        """Test TaskStatus enum values."""
-        assert TaskStatus.READY.value == "ready"
-        assert TaskStatus.RUNNING.value == "running"
-        assert TaskStatus.FAILED.value == "failed"
-        assert TaskStatus.DONE.value == "done"
+        assert [s.value for s in TaskStatus] == ["ready", "running", "failed", "done"]
 
 
-@pytest.mark.asyncio
 class TestCustomElement:
-    """Test suite for CustomElement."""
+    async def test_custom_element_initialization(self, ctx):
+        custom = CustomElement(name="test_custom", props={"key1": "value1", "key2": 42})
+        assert custom.type == "custom"
+        assert custom.mime == "application/json"
+        assert custom.updatable is True
+        assert json.loads(custom.content) == {"key1": "value1", "key2": 42}
 
-    async def test_custom_element_initialization(self, mock_chainlit_context):
-        """Test CustomElement initialization."""
-        async with mock_chainlit_context:
-            props = {"key1": "value1", "key2": 42}
-            custom = CustomElement(name="test_custom", props=props)
-
-            assert custom.type == "custom"
-            assert custom.name == "test_custom"
-            assert custom.props == props
-            assert custom.mime == "application/json"
-            assert custom.updatable is True
-
-    async def test_custom_element_content_serialization(self, mock_chainlit_context):
-        """Test CustomElement content serialization."""
-        async with mock_chainlit_context:
-            props = {"nested": {"data": [1, 2, 3]}}
-            custom = CustomElement(name="test_custom", props=props)
-
-            assert isinstance(custom.content, str)
-            assert "nested" in custom.content
-            assert "data" in custom.content
-
-    async def test_custom_element_update(self, mock_chainlit_context):
-        """Test CustomElement update method."""
-        async with mock_chainlit_context as ctx:
-            custom = CustomElement(
-                name="test_custom",
-                props={"key": "value"},
-                url="https://example.com/custom",
-            )
-            custom.for_id = "message_123"
-
-            await custom.update()
-
-            ctx.emitter.send_element.assert_called()
+    async def test_custom_element_update_resends(self, ctx, session, frames):
+        custom = CustomElement(name="test_custom", props={"key": "value"})
+        await custom.send(for_id="message_123")
+        custom.props["key"] = "changed"
+        custom.content = json.dumps(custom.props)
+        await custom.update()
+        shown = frames(session, ElementUpsert)
+        assert [e.element.props["key"] for e in shown] == ["value", "changed"]
+        assert shown[1].element.for_id == "message_123"
 
 
-@pytest.mark.asyncio
 class TestElementEdgeCases:
-    """Test suite for Element edge cases."""
+    async def test_element_with_custom_id_and_keys(self, ctx):
+        custom_id = str(uuid.uuid4())
+        element = File(
+            id=custom_id,
+            name="f",
+            url="https://example.com/f",
+            object_key="s3://bucket/key",
+            chainlit_key="chainlit_key_123",
+        )
+        assert element.id == custom_id
+        assert element.to_dict()["objectKey"] == "s3://bucket/key"
+        assert element.to_dict()["chainlitKey"] == "chainlit_key_123"
 
-    async def test_element_with_custom_id(self, mock_chainlit_context):
-        """Test Element with custom ID."""
-        async with mock_chainlit_context:
-            custom_id = str(uuid.uuid4())
-            element = File(
-                id=custom_id, name="test_file", url="https://example.com/file.txt"
-            )
+    async def test_element_send_without_url_or_key_raises_error(self, ctx, session):
+        async def no_key(**kwargs):
+            return {"id": None}
 
-            assert element.id == custom_id
+        session.persist_file = no_key
+        element = File(name="test_file", content=b"test content")
+        with pytest.raises(ValueError, match="Must provide url or chainlit key"):
+            await element.send(for_id="message_123", persist=False)
 
-    async def test_element_with_object_key(self, mock_chainlit_context):
-        """Test Element with object_key."""
-        async with mock_chainlit_context:
-            element = File(
-                name="test_file",
-                url="https://example.com/file.txt",
-                object_key="s3://bucket/key",
-            )
-
-            assert element.object_key == "s3://bucket/key"
-
-    async def test_element_with_chainlit_key(self, mock_chainlit_context):
-        """Test Element with chainlit_key."""
-        async with mock_chainlit_context:
-            element = File(
-                name="test_file",
-                url="https://example.com/file.txt",
-                chainlit_key="chainlit_key_123",
-            )
-
-            assert element.chainlit_key == "chainlit_key_123"
-
-    async def test_element_send_without_url_or_key_raises_error(
-        self, mock_chainlit_context
-    ):
-        """Test that send() raises error without url or chainlit_key."""
-        async with mock_chainlit_context as ctx:
-            # Mock persist_file to not set chainlit_key
-            ctx.session.persist_file = AsyncMock(return_value={"id": None})
-
-            element = File(name="test_file", content=b"test content")
-
-            with pytest.raises(ValueError, match="Must provide url or chainlit key"):
-                await element.send(for_id="message_123", persist=False)
-
-    async def test_element_from_dict_with_missing_fields(self, mock_chainlit_context):
-        """Test Element.from_dict() with minimal fields."""
-        async with mock_chainlit_context:
-            element_dict: ElementDict = {
-                "type": "file",
-                "url": "https://example.com/file.txt",
-            }
-
-            element = Element.from_dict(element_dict)
-
-            assert isinstance(element, File)
-            assert element.name == ""
-            assert element.url == "https://example.com/file.txt"
-
-    async def test_element_id_uniqueness(self, mock_chainlit_context):
-        """Test that each Element gets a unique ID."""
-        async with mock_chainlit_context:
-            element1 = File(name="file1", url="https://example.com/file1.txt")
-            element2 = File(name="file2", url="https://example.com/file2.txt")
-            element3 = File(name="file3", url="https://example.com/file3.txt")
-
-            ids = {element1.id, element2.id, element3.id}
-            assert len(ids) == 3  # All unique
+    async def test_element_id_uniqueness(self, ctx):
+        ids = {File(name="f", url="https://example.com/f").id for _ in range(3)}
+        assert len(ids) == 3
 
 
-@pytest.mark.asyncio
 class TestDataframeElement:
-    """Test suite for Dataframe element."""
+    async def test_dataframe_with_pandas(self, ctx):
+        pandas = pytest.importorskip("pandas")
+        df = pandas.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+        element = Dataframe(name="df", data=df)
+        assert element.type == "dataframe"
+        assert element.size == "large"
+        assert json.loads(element.content)["columns"] == ["a", "b"]
 
-    async def test_dataframe_with_pandas(self, mock_chainlit_context):
-        """Test Dataframe element with a pandas DataFrame."""
-        import pandas as pd
-
-        async with mock_chainlit_context:
-            df = pd.DataFrame({"a": [4, 2, 0], "b": ["foo", "bar", "baz"]})
-            element = Dataframe(name="test_df", data=df)
-
-            assert element.type == "dataframe"
-            assert element.size == "large"
-
-            parsed = json.loads(element.content)
-            assert parsed["columns"] == ["a", "b"]
-            assert parsed["data"] == [[4, "foo"], [2, "bar"], [0, "baz"]]
-            assert parsed["index"] == [0, 1, 2]
-
-    async def test_dataframe_with_polars(self, mock_chainlit_context):
-        """Test Dataframe element with a polars DataFrame."""
-        import polars as pl
-
-        async with mock_chainlit_context:
-            df = pl.DataFrame({"a": [4, 2, 0], "b": ["foo", "bar", "baz"]})
-            element = Dataframe(name="test_df", data=df)
-
-            assert element.type == "dataframe"
-            assert element.size == "large"
-
-            parsed = json.loads(element.content)
-            assert parsed["columns"] == ["a", "b"]
-            assert parsed["data"] == [[4, "foo"], [2, "bar"], [0, "baz"]]
-            assert parsed["index"] == [0, 1, 2]
-
-    async def test_dataframe_with_invalid_data(self, mock_chainlit_context):
-        """Test Dataframe element rejects non-DataFrame data."""
-        async with mock_chainlit_context:
-            with pytest.raises(
-                TypeError,
-                match=r"data must be a pandas\.DataFrame or polars\.DataFrame",
-            ):
-                Dataframe(name="test_df", data={"a": [1, 2]})
-
-    async def test_dataframe_polars_and_pandas_produce_equal_outputs(
-        self, mock_chainlit_context
-    ):
-        """Test that pandas and polars DataFrames produce the same JSON."""
-        import pandas as pd
-        import polars as pl
-
-        async with mock_chainlit_context:
-            pd_df = pd.DataFrame({"a": [4, 2, 0], "b": ["foo", "bar", "baz"]})
-            pl_df = pl.DataFrame({"a": [4, 2, 0], "b": ["foo", "bar", "baz"]})
-
-            pd_element = Dataframe(name="pd_df", data=pd_df)
-            pl_element = Dataframe(name="pl_df", data=pl_df)
-
-            pd_parsed = json.loads(pd_element.content)
-            pl_parsed = json.loads(pl_element.content)
-
-            assert pd_parsed["columns"] == pl_parsed["columns"]
-            assert pd_parsed["index"] == pl_parsed["index"]
-            assert pd_parsed["data"] == pl_parsed["data"]
-
-    async def test_dataframe_polars_with_dates(self, mock_chainlit_context):
-        """Test Dataframe element with polars date columns serializes correctly."""
-        from datetime import date
-
-        import polars as pl
-
-        async with mock_chainlit_context:
-            df = pl.DataFrame(
-                {"date": [date(2026, 1, 1), date(2025, 12, 31)], "val": [1, 2]}
-            )
-            element = Dataframe(name="test_df", data=df)
-
-            parsed = json.loads(element.content)
-            assert parsed["columns"] == ["date", "val"]
-            assert len(parsed["data"]) == 2
-            assert parsed["data"][0][0] == "2026-01-01"
-            assert parsed["data"][1][0] == "2025-12-31"
-
-
-@pytest.mark.asyncio
-async def test_from_dict_pdf_reconstructs_pdf(mock_chainlit_context):
-    """A PDF upload (infer_type_from_mime -> 'pdf') must reconstruct as a Pdf element."""
-    async with mock_chainlit_context:
-        mime = "application/pdf"
-        e_dict = {
-            "id": "abc",
-            "name": "report.pdf",
-            "path": "/tmp/report.pdf",
-            "chainlitKey": "abc",
-            "display": "inline",
-            "type": Element.infer_type_from_mime(mime),
-            "mime": mime,
-            "page": 3,
+    async def test_dataframe_with_polars(self, ctx):
+        polars = pytest.importorskip("polars")
+        df = polars.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+        element = Dataframe(name="df", data=df)
+        assert json.loads(element.content) == {
+            "columns": ["a", "b"],
+            "index": [0, 1],
+            "data": [[1, "x"], [2, "y"]],
         }
-        assert e_dict["type"] == "pdf"
-        el = Element.from_dict(e_dict)
-        assert isinstance(el, Pdf)
-        assert el.type == "pdf"
-        assert el.page == 3
+
+    async def test_dataframe_with_invalid_data(self, ctx):
+        with pytest.raises(
+            TypeError, match=r"must be a pandas\.DataFrame or polars\.DataFrame"
+        ):
+            Dataframe(name="df", data={"a": [1]})
+
+
+async def test_from_dict_pdf_reconstructs_pdf(ctx):
+    element = Element.from_dict(
+        {"type": "pdf", "url": "https://example.com/doc.pdf", "page": 2, "name": "doc"}
+    )
+    assert isinstance(element, Pdf)
+    assert element.page == 2

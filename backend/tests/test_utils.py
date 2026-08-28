@@ -1,7 +1,7 @@
 import os
 import tempfile
 from datetime import UTC, datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import click
 import pytest
@@ -154,22 +154,6 @@ class TestWrapUserFunction:
 
             assert result == "hello"
 
-    async def test_wrap_user_function_with_task(self, mock_chainlit_context):
-        """Test wrapping a function with task management."""
-        async with mock_chainlit_context as ctx:
-            ctx.emitter.task_acquire = AsyncMock()
-            ctx.emitter.task_release = AsyncMock()
-
-            def user_func(value):
-                return value * 2
-
-            wrapped = wrap_user_function(user_func, with_task=True)
-            result = await wrapped(10)
-
-            assert result == 20
-            ctx.emitter.task_acquire.assert_called_once()
-            ctx.emitter.task_release.assert_called_once()
-
     async def test_wrap_user_function_handles_exception(self, mock_chainlit_context):
         """Test that wrapped function handles exceptions."""
         async with mock_chainlit_context:
@@ -182,26 +166,6 @@ class TestWrapUserFunction:
 
             # Should return None when exception occurs
             assert result is None
-
-    async def test_wrap_user_function_with_task_handles_exception(
-        self, mock_chainlit_context
-    ):
-        """Test that wrapped function with task handles exceptions."""
-        async with mock_chainlit_context as ctx:
-            ctx.emitter.task_acquire = AsyncMock()
-            ctx.emitter.task_release = AsyncMock()
-
-            def user_func():
-                raise ValueError("Test error")
-
-            with patch("chainlit.utils.logger") as mock_logger:
-                wrapped = wrap_user_function(user_func, with_task=True)
-                result = await wrapped()
-
-                assert result is None
-                ctx.emitter.task_acquire.assert_called_once()
-                ctx.emitter.task_release.assert_called_once()
-                mock_logger.exception.assert_called_once()
 
     async def test_wrap_user_function_preserves_function_metadata(
         self, mock_chainlit_context

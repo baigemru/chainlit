@@ -7,13 +7,8 @@ from datetime import UTC, datetime
 from typing import Callable
 
 import click
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from packaging import version
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from chainlit.auth import ensure_jwt_secret
-from chainlit.context import context
 from chainlit.logger import logger
 
 
@@ -27,9 +22,14 @@ def timestamp_utc(timestamp: float):
     return dt.isoformat() + "Z"
 
 
-def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
+def wrap_user_function(user_function: Callable) -> Callable:
     """
     Wraps a user-defined function to accept arguments as a dictionary.
+
+    The wrapper only maps positional arguments onto the function's parameter
+    names and logs an exception instead of raising it. Task bookkeeping --
+    which the old ``with_task`` flag did through the emitter -- belongs to
+    ``chainlit.runner`` now, which runs every hook of the session itself.
 
     Args:
         user_function (Callable): The user-defined function to wrap.
@@ -49,12 +49,6 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
         }
 
         try:
-            # Inside the try so a cancellation landing during the acquire's
-            # own emit await still reaches the paired release in the
-            # finally — an unpaired acquire poisons the owner counter.
-            if with_task:
-                await context.emitter.task_acquire()
-
             # Call the user-defined function with the arguments
             if inspect.iscoroutinefunction(user_function):
                 return await user_function(**params_values)
@@ -64,15 +58,6 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
             pass
         except Exception as e:
             logger.exception(e)
-            if with_task:
-                from chainlit.message import ErrorMessage
-
-                await ErrorMessage(
-                    content=str(e) or e.__class__.__name__, author="Error"
-                ).send()
-        finally:
-            if with_task:
-                await context.emitter.task_release()
 
     return wrapper
 
@@ -130,47 +115,3 @@ def check_file(target: str):
 
     if not os.path.exists(target):
         raise click.BadParameter(f"File does not exist: {target}")
-
-
-def mount_chainlit(app: FastAPI, target: str, path="/chainlit"):
-    from chainlit.config import config, load_module
-    from chainlit.server import app as chainlit_app
-
-    config.run.debug = os.environ.get("CHAINLIT_DEBUG", False)
-    os.environ["CHAINLIT_ROOT_PATH"] = path
-
-    api_full_path = path
-
-    if app.root_path:
-        parent_root_path = app.root_path.rstrip("/")
-        api_full_path = parent_root_path + path
-        os.environ["CHAINLIT_PARENT_ROOT_PATH"] = parent_root_path
-
-    check_file(target)
-    # Load the module provided by the user
-    config.run.module_name = target
-    load_module(config.run.module_name)
-
-    ensure_jwt_secret()
-
-    class ChainlitMiddleware(BaseHTTPMiddleware):
-        """Middleware to handle path routing for submounted Chainlit applications.
-
-        When Chainlit is submounted within a larger FastAPI application, its default route
-        `@router.get("/{full_path:path}")` can conflict with the main app's routing. This
-        middleware ensures requests are only forwarded to Chainlit if they match the
-        designated subpath, preventing routing collisions.
-
-        If a request's path doesn't start with the configured subpath, the middleware
-        returns a 404 response instead of forwarding to Chainlit's default route.
-        """
-
-        async def dispatch(self, request: Request, call_next):
-            if not request.url.path.startswith(api_full_path):
-                return JSONResponse(status_code=404, content={"detail": "Not found"})
-
-            return await call_next(request)
-
-    chainlit_app.add_middleware(ChainlitMiddleware)
-
-    app.mount(path, chainlit_app)

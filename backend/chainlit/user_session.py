@@ -1,8 +1,14 @@
+"""``cl.user_session`` -- the application's own per-conversation state.
+
+A thin view over ``Session.state``. The dict is the session's, not this
+module's: it is what persistence writes into thread metadata and what a
+resume reads back, so keeping a second copy here keyed by session id was a
+second thing to keep in step, and a leak once the session was gone.
+"""
+
 from typing import Callable, Dict, Generic, Optional, TypeVar
 
 from chainlit.context import context
-
-user_sessions: Dict[str, Dict] = {}
 
 T = TypeVar("T")
 
@@ -17,16 +23,11 @@ class UserSession:
         if not context.session:
             return default
 
-        if context.session.id not in user_sessions:
-            # Create a new user session
-            user_sessions[context.session.id] = {}
-
-        user_session = user_sessions[context.session.id]
+        user_session: Dict = context.session.state
 
         # Copy important fields from the session
         user_session["id"] = context.session.id
         user_session["env"] = context.session.user_env
-        user_session["chat_settings"] = context.session.chat_settings
         user_session["user"] = context.session.user
         user_session["chat_profile"] = context.session.chat_profile
         user_session["client_type"] = context.session.client_type
@@ -37,11 +38,7 @@ class UserSession:
         if not context.session:
             return None
 
-        if context.session.id not in user_sessions:
-            user_sessions[context.session.id] = {}
-
-        user_session = user_sessions[context.session.id]
-        user_session[key] = value
+        context.session.state[key] = value
 
     def create_accessor(
         self, key: str, default: T, *, apply_fn: Optional[Callable[[T], T]] = None

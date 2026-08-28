@@ -3,8 +3,8 @@ from typing import Any, Dict, Optional, Union
 from google.auth import default
 from google.cloud import storage  # type: ignore
 from google.oauth2 import service_account
+from litestar.concurrency import sync_to_thread
 
-from chainlit import make_async
 from chainlit.data.storage_clients.base import BaseStorageClient, storage_expiry_time
 from chainlit.logger import logger
 
@@ -46,7 +46,7 @@ class GCSStorageClient(BaseStorageClient):
         )
 
     async def get_read_url(self, object_key: str) -> str:
-        return await make_async(self.sync_get_read_url)(object_key)
+        return await sync_to_thread(self.sync_get_read_url, object_key)
 
     def sync_upload_file(
         self,
@@ -85,8 +85,8 @@ class GCSStorageClient(BaseStorageClient):
         overwrite: bool = True,
         content_disposition: str | None = None,
     ) -> Dict[str, Any]:
-        return await make_async(self.sync_upload_file)(
-            object_key, data, mime, overwrite
+        return await sync_to_thread(
+            self.sync_upload_file, object_key, data, mime, overwrite
         )
 
     def sync_delete_file(self, object_key: str) -> bool:
@@ -98,7 +98,7 @@ class GCSStorageClient(BaseStorageClient):
             return False
 
     async def delete_file(self, object_key: str) -> bool:
-        return await make_async(self.sync_delete_file)(object_key)
+        return await sync_to_thread(self.sync_delete_file, object_key)
 
     async def close(self) -> None:
         self.client.close()

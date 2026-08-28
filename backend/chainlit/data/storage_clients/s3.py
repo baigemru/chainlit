@@ -2,8 +2,8 @@ import os
 from typing import Any, Dict, Union
 
 import boto3  # type: ignore
+from litestar.concurrency import sync_to_thread
 
-from chainlit import make_async
 from chainlit.data.storage_clients.base import BaseStorageClient, storage_expiry_time
 from chainlit.logger import logger
 
@@ -34,7 +34,7 @@ class S3StorageClient(BaseStorageClient):
             return object_key
 
     async def get_read_url(self, object_key: str) -> str:
-        return await make_async(self.sync_get_read_url)(object_key)
+        return await sync_to_thread(self.sync_get_read_url, object_key)
 
     def sync_upload_file(
         self,
@@ -72,8 +72,13 @@ class S3StorageClient(BaseStorageClient):
         overwrite: bool = True,
         content_disposition: str | None = None,
     ) -> Dict[str, Any]:
-        return await make_async(self.sync_upload_file)(
-            object_key, data, mime, overwrite, content_disposition
+        return await sync_to_thread(
+            self.sync_upload_file,
+            object_key,
+            data,
+            mime,
+            overwrite,
+            content_disposition,
         )
 
     def sync_delete_file(self, object_key: str) -> bool:
@@ -85,7 +90,7 @@ class S3StorageClient(BaseStorageClient):
             return False
 
     async def delete_file(self, object_key: str) -> bool:
-        return await make_async(self.sync_delete_file)(object_key)
+        return await sync_to_thread(self.sync_delete_file, object_key)
 
     async def close(self) -> None:
         await self.client.close()

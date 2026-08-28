@@ -1,15 +1,20 @@
-import uuid
-from typing import Dict, Optional
+"""A button the application attaches to a message.
 
-from dataclasses_json import DataClassJsonMixin
-from pydantic import Field
-from pydantic.dataclasses import dataclass
+A plain dataclass: the wire shape is ``chainlit.protocol.payloads.Action``
+and the emitter converts ``to_dict()`` into it, so the class only has to
+produce that dict. ``forId`` is spelled the way the wire spells it because
+the runner rebuilds an ``Action`` straight from the clicked payload.
+"""
+
+import uuid
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, Mapping, Optional
 
 from chainlit.context import context
 
 
 @dataclass
-class Action(DataClassJsonMixin):
+class Action:
     # Name of the action, this should be used in the action_callback
     name: str
     # The parameters to call this action with.
@@ -23,11 +28,21 @@ class Action(DataClassJsonMixin):
     # This should not be set manually, only used internally.
     forId: Optional[str] = None
     # The ID of the action
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
-    async def send(self, for_id: str):
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, action: Mapping[str, Any]) -> "Action":
+        return cls(**{k: v for k, v in action.items() if k in _FIELDS})
+
+    async def send(self, for_id: str) -> None:
         self.forId = for_id
-        await context.emitter.emit("action", self.to_dict())
+        context.emitter.add_action(self.to_dict())
 
-    async def remove(self):
-        await context.emitter.emit("remove_action", self.to_dict())
+    async def remove(self) -> None:
+        context.emitter.remove_action(self.id)
+
+
+_FIELDS = frozenset(Action.__dataclass_fields__)

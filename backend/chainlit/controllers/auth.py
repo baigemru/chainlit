@@ -555,14 +555,6 @@ class AuthController(Controller):
             content={"success": True},
             cookies=[cleared_auth_cookie(security)] if security is not None else [],
         )
-        if config.code.on_logout:
-            # A callback used as a notification hook returns nothing. FastAPI
-            # merged the injected response's headers in regardless; here the
-            # return value *is* the response, so a ``None`` would throw the
-            # cookie deletion away and leave the browser logged in.
-            result = await config.code.on_logout(request, response)
-            if result is not None:
-                return result
         return response
 
     # --- oauth ---

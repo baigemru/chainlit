@@ -1,9 +1,7 @@
 from abc import abstractmethod
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
-
-from pydantic import Field
-from pydantic.dataclasses import dataclass
 
 from chainlit.types import InputWidgetType
 
@@ -80,8 +78,8 @@ class Select(InputWidget):
     initial: Optional[str] = None
     initial_index: Optional[int] = None
     initial_value: Optional[str] = None
-    values: List[str] = Field(default_factory=list)
-    items: Dict[str, str] = Field(default_factory=dict)
+    values: List[str] = field(default_factory=list)
+    items: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(
         self,
@@ -175,8 +173,8 @@ class Tags(InputWidget):
     """Useful to create an input for an array of strings."""
 
     type: InputWidgetType = "tags"
-    initial: List[str] = Field(default_factory=list)
-    values: List[str] = Field(default_factory=list)
+    initial: List[str] = field(default_factory=list)
+    values: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -195,9 +193,9 @@ class MultiSelect(InputWidget):
     """Useful to create a multi-select input."""
 
     type: InputWidgetType = "multiselect"
-    initial: List[str] = Field(default_factory=list)
-    values: List[str] = Field(default_factory=list)
-    items: Dict[str, str] = Field(default_factory=dict)
+    initial: List[str] = field(default_factory=list)
+    values: List[str] = field(default_factory=list)
+    items: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(
         self,
@@ -257,8 +255,8 @@ class RadioGroup(InputWidget):
     initial: Optional[str] = None
     initial_index: Optional[int] = None
     initial_value: Optional[str] = None
-    values: List[str] = Field(default_factory=list)
-    items: Dict[str, str] = Field(default_factory=dict)
+    values: List[str] = field(default_factory=list)
+    items: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(
         self,
@@ -307,7 +305,7 @@ class RadioGroup(InputWidget):
 class Tab:
     id: str
     label: str
-    inputs: list[InputWidget] = Field(default_factory=list, exclude=True)
+    inputs: list[InputWidget] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {

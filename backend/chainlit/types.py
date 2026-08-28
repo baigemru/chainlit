@@ -1,29 +1,29 @@
-from enum import Enum
+"""The shapes the ``cl.*`` API hands to and takes from application code.
+
+Dictionaries and plain dataclasses only. The wire has its own structs in
+``chainlit.protocol``; what lives here is what an application author sees --
+the ``ThreadDict`` a resume hook receives, the ``ChatProfile`` a callback
+returns, the response of an ask. Nothing here validates: the conversion at
+the emitter is the validation, and a second schema in front of it would be a
+second thing to keep in step.
+"""
+
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
-    Generic,
     List,
     Literal,
     NotRequired,
     Optional,
-    Protocol,
     TypedDict,
-    TypeVar,
-    Union,
 )
 
 if TYPE_CHECKING:
     from chainlit.element import ElementDict
     from chainlit.step import StepDict
-
-from dataclasses import field
-
-from dataclasses_json import DataClassJsonMixin
-from pydantic import BaseModel
-from pydantic.dataclasses import dataclass
 
 InputWidgetType = Literal[
     "switch",
@@ -65,152 +65,17 @@ class ThreadDict(TypedDict):
     steps: List["StepDict"]
     elements: Optional[List["ElementDict"]]
     # Thread this one was switched from, when spawned by set_chat_profile.
-    # NotRequired: data layers unaware of it keep constructing ThreadDict.
     parentThreadId: NotRequired[Optional[str]]
 
 
-class Pagination(BaseModel):
-    first: int
-    cursor: Optional[str] = None
-
-
-class ThreadFilter(BaseModel):
-    feedback: Literal[0, 1] | None = None
-    userId: str | None = None
-    search: str | None = None
-
-
-@dataclass
-class PageInfo:
-    hasNextPage: bool
-    startCursor: Optional[str]
-    endCursor: Optional[str]
-
-    def to_dict(self):
-        return {
-            "hasNextPage": self.hasNextPage,
-            "startCursor": self.startCursor,
-            "endCursor": self.endCursor,
-        }
-
-    @classmethod
-    def from_dict(cls, page_info_dict: Dict) -> "PageInfo":
-        hasNextPage = page_info_dict.get("hasNextPage", False)
-        startCursor = page_info_dict.get("startCursor", None)
-        endCursor = page_info_dict.get("endCursor", None)
-        return cls(
-            hasNextPage=hasNextPage, startCursor=startCursor, endCursor=endCursor
-        )
-
-
-T = TypeVar("T", covariant=True)
-
-
-class HasFromDict(Protocol[T]):
-    @classmethod
-    def from_dict(cls, obj_dict: Any) -> T:
-        raise NotImplementedError
-
-
-@dataclass
-class PaginatedResponse(Generic[T]):
-    pageInfo: PageInfo
-    data: List[T]
-
-    def to_dict(self):
-        return {
-            "pageInfo": self.pageInfo.to_dict(),
-            "data": [
-                (d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) else d)
-                for d in self.data
-            ],
-        }
-
-    @classmethod
-    def from_dict(
-        cls, paginated_response_dict: Dict, the_class: HasFromDict[T]
-    ) -> "PaginatedResponse[T]":
-        pageInfo = PageInfo.from_dict(paginated_response_dict.get("pageInfo", {}))
-
-        data = [the_class.from_dict(d) for d in paginated_response_dict.get("data", [])]
-
-        return cls(pageInfo=pageInfo, data=data)
-
-
-@dataclass
-class FileSpec(DataClassJsonMixin):
-    accept: Union[List[str], Dict[str, List[str]]]
-    max_files: int
-    max_size_mb: int
-
-
-@dataclass
-class ActionSpec(DataClassJsonMixin):
-    keys: List[str]
-
-
-@dataclass
-class AskSpec(DataClassJsonMixin):
-    """Specification for asking the user."""
-
-    timeout: int
-    type: Literal["text", "file", "action", "element"]
-    step_id: str
-
-
-@dataclass
-class AskFileSpec(FileSpec, AskSpec, DataClassJsonMixin):
-    """Specification for asking the user a file."""
-
-
-@dataclass
-class AskActionSpec(ActionSpec, AskSpec, DataClassJsonMixin):
-    """Specification for asking the user an action"""
-
-
-@dataclass
-class AskElementSpec(AskSpec, DataClassJsonMixin):
-    """Specification for asking the user a custom element"""
-
-    element_id: str
-
-
-class FileReference(TypedDict):
-    id: str
-
-
 class FileDict(TypedDict):
+    """One spooled upload, as ``Session.files`` holds it."""
+
     id: str
     name: str
     path: Path
     size: int
     type: str
-
-
-class MessagePayload(TypedDict):
-    message: "StepDict"
-    fileReferences: Optional[List[FileReference]]
-
-
-class InputAudioChunkPayload(TypedDict):
-    isStart: bool
-    mimeType: str
-    elapsedTime: float
-    data: bytes
-
-
-@dataclass
-class InputAudioChunk:
-    isStart: bool
-    mimeType: str
-    elapsedTime: float
-    data: bytes
-
-
-class OutputAudioChunk(TypedDict):
-    track: str
-    mimeType: str
-    data: bytes
 
 
 @dataclass
@@ -232,49 +97,21 @@ class AskActionResponse(TypedDict):
 
 
 class AskElementResponse(TypedDict, total=False):
+    """Reply of a custom-element ask: the props travel nested, not spread."""
+
     submitted: bool
+    props: Dict[str, Any]
 
 
-class UpdateThreadRequest(BaseModel):
-    threadId: str
-    name: str
+class _AsDict:
+    """``to_dict`` for the dataclasses the project controller serialises."""
 
-
-class ShareThreadRequest(BaseModel):
-    threadId: str
-    isShared: bool
-
-
-class DeleteThreadRequest(BaseModel):
-    threadId: str
-
-
-class DeleteFeedbackRequest(BaseModel):
-    feedbackId: str
-
-
-class GetThreadsRequest(BaseModel):
-    pagination: Pagination
-    filter: ThreadFilter
-
-
-class CallActionRequest(BaseModel):
-    action: Dict
-    sessionId: str
-
-
-class ElementRequest(BaseModel):
-    element: Dict
-    sessionId: str
-
-
-class Theme(str, Enum):
-    light = "light"
-    dark = "dark"
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)  # type: ignore[call-overload]
 
 
 @dataclass
-class Starter(DataClassJsonMixin):
+class Starter(_AsDict):
     """Specification for a starter that can be chosen by the user at the thread start."""
 
     label: str
@@ -284,7 +121,7 @@ class Starter(DataClassJsonMixin):
 
 
 @dataclass
-class StarterCategory(DataClassJsonMixin):
+class StarterCategory(_AsDict):
     """A category/group of starters with an optional icon."""
 
     label: str
@@ -293,7 +130,7 @@ class StarterCategory(DataClassJsonMixin):
 
 
 @dataclass
-class ChatProfile(DataClassJsonMixin):
+class ChatProfile(_AsDict):
     """Specification for a chat profile that can be chosen by the user at the thread start."""
 
     name: str
@@ -303,9 +140,6 @@ class ChatProfile(DataClassJsonMixin):
     default: bool = False
     starters: Optional[List[Starter]] = None
     config_overrides: Any = None
-
-
-FeedbackStrategy = Literal["BINARY"]
 
 
 class CommandDict(TypedDict):
@@ -339,18 +173,13 @@ class Feedback:
     comment: Optional[str] = None
 
 
-class UpdateFeedbackRequest(BaseModel):
-    feedback: Feedback
-    sessionId: str
-
-
 @dataclass
 class ProfileStartInfo:
     """Argument of the ``@cl.on_profile_start`` hook.
 
     ``payload`` travels as a hook argument, not through
     ``user_session["transit_message"]``: that key belongs entirely to the
-    legacy ``set_chat_profile`` hand-off and the two must not be mixed.
+    ``set_chat_profile`` hand-off and the two must not be mixed.
 
     ``source`` tells a manual switch in the selector (``"client"``) from a
     programmatic one made by the app (``"server"``) — an app needs this to

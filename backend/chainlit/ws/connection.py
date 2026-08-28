@@ -105,6 +105,8 @@ def make_websocket_handler(
     make_session: Callable[[str, Hello, Any], Session],
     thread_store: Optional[ThreadStore] = None,
     on_arrival: Optional[Callable[[Arrival], Awaitable[None]]] = None,
+    on_ready: Optional[Callable[[Arrival], Awaitable[None]]] = None,
+    on_disconnect: Optional[Callable[[Session], Awaitable[None]]] = None,
     heartbeat_ms: int = HEARTBEAT_INTERVAL_MS,
 ) -> Any:
     """Build the route handler, closing over what the application supplies.
@@ -113,6 +115,14 @@ def make_websocket_handler(
     owned by the plugin instance: a module-level one would be the old
     process-wide dict again, and two applications in one interpreter -- two
     tests, most of the time -- would see each other's sessions.
+
+    Two application hooks bracket the handshake, and the split is about
+    frame order. ``on_arrival`` runs before ``session.ready`` goes out and
+    may only change *state* -- claim a handover, load a transcript -- because
+    anything it sent would land ahead of the frame the client resets its
+    buffer on. ``on_ready`` runs after the restore has replayed the screen,
+    and is where the application's hooks are launched: their first messages
+    have to land on top of the rebuilt feed, not under it.
     """
 
     @websocket("/ws")
@@ -165,7 +175,11 @@ def make_websocket_handler(
 
         try:
             await _serve(
-                socket, session, thread_store=thread_store, heartbeat_ms=heartbeat_ms
+                socket,
+                session,
+                thread_store=thread_store,
+                heartbeat_ms=heartbeat_ms,
+                on_ready=(lambda: on_ready(arrival)) if on_ready is not None else None,
             )
         finally:
             # The socket is gone; the session is not. It keeps its queue,
@@ -174,6 +188,8 @@ def make_websocket_handler(
             session.connected = False
             registry.mark_disconnected(session.id)
             await session.outbound.detach()
+            if on_disconnect is not None:
+                await on_disconnect(session)
 
     return chainlit_websocket
 
@@ -184,6 +200,7 @@ async def _serve(
     *,
     thread_store: Optional[ThreadStore],
     heartbeat_ms: int,
+    on_ready: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> None:
     """Run the reader, the restore and the heartbeat until the socket goes.
 
@@ -204,6 +221,11 @@ async def _serve(
             # reload arrives *during* this, which is exactly what the
             # restore has to notice.
             await restore(session, thread_store=thread_store)
+            if on_ready is not None:
+                # After the replay, inside the group: a hook that fails is
+                # this connection's failure, and one that launches work
+                # launches it onto the session, which outlives the group.
+                await on_ready()
     except* WebSocketDisconnect:
         pass
     except* Exception as errors:
@@ -262,7 +284,7 @@ async def _dispatch(session: Session, message: ClientMsg) -> None:
     runner = session.runner
     if isinstance(message, MessageSend):
         if runner is not None:
-            await runner.on_message(session, message.message)
+            await runner.on_message(session, message.message, message.file_references)
         return
 
     if isinstance(message, Stop):

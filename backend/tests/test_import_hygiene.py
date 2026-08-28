@@ -7,9 +7,9 @@ the list below is the whole of what is left to port, so adding an import of a
 departing library anywhere fails here, and removing the last one from a module
 requires deleting its line.
 
-``starlette`` is deliberately absent from the banned list. It cannot leave the
-install while the old FastAPI stack is still running -- so banning it would be
-a rule the project has already decided not to follow.
+``starlette`` is deliberately absent from the banned list. ``config.py`` still
+types the header-auth callback with its ``Headers``, and the public-API test
+pins that signature; it leaves with them.
 """
 
 import ast
@@ -35,23 +35,7 @@ REBUILT = (
 # This is the port's remaining surface, written down. Shrink it as modules
 # move over; it must never grow.
 REMAINING: dict[str, frozenset[str]] = {
-    "__init__.py": frozenset({"pydantic"}),
-    "action.py": frozenset({"dataclasses_json", "pydantic"}),
-    "auth/__init__.py": frozenset({"fastapi"}),
-    "auth/cookie.py": frozenset({"fastapi"}),
-    "callbacks.py": frozenset({"fastapi"}),
-    "chat_settings.py": frozenset({"pydantic"}),
-    "config.py": frozenset({"fastapi", "pydantic"}),
-    "context.py": frozenset({"lazify"}),
-    "data/acl.py": frozenset({"fastapi"}),
-    "element.py": frozenset({"pydantic"}),
-    "input_widget.py": frozenset({"pydantic"}),
-    "mode.py": frozenset({"dataclasses_json"}),
-    "server.py": frozenset({"fastapi"}),
-    "sync.py": frozenset({"asyncer", "syncer"}),
-    "types.py": frozenset({"dataclasses_json", "pydantic"}),
-    "user.py": frozenset({"dataclasses_json", "pydantic"}),
-    "utils.py": frozenset({"fastapi"}),
+    "config.py": frozenset({"pydantic"}),
 }
 
 
@@ -106,9 +90,9 @@ def test_the_port_only_ever_shrinks():
 def _closure(entry_points: tuple[str, ...]) -> set[str]:
     """Every module inside chainlit reachable from these packages.
 
-    Static, not by importing: ``chainlit/__init__.py`` still pulls the whole
-    old stack in, so a runtime probe would answer a question about the parent
-    package rather than about these two. Following the import graph on disk
+    Static, not by importing: ``chainlit/__init__.py`` still pulls in every
+    module of the package, so a runtime probe would answer a question about
+    the parent package rather than about these. Following the import graph on disk
     asks what the rebuilt code itself depends on, which is the thing that has
     to stay clean while the port finishes.
     """

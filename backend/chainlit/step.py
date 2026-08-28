@@ -5,19 +5,41 @@ import time
 import uuid
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Dict, List, NotRequired, Optional, TypedDict, Union
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from literalai import BaseGeneration
 from literalai.observability.step import StepType, TrueStepType
 
+from chainlit import persist
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps
-from chainlit.data import get_data_layer
 from chainlit.element import Element
 from chainlit.logger import logger
-from chainlit.persist_barrier import create_persist_task
 from chainlit.types import FeedbackDict
 from chainlit.utils import utc_now
+
+# Tasks the synchronous context manager launches. Held here because a task
+# nothing references can be collected mid-flight; dropped by the callback
+# once done.
+_background: "set[asyncio.Task[Any]]" = set()
+
+
+def _spawn(coro: "Coroutine[Any, Any, Any]") -> "asyncio.Task[Any]":
+    task = asyncio.ensure_future(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return task
 
 
 def check_add_step_in_cot(step: "Step"):
@@ -208,7 +230,6 @@ class Step:
     default_open: Optional[bool]
     auto_collapse: Optional[bool]
     elements: Optional[List[Element]]
-    fail_on_persist_error: bool
 
     def __init__(
         self,
@@ -229,7 +250,8 @@ class Step:
         time.sleep(0.001)
         self._input = ""
         self._output = ""
-        self.thread_id = thread_id or context.session.thread_id
+        # Minted with the session; Optional only on the bare constructor.
+        self.thread_id = thread_id or cast(str, context.session.thread_id)
         self.name = name or ""
         self.type = type
         self.id = id or str(uuid.uuid4())
@@ -252,7 +274,6 @@ class Step:
 
         self.streaming = False
         self.persisted = False
-        self.fail_on_persist_error = False
 
     def _clean_content(self, content):
         """
@@ -351,23 +372,15 @@ class Step:
             self.streaming = False
 
         step_dict = self.to_dict()
-        data_layer = get_data_layer()
-
-        if data_layer:
-            try:
-                create_persist_task(data_layer.update_step(step_dict.copy()))
-            except Exception as e:
-                if self.fail_on_persist_error:
-                    raise e
-                logger.error(f"Failed to persist step update: {e!s}")
+        persist.save_step(step_dict)
 
         tasks = [el.send(for_id=self.id) for el in self.elements]
         await asyncio.gather(*tasks)
 
         if not check_add_step_in_cot(self):
-            await context.emitter.update_step(stub_step(self))
+            context.emitter.update_step(stub_step(self))
         else:
-            await context.emitter.update_step(step_dict)
+            context.emitter.update_step(step_dict)
 
         return True
 
@@ -375,18 +388,8 @@ class Step:
         """
         Remove a step already sent to the UI.
         """
-        step_dict = self.to_dict()
-        data_layer = get_data_layer()
-
-        if data_layer:
-            try:
-                create_persist_task(data_layer.delete_step(self.id))
-            except Exception as e:
-                if self.fail_on_persist_error:
-                    raise e
-                logger.error(f"Failed to persist step deletion: {e!s}")
-
-        await context.emitter.delete_step(step_dict)
+        persist.delete_step(self.id)
+        context.emitter.delete_step(self.id)
 
         return True
 
@@ -401,25 +404,16 @@ class Step:
             self.streaming = False
 
         step_dict = self.to_dict()
-
-        data_layer = get_data_layer()
-
-        if data_layer:
-            try:
-                create_persist_task(data_layer.create_step(step_dict.copy()))
-                self.persisted = True
-            except Exception as e:
-                if self.fail_on_persist_error:
-                    raise e
-                logger.error(f"Failed to persist step creation: {e!s}")
+        persist.save_step(step_dict)
+        self.persisted = True
 
         tasks = [el.send(for_id=self.id) for el in self.elements]
         await asyncio.gather(*tasks)
 
         if not check_add_step_in_cot(self):
-            await context.emitter.send_step(stub_step(self))
+            context.emitter.send_step(stub_step(self))
         else:
-            await context.emitter.send_step(step_dict)
+            context.emitter.send_step(step_dict)
 
         return self
 
@@ -445,15 +439,15 @@ class Step:
         assert self.id
 
         if not check_add_step_in_cot(self):
-            await context.emitter.send_step(stub_step(self))
+            context.emitter.send_step(stub_step(self))
             return
 
         if not self.streaming:
             self.streaming = True
             step_dict = self.to_dict()
-            await context.emitter.stream_start(step_dict)
+            context.emitter.stream_start(step_dict)
         else:
-            await context.emitter.send_token(
+            context.emitter.send_token(
                 id=self.id, token=token, is_sequence=is_sequence, is_input=is_input
             )
 
@@ -506,7 +500,7 @@ class Step:
                 self.parent_id = parent_step.id
         local_steps.set(previous_steps + [self])
 
-        create_persist_task(self.send())
+        _spawn(self.send())
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -521,4 +515,4 @@ class Step:
             current_steps.remove(self)
             local_steps.set(current_steps)
 
-        create_persist_task(self.update())
+        _spawn(self.update())

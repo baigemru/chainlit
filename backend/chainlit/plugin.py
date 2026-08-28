@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -54,7 +55,8 @@ from litestar.static_files import create_static_files_router
 from litestar.stores.registry import StoreRegistry
 from litestar.types import Empty, EmptyType
 
-from chainlit.config import APP_ROOT
+import chainlit.config
+from chainlit.config import APP_ROOT, FILES_DIRECTORY
 from chainlit.controllers.auth import (
     AuthController,
     provide_user_service,
@@ -62,6 +64,11 @@ from chainlit.controllers.auth import (
 )
 from chainlit.controllers.files import FilesController
 from chainlit.controllers.project import ProjectController
+from chainlit.runner import (
+    DEFAULT_SESSION_TIMEOUT,
+    ApplicationRunner,
+    ThreadStoreAdapter,
+)
 from chainlit.security import ChainlitAuth, chainlit_auth, get_auth_secret
 from chainlit.transit_store import (
     SWEEP_INTERVAL_SECONDS,
@@ -72,7 +79,6 @@ from chainlit.transit_store import (
 from chainlit.ws.connection import make_websocket_handler
 from chainlit.ws.lookup import SessionLookup
 from chainlit.ws.registry import SessionRegistry
-from chainlit.ws.session import Session
 
 if TYPE_CHECKING:
     from chainlit.persistence.config import Persistence
@@ -224,6 +230,7 @@ class ChainlitPlugin(InitPlugin):
         "_persistence",
         "_public_dir",
         "_request_max_body_size",
+        "_runner",
         "_sessions",
         "_transit",
         "_transit_sweep_interval",
@@ -255,6 +262,16 @@ class ChainlitPlugin(InitPlugin):
         #: two applications in one interpreter -- which is what two tests
         #: are -- would see each other's sessions.
         self._sessions = SessionRegistry()
+        self._runner = ApplicationRunner(
+            config if config is not None else chainlit.config.config,
+            registry=self._sessions,
+            persistence=persistence,
+            transit=self._transit,
+            session_timeout=float(
+                getattr(getattr(config, "project", None), "session_timeout", None)
+                or DEFAULT_SESSION_TIMEOUT
+            ),
+        )
         self._transit_sweep_interval = transit_sweep_interval
         self._request_max_body_size: Union[int, None] = (
             max_request_body_size(config)
@@ -374,21 +391,29 @@ class ChainlitPlugin(InitPlugin):
         for name in ("users", "threads", "steps", "elements", "feedbacks"):
             app_config.dependencies.setdefault(name, refuse(name))
 
+    @property
+    def runner(self) -> ApplicationRunner:
+        return self._runner
+
     def _websocket(self) -> Any:
-        """The one socket, at the path the client already speaks to."""
+        """The one socket, at the path the client already speaks to.
 
-        def make_session(session_id: str, hello: Any, user: Any) -> Session:
-            return Session(
-                id=session_id,
-                user=user,
-                thread_id=hello.thread_id,
-                chat_profile=hello.chat_profile,
-                client_type=hello.client_type,
-                user_env=dict(hello.user_env or {}),
-            )
-
+        Everything the socket needs from the application comes from the
+        runner: how to build a session, what arriving means, what to do when
+        the socket goes. The handshake decides; the runner reacts.
+        """
+        runner = self._runner
         return make_websocket_handler(
-            registry=self._sessions, make_session=make_session
+            registry=self._sessions,
+            make_session=runner.make_session,
+            thread_store=(
+                ThreadStoreAdapter(self._persistence)
+                if self._persistence is not None
+                else None
+            ),
+            on_arrival=runner.on_arrival,
+            on_ready=runner.on_ready,
+            on_disconnect=runner.on_disconnect,
         )
 
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
@@ -485,8 +510,17 @@ class ChainlitPlugin(InitPlugin):
         checking the callbacks before they exist would fail the honest case.
         """
         self.bootstrap()
-        async with transit_sweeper(self._transit, self._transit_sweep_interval):
-            yield
+        code = self._code()
+        if startup := getattr(code, "on_app_startup", None):
+            await startup()
+        try:
+            async with transit_sweeper(self._transit, self._transit_sweep_interval):
+                yield
+        finally:
+            if shutdown := getattr(code, "on_app_shutdown", None):
+                await shutdown()
+            # The spool is per process: nothing in it outlives the server.
+            shutil.rmtree(FILES_DIRECTORY, ignore_errors=True)
 
     def bootstrap(self) -> None:
         """Run the startup checks and side effects, in order of severity."""
@@ -500,7 +534,6 @@ class ChainlitPlugin(InitPlugin):
         self._assert_app()
         self._assert_auth_secret()
         self._init_markdown()
-        self._init_lc_cache()
 
     def _code(self) -> Optional[Any]:
         return getattr(self._config, "code", None)
@@ -557,10 +590,3 @@ class ChainlitPlugin(InitPlugin):
         from chainlit.markdown import init_markdown
 
         init_markdown(root)
-
-    def _init_lc_cache(self) -> None:
-        if self._config is None:
-            return
-        from chainlit.cache import init_lc_cache
-
-        init_lc_cache()

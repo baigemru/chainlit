@@ -19,9 +19,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
-from starlette.datastructures import Headers
 
-from chainlit.data.base import BaseDataLayer
 from chainlit.logger import logger
 from chainlit.translations import lint_translation_json
 from chainlit.version import __version__
@@ -29,14 +27,11 @@ from chainlit.version import __version__
 from ._utils import is_path_inside
 
 if TYPE_CHECKING:
-    from fastapi import Request, Response
-
     from chainlit.action import Action
     from chainlit.message import Message
     from chainlit.types import (
         ChatProfile,
         Feedback,
-        InputAudioChunk,
         ProfileStartInfo,
         Starter,
         StarterCategory,
@@ -47,7 +42,7 @@ else:
     # Pydantic needs to resolve forward annotations. Because all of these are used
     # within `typing.Callable`, alias to `Any` as Pydantic does not perform validation
     # of callable argument/return types anyway.
-    Request = Response = Action = Message = ChatProfile = InputAudioChunk = ProfileStartInfo = Starter = StarterCategory = ThreadDict = User = Feedback = Any  # fmt: off
+    Action = Message = ChatProfile = ProfileStartInfo = Starter = StarterCategory = ThreadDict = User = Feedback = Any  # fmt: off
 
 BACKEND_ROOT = os.path.dirname(__file__)
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(BACKEND_ROOT))
@@ -414,7 +409,6 @@ class CodeSettings(BaseModel):
     on_app_shutdown: Optional[Callable[[], Union[Awaitable[None], None]]] = None
 
     # Session life cycle callbacks
-    on_logout: Optional[Callable[["Request", "Response"], Any]] = None
     on_stop: Optional[Callable[[], Any]] = None
     on_chat_start: Optional[Callable[[], Any]] = None
     on_chat_end: Optional[Callable[[], Any]] = None
@@ -423,11 +417,6 @@ class CodeSettings(BaseModel):
     on_profile_start: Optional[Callable[["ProfileStartInfo"], Any]] = None
     on_message: Optional[Callable[["Message"], Any]] = None
     on_feedback: Optional[Callable[["Feedback"], Any]] = None
-    on_audio_start: Optional[Callable[[], Any]] = None
-    on_audio_chunk: Optional[Callable[["InputAudioChunk"], Any]] = None
-    on_audio_end: Optional[Callable[[], Any]] = None
-    on_settings_edit: Optional[Callable[[Dict[str, Any]], Any]] = None
-    on_settings_update: Optional[Callable[[Dict[str, Any]], Any]] = None
     set_chat_profiles: Optional[
         Callable[[Optional["User"], Optional["str"]], Awaitable[List["ChatProfile"]]]
     ] = None
@@ -447,17 +436,15 @@ class CodeSettings(BaseModel):
     password_auth_callback: Optional[
         Callable[[str, str], Awaitable[Optional["User"]]]
     ] = None
-    header_auth_callback: Optional[Callable[[Headers], Awaitable[Optional["User"]]]] = (
-        None
-    )
     oauth_callback: Optional[
         Callable[[str, str, Dict[str, str], "User"], Awaitable[Optional["User"]]]
     ] = None
 
     # Helpers
-    on_window_message: Optional[Callable[[str], Any]] = None
     author_rename: Optional[Callable[[str], Awaitable[str]]] = None
-    data_layer: Optional[Callable[[], BaseDataLayer]] = None
+    # ``BaseDataLayer`` is gone with ``chainlit.data``; the factory is untyped
+    # until the ``@cl.data_layer`` hook is redefined against ``chainlit.persistence``.
+    data_layer: Optional[Callable[[], Any]] = None
 
 
 class ProjectSettings(BaseModel):

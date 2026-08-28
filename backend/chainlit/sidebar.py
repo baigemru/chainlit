@@ -22,7 +22,7 @@ class ElementSidebar:
         Returns:
             None: This method does not return anything.
         """
-        await context.emitter.emit("set_sidebar_title", title)
+        context.emitter.set_sidebar(title=title)
 
     @staticmethod
     async def set_elements(elements: List[ElementBased], key: Optional[str] = None):
@@ -49,7 +49,4 @@ class ElementSidebar:
             for element in elements
         ]
         await asyncio.gather(*coros)
-        await context.emitter.emit(
-            "set_sidebar_elements",
-            {"elements": [el.to_dict() for el in elements], "key": key},
-        )
+        context.emitter.set_sidebar(elements=[el.to_dict() for el in elements], key=key)

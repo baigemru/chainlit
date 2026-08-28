@@ -1,58 +1,64 @@
+"""The per-coroutine context every ``cl.*`` call reads.
+
+A context variable, because the application's callbacks run as tasks the
+transport creates, and the session those tasks belong to has to travel with
+them without being passed through every signature. Whoever launches a
+callback sets it (see ``chainlit.runner``); nothing else may.
+"""
+
+from __future__ import annotations
+
 import asyncio
-import uuid
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
-
-from lazify import LazyProxy
-
-from chainlit.session import ClientType, HTTPSession, WebsocketSession
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
-    from chainlit.emitter import BaseChainlitEmitter
+    from chainlit.emitter import Emitter
     from chainlit.step import Step
-    from chainlit.user import PersistedUser, User
+    from chainlit.ws.session import Session
 
-CL_RUN_NAMES = ["on_chat_start", "on_message", "on_audio_end"]
+__all__ = [
+    "CL_RUN_NAMES",
+    "ChainlitContext",
+    "ChainlitContextException",
+    "context",
+    "context_var",
+    "get_context",
+    "init_context",
+    "local_steps",
+]
+
+CL_RUN_NAMES = ["on_chat_start", "on_message"]
 
 
 class ChainlitContextException(Exception):
-    def __init__(self, msg="Chainlit context not found", *args, **kwargs):
-        super().__init__(msg, *args, **kwargs)
+    def __init__(self, msg: str = "Chainlit context not found", *args: object):
+        super().__init__(msg, *args)
 
 
 class ChainlitContext:
-    loop: asyncio.AbstractEventLoop
-    emitter: "BaseChainlitEmitter"
-    session: Union["HTTPSession", "WebsocketSession"]
+    """One session and its emitter, as seen from inside a callback."""
+
+    __slots__ = ("emitter", "loop", "session")
+
+    def __init__(self, session: "Session", emitter: "Emitter") -> None:
+        self.loop = asyncio.get_running_loop()
+        self.session = session
+        self.emitter = emitter
 
     @property
-    def current_step(self):
+    def current_step(self) -> Optional["Step"]:
         if previous_steps := local_steps.get():
             return previous_steps[-1]
+        return None
 
     @property
-    def current_run(self):
+    def current_run(self) -> Optional["Step"]:
         if previous_steps := local_steps.get():
             return next(
                 (step for step in previous_steps if step.name in CL_RUN_NAMES), None
             )
-
-    def __init__(
-        self,
-        session: Union["HTTPSession", "WebsocketSession"],
-        emitter: Optional["BaseChainlitEmitter"] = None,
-    ):
-        from chainlit.emitter import BaseChainlitEmitter, ChainlitEmitter
-
-        self.loop = asyncio.get_running_loop()
-        self.session = session
-
-        if emitter:
-            self.emitter = emitter
-        elif isinstance(self.session, HTTPSession):
-            self.emitter = BaseChainlitEmitter(self.session)
-        elif isinstance(self.session, WebsocketSession):
-            self.emitter = ChainlitEmitter(self.session)
+        return None
 
 
 context_var: ContextVar[ChainlitContext] = ContextVar("chainlit")
@@ -61,55 +67,41 @@ local_steps: ContextVar[Optional[List["Step"]]] = ContextVar(
 )
 
 
-def init_ws_context(session_or_sid: Union[WebsocketSession, str]) -> ChainlitContext:
-    if not isinstance(session_or_sid, WebsocketSession):
-        session = WebsocketSession.require(session_or_sid)
-    else:
-        session = session_or_sid
-    context = ChainlitContext(session)
-    context_var.set(context)
-    return context
-
-
-def init_http_context(
-    thread_id: Optional[str] = None,
-    user: Optional[Union["User", "PersistedUser"]] = None,
-    auth_token: Optional[str] = None,
-    user_env: Optional[Dict[str, str]] = None,
-    client_type: ClientType = "webapp",
+def init_context(
+    session: "Session", emitter: Optional["Emitter"] = None
 ) -> ChainlitContext:
-    from chainlit.data import get_data_layer
+    """Bind the current task to ``session``. Returns what it bound."""
+    if emitter is None:
+        from chainlit.emitter import Emitter
 
-    session_id = str(uuid.uuid4())
-    thread_id = thread_id or str(uuid.uuid4())
-    session = HTTPSession(
-        id=session_id,
-        thread_id=thread_id,
-        token=auth_token,
-        user=user,
-        client_type=client_type,
-        user_env=user_env,
-    )
-    context = ChainlitContext(session)
-    context_var.set(context)
-
-    if data_layer := get_data_layer():
-        if user_id := getattr(user, "id", None):
-            from chainlit.persist_barrier import create_persist_task
-
-            create_persist_task(
-                data_layer.update_thread(thread_id=thread_id, user_id=user_id),
-                thread_id=thread_id,
-            )
-
-    return context
+        emitter = Emitter(session)
+    ctx = ChainlitContext(session, emitter)
+    context_var.set(ctx)
+    return ctx
 
 
 def get_context() -> ChainlitContext:
     try:
         return context_var.get()
-    except LookupError as e:
-        raise ChainlitContextException from e
+    except LookupError as error:
+        raise ChainlitContextException from error
 
 
-context: ChainlitContext = LazyProxy(get_context, enable_cache=False)
+class _ContextProxy:
+    """``cl.context`` -- resolves the variable on every attribute access.
+
+    A proxy rather than a module-level object, because the object differs
+    per task and a module-level name is bound once. Ten lines that replace a
+    dependency.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(get_context(), name)
+
+    def __repr__(self) -> str:
+        return "<chainlit.context>"
+
+
+context: ChainlitContext = _ContextProxy()  # type: ignore[assignment]

@@ -44,11 +44,18 @@ from typing import (
     Mapping,
     Optional,
     Protocol,
+    Sequence,
     Tuple,
     runtime_checkable,
 )
 
-from chainlit.protocol.payloads import Action, AskSpec, Element, Step as StepPayload
+from chainlit.protocol.payloads import (
+    Action,
+    AskSpec,
+    Element,
+    FileRef,
+    Step as StepPayload,
+)
 from chainlit.ws.outbound import Outbound
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -80,12 +87,35 @@ class CallbackRunner(Protocol):
         """
         ...
 
-    async def on_message(self, session: "Session", message: StepPayload) -> None:
+    async def on_message(
+        self,
+        session: "Session",
+        message: StepPayload,
+        file_references: Sequence[FileRef] = (),
+    ) -> None:
         """Hand the application a message the user just sent."""
         ...
 
     async def on_stop(self, session: "Session") -> None:
         """The user asked for the running task to stop."""
+        ...
+
+    async def record_user_message(
+        self, session: "Session", message: StepPayload
+    ) -> Any:
+        """Take note of something the user said, without running ``on_message``.
+
+        The answer to a text question is a user message too: it goes into
+        the transcript, into persistence, and it is the thread's first
+        interaction if nothing preceded it -- but it is delivered to the
+        code that asked, not to ``on_message``.
+        """
+        ...
+
+    async def record_ask_files(
+        self, session: "Session", files: Sequence[Mapping[str, Any]], *, for_id: str
+    ) -> None:
+        """The files answering a file question, spooled and ready to persist."""
         ...
 
 
@@ -219,6 +249,26 @@ class Session:
         self.parent_thread_id: Optional[str] = None
         self.profile_switch_lock = asyncio.Lock()
         self.pending_transit_id: Optional[str] = None
+
+        #: The writer batching this session's rows, when there is a database.
+        #: Owned here rather than looked up by thread: two tabs on one
+        #: thread are two writers, and FIFO is a per-writer promise.
+        self.writer: Optional[Any] = None
+
+        #: Whether ``on_chat_start`` has run for this session. A session
+        #: reconnecting keeps it -- the hook is a beginning, not a greeting.
+        self.chat_started = False
+
+        #: The thread this session resumed, once the resume has happened.
+        #: Guards the hooks that fire once per resumed session against the
+        #: reconnects that follow.
+        self.resumed_thread_id: Optional[str] = None
+
+        #: The task waiting out the disconnect grace before the session is
+        #: torn down. Held on the session so the one place that decides the
+        #: session lives on -- the ``kept`` branch of the handshake -- can
+        #: cancel it without knowing who scheduled it.
+        self.reaper: Optional["asyncio.Task[Any]"] = None
 
     # ------------------------------------------------------------ SessionView
 

@@ -1,404 +1,253 @@
 """A message arriving while an ask is pending.
 
-Mirror of the orphaned-ask_reply rescue: ask mode lives only in the
-client's `askUser` atom, so a message can reach `client_message` while the
-server still waits on `pending_ask`. See
-`chainlit-panda/docs/task_chainlit_message_during_live_ask.md` (rev 2).
+The composer does not know the server is waiting on a text question -- ask
+mode lives in the client's own state -- so a plain message can reach the
+runner while ``pending_ask`` is a text ask. It is the answer, and it must
+reach the code that asked rather than ``on_message``. Everything else is a
+message. See ``chainlit-panda/docs/task_chainlit_message_during_live_ask.md``.
 """
 
+from __future__ import annotations
+
 import asyncio
-import time
-import uuid
+import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from typing import Any, Dict, List
 
 import pytest
+import pytest_asyncio
 
-from chainlit.emitter import ChainlitEmitter
-from chainlit.session import PendingAsk, WebsocketSession
-from chainlit.socket import message as client_message
-from chainlit.types import AskActionSpec, AskSlotBusyError, AskSpec
+from chainlit.action import Action
+from chainlit.message import AskActionMessage, AskUserMessage, Message
+from chainlit.protocol.payloads import AskTextSpec, FileRef, Step as StepPayload
+from chainlit.protocol.server import AskEnd, StepUpsert
+from chainlit.runner import ApplicationRunner
+from chainlit.ws.registry import SessionRegistry
+from chainlit.ws.session import Session
+from tests.conftest import bind_context
+
+# ``chainlit.step`` the attribute is the decorator; the module is only
+# reachable by name.
+step_module = sys.modules["chainlit.step"]
 
 
-def _text_step(**overrides) -> dict:
-    step = {
-        "threadId": "",
-        "id": str(uuid.uuid4()),
+class _Code:
+    def __init__(self) -> None:
+        self.on_message = None
+        self.on_chat_start = None
+        self.on_chat_end = None
+        self.on_chat_resume = None
+        self.on_thread_ready = None
+        self.on_stop = None
+        self.action_callbacks: Dict[str, Any] = {}
+        self.author_rename = None
+
+
+@pytest.fixture
+def code():
+    return _Code()
+
+
+@pytest.fixture
+def runner(code, monkeypatch):
+    runner = ApplicationRunner(
+        SimpleNamespace(
+            code=code, features=SimpleNamespace(hot_swap_chat_profile=False)
+        ),
+        registry=SessionRegistry(),
+    )
+    return runner
+
+
+@pytest.fixture
+def session(runner, tmp_path, persisted_test_user) -> Session:
+    return Session(
+        id="sid-1",
+        runner=runner,
+        user=persisted_test_user,
+        thread_id="t1",
+        files_root=tmp_path,
+    )
+
+
+@pytest_asyncio.fixture
+async def ctx(session):
+    async with bind_context(session) as bound:
+        yield bound
+
+
+@pytest.fixture
+def no_author_rename(monkeypatch):
+    monkeypatch.setattr("chainlit.message.config.code.author_rename", None)
+    monkeypatch.setattr(step_module.config.code, "author_rename", None)
+
+
+def _text(**overrides: Any) -> StepPayload:
+    fields: Dict[str, Any] = {
+        "id": "u1",
         "name": "User",
         "type": "user_message",
         "output": "Кардиган вязанный для мальчика",
-        "createdAt": "2026-08-27T10:00:00.000Z",
-        "metadata": {},
     }
-    step.update(overrides)
-    return step
+    fields.update(overrides)
+    return StepPayload(**fields)
 
 
-def _pending(spec, *, parent_id="ask-parent", timeout=86400) -> PendingAsk:
-    return PendingAsk(
-        step_dict={"id": spec.step_id, "parentId": parent_id},
-        spec=spec,
-        future=asyncio.get_running_loop().create_future(),
-        deadline=time.monotonic() + timeout,
-        restore_actions=[],
-        restore_element=None,
-    )
+async def _until_asked(session: Session) -> None:
+    for _ in range(50):
+        if session.pending_ask is not None:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("no ask was sent")
 
 
-def _text_ask(step_id="ask-step") -> PendingAsk:
-    return _pending(AskSpec(type="text", step_id=step_id, timeout=86400))
-
-
-def _action_ask(step_id="action-step") -> PendingAsk:
-    return _pending(
-        AskActionSpec(type="action", step_id=step_id, timeout=86400, keys=["yes"])
-    )
-
-
-def _context(session) -> Mock:
-    context = Mock()
-    context.session = session
-    context.emitter = AsyncMock()
-    return context
+async def _settle() -> None:
+    for _ in range(5):
+        await asyncio.sleep(0)
 
 
 class TestDeliverToPendingTextAsk:
     """Branch A: a live text ask takes the message as its answer."""
 
-    async def _run(self, session, payload):
-        context = _context(session)
-        with (
-            patch.object(WebsocketSession, "require", return_value=session),
-            patch("chainlit.socket.init_ws_context", return_value=context),
-            patch("chainlit.socket.process_message", new=AsyncMock()) as process,
-        ):
-            await client_message("sid-1", payload)
-        return context, process
-
-    @pytest.mark.asyncio
-    async def test_message_answers_the_pending_text_ask(self, mock_session_factory):
+    async def test_message_answers_the_pending_text_ask(
+        self, ctx, session, code, frames, no_author_rename
+    ):
         """The incident: wizard asks, the user's text arrives as a message."""
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-        step = _text_step()
+        on_message_calls: List[Message] = []
 
-        _, process = await self._run(session, {"message": step, "fileReferences": []})
+        async def on_message(message):
+            on_message_calls.append(message)
 
-        assert pending.future.done()
-        assert pending.future.result()["output"] == step["output"]
-        process.assert_not_awaited()
-        # The long-lived hook keeps its slot: no parallel on_message task.
+        code.on_message = on_message
+        asking = asyncio.create_task(
+            AskUserMessage(content="Что вяжем?", timeout=1).send()
+        )
+        await _until_asked(session)
+
+        await session.runner.on_message(session, _text())
+        result = await asking
+
+        assert result["output"] == "Кардиган вязанный для мальчика"
+        assert on_message_calls == []
         assert session.current_task is None
 
-    @pytest.mark.asyncio
-    async def test_answer_is_stamped_with_the_ask_parent_and_re_emitted(
-        self, mock_session_factory
+    async def test_answer_is_stamped_with_the_ask_parent_and_recorded(
+        self, ctx, session, frames, no_author_rename
     ):
         """The client echo carries no parentId; the server must add it."""
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
+        question = AskUserMessage(content="?", timeout=1)
+        question.parent_id = "ask-parent"
+        asking = asyncio.create_task(question.send())
+        await _until_asked(session)
 
-        context, _ = await self._run(session, {"message": _text_step()})
+        await session.runner.on_message(session, _text(id="u2"))
+        result = await asking
 
-        assert pending.future.result()["parentId"] == "ask-parent"
-        context.emitter.send_step.assert_awaited_once()
-        assert context.emitter.send_step.await_args.args[0]["parentId"] == "ask-parent"
-
-    @pytest.mark.asyncio
-    async def test_redelivery_is_deduped_by_step_id(self, mock_session_factory):
-        """A later ask_reply for the same step must be recognised as a dup."""
-        pending = _text_ask(step_id="step-42")
-        session = mock_session_factory(pending_ask=pending)
-
-        await self._run(session, {"message": _text_step()})
-
-        assert session.last_resolved_ask_step_id == "step-42"
-
-    @pytest.mark.asyncio
-    async def test_expired_ask_still_holding_the_slot_takes_the_answer(
-        self, mock_session_factory
-    ):
-        """Mirrors branch 1 of ask_reply: expired-but-pending still wins.
-
-        Refusing here would hand the app both a timeout and a duplicate
-        message.
-        """
-        pending = _pending(
-            AskSpec(type="text", step_id="ask-step", timeout=1), timeout=-1
-        )
-        session = mock_session_factory(pending_ask=pending)
-
-        _, process = await self._run(session, {"message": _text_step()})
-
-        assert pending.future.done()
-        process.assert_not_awaited()
+        assert result["parentId"] == "ask-parent"
+        # Recorded as a user message: on the wire and in the transcript.
+        assert any(f.step.id == "u2" for f in frames(session, StepUpsert))
+        assert [e.step.id for e in session.transcript][-1] == "u2"
+        assert [e.reason for e in frames(session, AskEnd)] == ["answered"]
 
 
 class TestFallsBackToRegularMessage:
     """Branches B and C: everything that is not a plain text answer."""
 
-    async def _run(self, session, payload):
-        context = _context(session)
-        with (
-            patch.object(WebsocketSession, "require", return_value=session),
-            patch("chainlit.socket.init_ws_context", return_value=context),
-            patch("chainlit.socket.process_message", new=AsyncMock()) as process,
-        ):
-            await client_message("sid-1", payload)
-            # The handler fires process_message as a task; let it run.
-            task = session.current_task
-            if isinstance(task, asyncio.Task):
-                await task
-        return context, process
+    async def _run(self, session, code, message, file_references=()):
+        received: List[Message] = []
 
-    @pytest.mark.asyncio
-    async def test_no_pending_ask(self, mock_session_factory):
-        session = mock_session_factory(pending_ask=None)
+        async def on_message(message):
+            received.append(message)
 
-        _, process = await self._run(session, {"message": _text_step()})
-
-        process.assert_awaited_once()
+        code.on_message = on_message
+        await session.runner.on_message(session, message, file_references)
         assert session.current_task is not None
+        await session.current_task
+        return received
 
-    @pytest.mark.asyncio
-    async def test_action_ask_is_not_answered_by_text(self, mock_session_factory):
-        """A text value cannot answer an action spec."""
-        pending = _action_ask()
-        session = mock_session_factory(pending_ask=pending)
+    async def test_no_pending_ask(self, ctx, session, code, no_author_rename):
+        [received] = await self._run(session, code, _text())
+        assert received.content == "Кардиган вязанный для мальчика"
+        assert received.type == "user_message"
 
-        _, process = await self._run(session, {"message": _text_step()})
-
-        assert not pending.future.done()
-        process.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_attachments_stay_a_regular_message(self, mock_session_factory):
-        """A text ask cannot carry files; dropping them silently is worse."""
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-
-        _, process = await self._run(
-            session,
-            {"message": _text_step(), "fileReferences": [{"id": "file-1"}]},
-        )
-
-        assert not pending.future.done()
-        process.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_command_stays_a_regular_message(self, mock_session_factory):
-        """Only process_message reads `command`; an ask reply would eat it."""
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-
-        _, process = await self._run(session, {"message": _text_step(command="search")})
-
-        assert not pending.future.done()
-        process.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_modes_stay_a_regular_message(self, mock_session_factory):
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-
-        _, process = await self._run(
-            session, {"message": _text_step(modes={"deep": True})}
-        )
-
-        assert not pending.future.done()
-        process.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_non_convertible_payload(self, mock_session_factory):
-        """The strict gate is shared with the orphan-reply conversion."""
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-
-        _, process = await self._run(session, {"message": _text_step(id="not-a-uuid4")})
-
-        assert not pending.future.done()
-        process.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_already_answered_ask_does_not_swallow_the_message(
-        self, mock_session_factory
+    async def test_action_ask_is_not_answered_by_text(
+        self, ctx, session, code, no_author_rename
     ):
-        pending = _text_ask()
-        pending.future.set_result({"output": "earlier"})
-        session = mock_session_factory(pending_ask=pending)
+        action = Action(name="yes", payload={})
+        asking = asyncio.create_task(
+            AskActionMessage(content="?", actions=[action]).send()
+        )
+        await _until_asked(session)
 
-        _, process = await self._run(session, {"message": _text_step()})
+        received = await self._run(session, code, _text())
+        assert len(received) == 1
+        assert not session.pending_ask.future.done()
+        asking.cancel()
+        await _settle()
 
-        process.assert_awaited_once()
+    @pytest.mark.parametrize(
+        ("message", "files"),
+        [
+            (_text(), (FileRef(id="f1"),)),
+            (_text(command="search"), ()),
+            (_text(modes={"model": "gpt"}), ()),
+            (_text(type="system_message"), ()),
+        ],
+        ids=["attachments", "command", "modes", "not-a-user-message"],
+    )
+    async def test_anything_but_plain_text_stays_a_message(
+        self, ctx, session, code, no_author_rename, message, files
+    ):
+        asking = asyncio.create_task(AskUserMessage(content="?").send())
+        await _until_asked(session)
+
+        received = await self._run(session, code, message, files)
+        assert len(received) == 1
+        assert not session.pending_ask.future.done()
+        asking.cancel()
+        await _settle()
+
+    async def test_already_answered_ask_does_not_swallow_the_message(
+        self, ctx, session, code, no_author_rename
+    ):
+        asking = asyncio.create_task(AskUserMessage(content="?").send())
+        await _until_asked(session)
+        session.pending_ask.future.set_result(None)
+
+        received = await self._run(session, code, _text())
+        assert len(received) == 1
+        asking.cancel()
+        await _settle()
 
 
 class TestStrictAskSlot:
-    """A busy slot must be distinguishable from a timeout."""
+    async def _block(self, session):
+        asking = asyncio.create_task(AskUserMessage(content="first").send())
+        await _until_asked(session)
+        return asking
 
-    @pytest.fixture
-    def emitter(self, mock_websocket_session: MagicMock) -> ChainlitEmitter:
-        return ChainlitEmitter(mock_websocket_session)
-
-    def _busy(self, session, pending):
-        session.pending_ask = pending
-
-    def _strict(self, session, enabled: bool):
-        session.get_config.return_value = SimpleNamespace(
-            features=SimpleNamespace(strict_ask_slot=enabled)
-        )
-
-    @pytest.mark.asyncio
     async def test_disabled_returns_none(
-        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+        self, ctx, session, no_author_rename, monkeypatch
     ):
-        self._busy(mock_websocket_session, _text_ask())
-        self._strict(mock_websocket_session, False)
+        monkeypatch.setattr("chainlit.config.config.features.strict_ask_slot", False)
+        first = await self._block(session)
+        assert await AskUserMessage(content="second").send() is None
+        first.cancel()
+        await _settle()
 
-        res = await emitter.send_ask_user(
-            {"id": "s", "parentId": "p"},
-            AskSpec(type="text", step_id="s", timeout=10),
-            False,
-        )
-
-        assert res is None
-
-    @pytest.mark.asyncio
-    async def test_mock_config_does_not_arm_strict_mode(
-        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
-    ):
-        """`Mock(spec=...).get_config()` is truthy — it must not count."""
-        self._busy(mock_websocket_session, _text_ask())
-
-        res = await emitter.send_ask_user(
-            {"id": "s", "parentId": "p"},
-            AskSpec(type="text", step_id="s", timeout=10),
-            False,
-        )
-
-        assert res is None
-
-    @pytest.mark.asyncio
     async def test_enabled_raises_with_the_blocking_step(
-        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+        self, ctx, session, no_author_rename, monkeypatch
     ):
-        self._busy(mock_websocket_session, _text_ask(step_id="blocking-step"))
-        self._strict(mock_websocket_session, True)
+        from chainlit.types import AskSlotBusyError
 
-        with pytest.raises(AskSlotBusyError) as excinfo:
-            await emitter.send_ask_user(
-                {"id": "s", "parentId": "p"},
-                AskSpec(type="text", step_id="s", timeout=10),
-                False,
-            )
-
-        assert excinfo.value.step_id == "blocking-step"
-
-    @pytest.mark.asyncio
-    async def test_refusal_does_not_take_the_slot(
-        self, emitter: ChainlitEmitter, mock_websocket_session: MagicMock
-    ):
-        pending = _text_ask()
-        self._busy(mock_websocket_session, pending)
-        self._strict(mock_websocket_session, True)
-
-        with pytest.raises(AskSlotBusyError):
-            await emitter.send_ask_user(
-                {"id": "s", "parentId": "p"},
-                AskSpec(type="text", step_id="s", timeout=10),
-                False,
-            )
-
-        assert mock_websocket_session.pending_ask is pending
-
-
-class TestParkedConversionCountsAsLiveWork:
-    """An ask_reply conversion waiting on the handshake gate is live work.
-
-    Dropping the session on a page load cancels it, and `delete()` calls
-    that the one path where rescued user input is genuinely lost.
-    """
-
-    @pytest.mark.asyncio
-    async def test_parked_conversion_keeps_the_session(self):
-        from chainlit.socket import _session_has_live_work
-
-        parked = asyncio.create_task(asyncio.sleep(30))
-        try:
-            session = SimpleNamespace(
-                pending_ask=None,
-                current_task=None,
-                thread_ready_task=None,
-                profile_start_task=None,
-                deferred_ask_reply_tasks=[parked],
-            )
-            assert _session_has_live_work(session) is True
-        finally:
-            parked.cancel()
-
-    @pytest.mark.asyncio
-    async def test_finished_conversion_does_not_keep_the_session(self):
-        from chainlit.socket import _session_has_live_work
-
-        done = asyncio.create_task(asyncio.sleep(0))
-        await done
-
-        session = SimpleNamespace(
-            pending_ask=None,
-            current_task=None,
-            thread_ready_task=None,
-            profile_start_task=None,
-            deferred_ask_reply_tasks=[done],
-        )
-        assert _session_has_live_work(session) is False
-
-
-class TestResolveBeforeEmit:
-    """No await may sit between the done() check and set_result."""
-
-    @pytest.mark.asyncio
-    async def test_a_failing_send_step_still_answers_the_ask(
-        self, mock_session_factory
-    ):
-        """The emit is a courtesy re-send; it must not unanswer the ask."""
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-        context = _context(session)
-        context.emitter.send_step = AsyncMock(side_effect=RuntimeError("dead socket"))
-
-        with (
-            patch.object(WebsocketSession, "require", return_value=session),
-            patch("chainlit.socket.init_ws_context", return_value=context),
-            patch("chainlit.socket.process_message", new=AsyncMock()) as process,
-            pytest.raises(RuntimeError),
-        ):
-            await client_message("sid-1", {"message": _text_step()})
-
-        assert pending.future.done()
-        process.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_cancelling_during_the_emit_does_not_explode(
-        self, mock_session_factory
-    ):
-        """stop()/a profile switch cancel the future; set_result already ran.
-
-        With the emit before set_result this raised InvalidStateError out of
-        the handler and lost the message on both paths.
-        """
-        pending = _text_ask()
-        session = mock_session_factory(pending_ask=pending)
-        context = _context(session)
-
-        async def cancel_mid_emit(_step):
-            pending.cancel()
-
-        context.emitter.send_step = AsyncMock(side_effect=cancel_mid_emit)
-
-        with (
-            patch.object(WebsocketSession, "require", return_value=session),
-            patch("chainlit.socket.init_ws_context", return_value=context),
-            patch("chainlit.socket.process_message", new=AsyncMock()),
-        ):
-            await client_message("sid-1", {"message": _text_step()})
-
-        assert pending.future.done()
+        monkeypatch.setattr("chainlit.config.config.features.strict_ask_slot", True)
+        first = await self._block(session)
+        blocking_id = session.pending_ask.step_id
+        with pytest.raises(AskSlotBusyError) as info:
+            await AskUserMessage(content="second").send()
+        assert info.value.step_id == blocking_id
+        # The refusal did not take the slot.
+        assert session.pending_ask.step_id == blocking_id
+        assert isinstance(session.pending_ask.spec, AskTextSpec)
+        first.cancel()
+        await _settle()

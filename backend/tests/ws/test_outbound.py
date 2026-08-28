@@ -353,6 +353,11 @@ def test_a_client_disconnect_mid_write_does_not_surface_as_4500() -> None:
                     await asyncio.sleep(0)
         except* WebSocketDisconnect:
             state["disconnected"] = True
+        # Queued after the socket is gone, so it cannot have been written: a
+        # fast writer may well have drained all 500 before the hangup
+        # arrived, and the claim below is about frames the socket never
+        # took, not about how fast this machine is.
+        outbound.send(token("s", "after-hangup"))
         await outbound.detach()
         state["closed"] = outbound.closed
         state["backlog"] = outbound.backlog

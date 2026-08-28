@@ -4,7 +4,8 @@ import { useRecoilState, useRecoilValue } from 'recoil';
 import { toast } from 'sonner';
 
 import {
-  resumeThreadErrorState,
+  ErrorCode,
+  protocolErrorState,
   useChatInteract,
   useChatSession,
   useConfig
@@ -23,9 +24,7 @@ export default function AutoResumeThread({ id }: Props) {
   const { config } = useConfig();
   const { clear, setIdToResume } = useChatInteract();
   const { session, idToResume } = useChatSession();
-  const [resumeThreadError, setResumeThreadError] = useRecoilState(
-    resumeThreadErrorState
-  );
+  const [protocolError, setProtocolError] = useRecoilState(protocolErrorState);
   const resetKeptTranscript = useResetKeptTranscript();
 
   // Read through a ref: the transition must not re-trigger the resume
@@ -58,13 +57,18 @@ export default function AutoResumeThread({ id }: Props) {
     }
   }, [session, idToResume, id]);
 
+  // The wire has one error channel now; a resume failure is the
+  // `thread_not_found` code on it.
   useEffect(() => {
-    if (resumeThreadError) {
-      toast.error("Couldn't resume chat: " + resumeThreadError);
-      navigate('/');
-      setResumeThreadError(undefined);
-    }
-  }, [resumeThreadError]);
+    if (protocolError?.code !== ErrorCode.THREAD_NOT_FOUND) return;
+    toast.error(
+      protocolError.message
+        ? "Couldn't resume chat: " + protocolError.message
+        : "Couldn't resume chat"
+    );
+    navigate('/');
+    setProtocolError(undefined);
+  }, [protocolError]);
 
   return null;
 }

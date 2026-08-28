@@ -78,7 +78,14 @@ def ts_type(schema: Dict[str, Any]) -> str:
     kind: str = schema.get("type", "")
     if kind == "array":
         items = schema.get("items")
-        return f"{ts_type(items)}[]" if items else "unknown[]"
+        if not items:
+            return "unknown[]"
+        rendered = ts_type(items)
+        # `A | B[]` parses as `A | (B[])`, so a list of a union has to be
+        # parenthesised or the generated type silently means something else.
+        # Element is a union of eleven branches, which is how Thread.elements
+        # came out as "ten element types, or an array of the eleventh".
+        return f"({rendered})[]" if " | " in rendered else f"{rendered}[]"
     if kind == "object":
         values = schema.get("additionalProperties")
         return f"Record<string, {ts_type(values) if values else 'unknown'}>"

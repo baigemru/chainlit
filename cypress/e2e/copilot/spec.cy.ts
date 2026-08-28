@@ -17,20 +17,6 @@ describe('Copilot', { includeShadowDom: true }, () => {
     cy.get('#chainlit-copilot').should('not.exist');
     mountCopilotWidget();
     cy.get('#chainlit-copilot').should('exist');
-    cy.window().then((win) => {
-      win.addEventListener('chainlit-call-fn', (e) => {
-        // @ts-expect-error is not a valid prop
-        win.sendChainlitMessage({
-          type: 'system_message',
-          output: 'Hello World!'
-        });
-        // @ts-expect-error is not a valid prop
-        const { name, args, callback } = e.detail;
-        if (name === 'test') {
-          callback('Function called with: ' + args.msg);
-        }
-      });
-    });
 
     openCopilot();
 
@@ -40,10 +26,18 @@ describe('Copilot', { includeShadowDom: true }, () => {
     cy.step('Start conversation');
 
     submitMessage('Call func!');
-    cy.get('.step').should('have.length', 5);
-    cy.contains('.step', 'Function called with: Call func!').should(
-      'be.visible'
-    );
+    cy.get('.step').should('have.length', 3);
+    cy.contains('.step', 'Echo: Call func!').should('be.visible');
+
+    cy.step('The host page can inject a message');
+
+    cy.window().then((win) => {
+      // @ts-expect-error is not a valid prop
+      win.sendChainlitMessage({
+        type: 'system_message',
+        output: 'Hello World!'
+      });
+    });
     cy.contains('.step', 'System message received: Hello World!').should(
       'be.visible'
     );

@@ -139,7 +139,9 @@ const hasMessageById = (messages: IStep[], messageId: string): boolean => {
 const updateMessageById = (
   messages: IStep[],
   messageId: string,
-  updatedMessage: IStep
+  // A partial on purpose: `step.update` carries only the fields it means to
+  // write, and merging in the ones it left out would clobber them.
+  updatedMessage: Partial<IStep>
 ): IStep[] => {
   let hasChanges = false;
   const nextMessages = messages.map((msg) => {

@@ -20,7 +20,7 @@ const useUpload = ({ onError, onResolved, options, spec }: useUploadProps) => {
     (acceptedFiles: FileWithPath[], fileRejections: FileRejection[]) => {
       if (fileRejections.length > 0) {
         if (fileRejections[0].errors[0].code === 'file-too-large') {
-          onError?.(`File is larger than ${spec.max_size_mb} MB`);
+          onError?.(`File is larger than ${spec.maxSizeMb} MB`);
         } else {
           onError?.(fileRejections[0].errors[0].message);
         }
@@ -47,9 +47,9 @@ const useUpload = ({ onError, onResolved, options, spec }: useUploadProps) => {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    maxFiles: spec.max_files || undefined,
+    maxFiles: spec.maxFiles || undefined,
     accept: dzAccept,
-    maxSize: (spec.max_size_mb || 2) * 1000000,
+    maxSize: (spec.maxSizeMb || 2) * 1000000,
     ...options
   });
 

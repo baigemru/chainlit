@@ -85,10 +85,10 @@ const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
     (props: Record<string, unknown>) => {
       if (
         askUser?.spec.type === 'element' &&
-        askUser.spec.step_id === element.forId &&
+        askUser.spec.stepId === element.forId &&
         !askUser.awaitingReply
       ) {
-        askUser.callback({ ...props, submitted: true });
+        askUser.callback({ submitted: true, props });
       }
     },
     [askUser, element.forId]
@@ -97,7 +97,7 @@ const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
   const cancelElement = useCallback(() => {
     if (
       askUser?.spec.type === 'element' &&
-      askUser.spec.step_id === element.forId &&
+      askUser.spec.stepId === element.forId &&
       !askUser.awaitingReply
     ) {
       askUser.callback({ submitted: false });

@@ -17,7 +17,7 @@ const ask = (stepId: string, keys?: string[]): IAsk =>
     callback: () => undefined,
     spec: {
       type: keys ? 'action' : 'text',
-      step_id: stepId,
+      stepId,
       timeout: 60,
       ...(keys ? { keys } : {})
     }

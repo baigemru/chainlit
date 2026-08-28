@@ -15,7 +15,6 @@ interface IMessageContext {
   cotDisplay: 'list' | 'compact';
   showStepDetails: boolean;
   askUser?: IAsk;
-  editable: boolean;
   loading: boolean;
   showFeedbackButtons: boolean;
   uiName: string;

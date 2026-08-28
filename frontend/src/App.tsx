@@ -6,7 +6,6 @@ import { router } from 'router';
 
 import { useAuth, useChatSession, useConfig } from '@chainlit/react-client';
 
-import ChatSettingsModal from './components/ChatSettings';
 import { ThemeProvider } from './components/ThemeProvider';
 import { Loader } from '@/components/Loader';
 import { Toaster } from '@/components/ui/sonner';
@@ -16,7 +15,6 @@ import { userEnvState } from 'state/user';
 declare global {
   interface Window {
     cl_shadowRootElement?: HTMLDivElement;
-    transports?: string[];
     theme?: {
       light: Record<string, string>;
       dark: Record<string, string>;
@@ -44,10 +42,7 @@ function App() {
       return;
     }
 
-    connect({
-      transports: window.transports,
-      userEnv
-    });
+    connect({ userEnv });
   }, [userEnv, isAuthenticated, connect, isReady, chatProfileOk]);
 
   useEffect(() => {
@@ -80,7 +75,6 @@ function App() {
     >
       <Toaster richColors className="toast" position="top-right" />
 
-      <ChatSettingsModal />
       <RouterProvider router={router} />
 
       <div

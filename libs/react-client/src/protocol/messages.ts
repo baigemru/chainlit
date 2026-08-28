@@ -92,11 +92,6 @@ export interface AskTextSpec {
   timeout?: number;
 }
 
-export interface AudioConnection {
-  t: 'audio.connection';
-  state: 'off' | 'on';
-}
-
 export interface AudioElement {
   type: 'audio';
   id: string;
@@ -110,47 +105,6 @@ export interface AudioElement {
   path?: string | null;
   mime?: string | null;
   autoPlay?: boolean;
-}
-
-export interface AudioEnd {
-  t: 'audio.end';
-}
-
-export interface AudioIn {
-  t: 'audio.in';
-  data: string;
-  mimeType?: string;
-  isStart?: boolean;
-  elapsedTime?: number;
-}
-
-export interface AudioInterrupt {
-  t: 'audio.interrupt';
-}
-
-export interface AudioOut {
-  t: 'audio.out';
-  track: string;
-  mimeType: string;
-  data: string;
-}
-
-export interface AudioStart {
-  t: 'audio.start';
-}
-
-export interface Command {
-  id: string;
-  icon?: string;
-  description?: string;
-  button?: boolean;
-  persistent?: boolean;
-  selected?: boolean;
-}
-
-export interface CommandsSet {
-  t: 'commands.set';
-  commands?: Command[];
 }
 
 export interface CustomElement {
@@ -208,15 +162,6 @@ export interface Error {
   message?: string;
   detail?: Record<string, unknown> | null;
   fatal?: boolean;
-}
-
-export interface FavoritesFetch {
-  t: 'favorites.fetch';
-}
-
-export interface FavoritesSet {
-  t: 'favorites.set';
-  steps?: Step[];
 }
 
 export interface Feedback {
@@ -281,71 +226,10 @@ export interface ImageElement {
   size?: 'large' | 'medium' | 'small' | null;
 }
 
-export interface InputWidgetSpec {
-  id: string;
-  label: string;
-  type?:
-    | 'checkbox'
-    | 'datepicker'
-    | 'multiselect'
-    | 'numberinput'
-    | 'radio'
-    | 'select'
-    | 'slider'
-    | 'switch'
-    | 'tags'
-    | 'textinput';
-  initial?: unknown;
-  tooltip?: string | null;
-  description?: string | null;
-  disabled?: boolean;
-  min?: number | null;
-  max?: number | null;
-  step?: number | null;
-  items?: unknown;
-  placeholder?: string | null;
-  multiline?: boolean;
-  mode?: string | null;
-  format?: string | null;
-  minDate?: string | null;
-  maxDate?: string | null;
-  inputs?: unknown;
-}
-
-export interface MessageEdit {
-  t: 'message.edit';
-  message: Step;
-}
-
-export interface MessageFavorite {
-  t: 'message.favorite';
-  messageId: string;
-  favorite?: boolean;
-}
-
 export interface MessageSend {
   t: 'message.send';
   message: Step;
   fileReferences?: FileRef[];
-}
-
-export interface Mode {
-  id: string;
-  name: string;
-  options?: ModeOption[];
-}
-
-export interface ModeOption {
-  id: string;
-  name: string;
-  description?: string | null;
-  icon?: string | null;
-  default?: boolean;
-}
-
-export interface ModesSet {
-  t: 'modes.set';
-  modes?: Mode[];
 }
 
 export interface PdfElement {
@@ -393,26 +277,6 @@ export interface Reload {
   t: 'reload';
 }
 
-export interface RpcCall {
-  t: 'rpc.call';
-  callId: string;
-  name: string;
-  args?: Record<string, unknown>;
-}
-
-export interface RpcCancel {
-  t: 'rpc.cancel';
-  callId: string;
-  reason?: 'answered' | 'cancelled' | 'timeout';
-}
-
-export interface RpcResult {
-  t: 'rpc.result';
-  callId: string;
-  result?: Record<string, unknown> | null;
-  error?: string | null;
-}
-
 export interface SessionClear {
   t: 'session.clear';
 }
@@ -434,25 +298,10 @@ export interface SessionReady {
   heartbeatIntervalMs?: number;
 }
 
-export interface SettingsChange {
-  t: 'settings.change';
-  settings?: Record<string, unknown>;
-}
-
-export interface SettingsEdit {
-  t: 'settings.edit';
-  settings?: Record<string, unknown>;
-}
-
-export interface SettingsSet {
-  t: 'settings.set';
-  inputs?: InputWidgetSpec[];
-}
-
 export interface SidebarSet {
   t: 'sidebar.set';
   title?: string | null;
-  elements?:
+  elements?: (
     | ImageElement
     | TextElement
     | PdfElement
@@ -462,7 +311,8 @@ export interface SidebarSet {
     | PlotlyElement
     | DataframeElement
     | CustomElement
-    | TasklistElement[];
+    | TasklistElement
+  )[];
   key?: string | null;
 }
 
@@ -619,7 +469,7 @@ export interface Thread {
   tags?: string[] | null;
   metadata?: Record<string, unknown> | null;
   steps?: Step[];
-  elements?:
+  elements?: (
     | ImageElement
     | TextElement
     | PdfElement
@@ -629,7 +479,8 @@ export interface Thread {
     | PlotlyElement
     | DataframeElement
     | CustomElement
-    | TasklistElement[];
+    | TasklistElement
+  )[];
 }
 
 export interface ThreadFirstInteraction {
@@ -654,20 +505,10 @@ export interface ThreadResume {
   thread: Thread;
 }
 
-export interface ThreadResumeError {
-  t: 'thread.resume_error';
-  error: string;
-}
-
 export interface Toast {
   t: 'toast';
   message: string;
   type?: 'error' | 'info' | 'success' | 'warning';
-}
-
-export interface TokenUsage {
-  t: 'token.usage';
-  count: number;
 }
 
 export interface VideoElement {
@@ -692,16 +533,6 @@ export interface Wait {
   loop?: boolean;
 }
 
-export interface ClientWindowMessage {
-  t: 'window.message';
-  data?: unknown;
-}
-
-export interface ServerWindowMessage {
-  t: 'window.message';
-  data?: unknown;
-}
-
 export type ServerMsg =
   | SessionReady
   | Error
@@ -720,25 +551,13 @@ export type ServerMsg =
   | AskEnd
   | TaskIndicator
   | ThreadResume
-  | ThreadResumeError
   | ThreadFirstInteraction
   | ThreadParent
   | ThreadOpen
   | ProfileChanged
   | SessionHandoff
-  | SettingsSet
-  | CommandsSet
-  | ModesSet
-  | FavoritesSet
   | SidebarSet
-  | AudioConnection
-  | AudioOut
-  | AudioInterrupt
-  | RpcCall
-  | RpcCancel
-  | Toast
-  | TokenUsage
-  | ServerWindowMessage;
+  | Toast;
 
 export type ServerMsgTag =
   | 'session.ready'
@@ -758,25 +577,13 @@ export type ServerMsgTag =
   | 'ask.end'
   | 'task.indicator'
   | 'thread.resume'
-  | 'thread.resume_error'
   | 'thread.first_interaction'
   | 'thread.parent'
   | 'thread.open'
   | 'profile.changed'
   | 'session.handoff'
-  | 'settings.set'
-  | 'commands.set'
-  | 'modes.set'
-  | 'favorites.set'
   | 'sidebar.set'
-  | 'audio.connection'
-  | 'audio.out'
-  | 'audio.interrupt'
-  | 'rpc.call'
-  | 'rpc.cancel'
-  | 'toast'
-  | 'token.usage'
-  | 'window.message';
+  | 'toast';
 
 /** Exhaustive handler table: omitting a message is a compile error. */
 export type ServerMsgHandlers = {
@@ -789,18 +596,8 @@ export type ClientMsg =
   | SessionClear
   | Stop
   | MessageSend
-  | MessageEdit
-  | MessageFavorite
-  | FavoritesFetch
   | AskReply
-  | ProfileSwitch
-  | SettingsChange
-  | SettingsEdit
-  | AudioStart
-  | AudioIn
-  | AudioEnd
-  | RpcResult
-  | ClientWindowMessage;
+  | ProfileSwitch;
 
 export type ClientMsgTag =
   | 'hello'
@@ -808,18 +605,8 @@ export type ClientMsgTag =
   | 'session.clear'
   | 'stop'
   | 'message.send'
-  | 'message.edit'
-  | 'message.favorite'
-  | 'favorites.fetch'
   | 'ask.reply'
-  | 'profile.switch'
-  | 'settings.change'
-  | 'settings.edit'
-  | 'audio.start'
-  | 'audio.in'
-  | 'audio.end'
-  | 'rpc.result'
-  | 'window.message';
+  | 'profile.switch';
 
 /** Exhaustive handler table: omitting a message is a compile error. */
 export type ClientMsgHandlers = {

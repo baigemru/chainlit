@@ -1,16 +1,13 @@
 import { isEqual } from 'lodash';
 import { AtomEffect, DefaultValue, atom, selector } from 'recoil';
-import { Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 
-import { ICommand } from './types/command';
-import { IMode } from './types/mode';
-
+import type { ProtocolError } from './protocol';
+import { ChainlitSocket } from './socket';
 import {
   IAction,
   IAsk,
   IAuthConfig,
-  ICallFn,
   IChainlitConfig,
   IMcp,
   IMessageElement,
@@ -20,10 +17,9 @@ import {
   ThreadHistory
 } from './types';
 import { groupByDate } from './utils/group';
-import { WavRecorder, WavStreamPlayer } from './wavtools';
 
 export interface ISession {
-  socket: Socket;
+  socket: ChainlitSocket;
   error?: boolean;
 }
 
@@ -32,8 +28,16 @@ export const threadIdToResumeState = atom<string | undefined>({
   default: undefined
 });
 
-export const resumeThreadErrorState = atom<string | undefined>({
-  key: 'ResumeThreadErrorState',
+/**
+ * The last `error` message from the server, or undefined.
+ *
+ * Replaces the old `resume_thread_error` atom, which carried a bare string
+ * for the one failure the wire could name. `error` names every one of them
+ * with an `ErrorCode`, so consumers filter on the code instead of each
+ * getting a channel of its own.
+ */
+export const protocolErrorState = atom<ProtocolError | undefined>({
+  key: 'ProtocolError',
   default: undefined
 });
 
@@ -132,21 +136,6 @@ export const messagesState = atom<IStep[]>({
   default: []
 });
 
-export const commandsState = atom<ICommand[]>({
-  key: 'Commands',
-  default: []
-});
-
-export const modesState = atom<IMode[]>({
-  key: 'Modes',
-  default: []
-});
-
-export const tokenCountState = atom<number>({
-  key: 'TokenCount',
-  default: 0
-});
-
 export const loadingState = atom<boolean>({
   key: 'Loading',
   default: false
@@ -155,75 +144,6 @@ export const loadingState = atom<boolean>({
 export const askUserState = atom<IAsk | undefined>({
   key: 'AskUser',
   default: undefined
-});
-
-export const wavRecorderState = atom({
-  key: 'WavRecorder',
-  dangerouslyAllowMutability: true,
-  default: new WavRecorder()
-});
-
-export const wavStreamPlayerState = atom({
-  key: 'WavStreamPlayer',
-  dangerouslyAllowMutability: true,
-  default: new WavStreamPlayer()
-});
-
-export const audioConnectionState = atom<'connecting' | 'on' | 'off'>({
-  key: 'AudioConnection',
-  default: 'off'
-});
-
-export const isAiSpeakingState = atom({
-  key: 'isAiSpeaking',
-  default: false
-});
-
-export const callFnState = atom<ICallFn | undefined>({
-  key: 'CallFn',
-  default: undefined
-});
-
-export const chatSettingsInputsState = atom<any>({
-  key: 'ChatSettings',
-  default: []
-});
-
-export const chatSettingsDefaultValueSelector = selector({
-  key: 'ChatSettingsValue/Default',
-  get: ({ get }) => {
-    const chatSettings = get(chatSettingsInputsState);
-
-    const collectInitialValues = (
-      inputs: any[],
-      acc: Record<string, any>
-    ): Record<string, any> => {
-      if (!Array.isArray(inputs)) {
-        return acc;
-      }
-
-      inputs.forEach((input) => {
-        if (!input) {
-          return;
-        }
-        if (Array.isArray(input?.inputs) && input.inputs.length > 0) {
-          // Handle tabs
-          collectInitialValues(input.inputs, acc);
-        } else if (input?.id !== undefined) {
-          acc[input.id] = input.initial;
-        }
-      });
-
-      return acc;
-    };
-
-    return collectInitialValues(chatSettings, {});
-  }
-});
-
-export const chatSettingsValueState = atom<Record<string, any>>({
-  key: 'ChatSettingsValue',
-  default: chatSettingsDefaultValueSelector
 });
 
 export const elementState = atom<IMessageElement[]>({
@@ -331,9 +251,4 @@ export const mcpState = atom<IMcp[]>({
   key: 'Mcp',
   default: [],
   effects: [localStorageEffect<IMcp[]>('mcp_storage_key')]
-});
-
-export const favoriteMessagesState = atom<IStep[]>({
-  key: 'favoriteMessagesState',
-  default: []
 });

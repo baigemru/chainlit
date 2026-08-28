@@ -5,52 +5,30 @@ import {
   useRef,
   useState
 } from 'react';
-import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
+import { useRecoilState } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
   FileSpec,
   IStep,
-  commandsState,
   useAuth,
   useChatData,
-  useChatInteract,
-  useConfig
+  useChatInteract
 } from '@chainlit/react-client';
-import type { IMode, IModeOption } from '@chainlit/react-client';
-import { modesState } from '@chainlit/react-client';
 
-import { Settings } from '@/components/icons/Settings';
-import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from '@/components/ui/tooltip';
 import { useTranslation } from 'components/i18n/Translator';
 
 import { useQuery } from '@/hooks/query';
 import { useIsMobile } from '@/hooks/use-mobile';
 
-import { chatSettingsOpenState } from '@/state/project';
-import {
-  IAttachment,
-  attachmentsState,
-  persistentCommandState
-} from 'state/chat';
+import { IAttachment, attachmentsState } from 'state/chat';
 
 import { Attachments } from './Attachments';
-import CommandButtons from './CommandButtons';
-import CommandButton from './CommandPopoverButton';
-import FavoriteButton from './FavoriteButton';
 import Input, { InputMethods } from './Input';
 import McpButton from './Mcp';
-import ModePicker from './ModePicker';
 import OpenParentThreadButton from './OpenParentThreadButton';
 import SubmitButton from './SubmitButton';
 import UploadButton from './UploadButton';
-import VoiceButton from './VoiceButton';
 
 interface Props {
   fileSpec: FileSpec;
@@ -67,61 +45,16 @@ export default function MessageComposer({
 }: Props) {
   const inputRef = useRef<InputMethods>(null);
   const [value, setValue] = useState('');
-  const [selectedCommand, setSelectedCommand] = useRecoilState(
-    persistentCommandState
-  );
-  const commands = useRecoilValue(commandsState);
-  const setChatSettingsOpen = useSetRecoilState(chatSettingsOpenState);
-
-  // Pre-select the command marked as selected by the backend
-  useEffect(() => {
-    const defaultSelected = commands.find((c) => c.selected);
-    if (defaultSelected && !selectedCommand) {
-      setSelectedCommand(defaultSelected);
-    }
-  }, [commands]);
   const [attachments, setAttachments] = useRecoilState(attachmentsState);
   const { t } = useTranslation();
 
   const { user } = useAuth();
   const { sendMessage, replyMessage } = useChatInteract();
-  const { askUser, chatSettingsInputs, disabled: _disabled } = useChatData();
+  const { askUser, disabled: _disabled } = useChatData();
 
   const disabled = _disabled || !!attachments.find((a) => !a.uploaded);
 
-  const { config } = useConfig();
-  const showSettingsInComposer =
-    config?.ui?.chat_settings_location !== 'sidebar' &&
-    chatSettingsInputs.length > 0;
-
   const isMobile = useIsMobile();
-
-  // Get/set available modes from state - selections are tracked via the 'default' flag on options
-  const [modes, setModes] = useRecoilState(modesState);
-
-  const handleModeSelect = useCallback(
-    (modeId: string, optionId: string) => {
-      setModes((prevModes) =>
-        prevModes.map((mode) => {
-          if (mode.id !== modeId) return mode;
-          return {
-            ...mode,
-            options: mode.options.map((opt: IModeOption) => ({
-              ...opt,
-              default: opt.id === optionId
-            }))
-          };
-        })
-      );
-    },
-    [setModes]
-  );
-
-  // Helper to get selected option for a mode (the one with default=true, or first option)
-  const getSelectedOptionId = useCallback((mode: IMode): string | undefined => {
-    const defaultOpt = mode.options.find((opt) => opt.default);
-    return defaultOpt?.id || mode.options[0]?.id;
-  }, []);
 
   let promptValue = '';
   try {
@@ -132,13 +65,6 @@ export default function MessageComposer({
   }
 
   const [promptUsed, setPromptUsed] = useState(false);
-
-  const onFavoriteSelect = useCallback((content: string) => {
-    setValue(content);
-    if (inputRef.current) {
-      inputRef.current.setValueExtern(content);
-    }
-  }, []);
 
   const onPaste = useCallback(
     (event: ClipboardEvent) => {
@@ -160,24 +86,9 @@ export default function MessageComposer({
   );
 
   const onSubmit = useCallback(
-    async (
-      msg: string,
-      attachments?: IAttachment[],
-      selectedCommand?: string
-    ) => {
-      // Build modes dict: only include modes that have selections
-      const modesDict: Record<string, string> = {};
-      modes.forEach((mode) => {
-        const selectedId = getSelectedOptionId(mode);
-        if (selectedId) {
-          modesDict[mode.id] = selectedId;
-        }
-      });
-
+    async (msg: string, attachments?: IAttachment[]) => {
       const message: IStep = {
         threadId: '',
-        command: selectedCommand,
-        modes: Object.keys(modesDict).length > 0 ? modesDict : undefined,
         id: uuidv4(),
         name: user?.identifier || 'User',
         type: 'user_message',
@@ -195,7 +106,7 @@ export default function MessageComposer({
       }
       sendMessage(message, fileReferences);
     },
-    [user, sendMessage, autoScrollRef, modes, getSelectedOptionId]
+    [user, sendMessage, autoScrollRef]
   );
 
   const onReply = useCallback(
@@ -219,17 +130,14 @@ export default function MessageComposer({
   );
 
   const submit = useCallback(() => {
-    if (
-      disabled ||
-      (value.trim() === '' && attachments.length === 0 && !selectedCommand)
-    ) {
+    if (disabled || (value.trim() === '' && attachments.length === 0)) {
       return;
     }
 
     if (askUser) {
       onReply(value);
     } else {
-      onSubmit(value, attachments, selectedCommand?.id);
+      onSubmit(value, attachments);
     }
 
     setAttachments([]);
@@ -240,7 +148,6 @@ export default function MessageComposer({
     disabled,
     askUser,
     attachments,
-    selectedCommand,
     setAttachments,
     onSubmit,
     onReply
@@ -274,8 +181,6 @@ export default function MessageComposer({
         ref={inputRef}
         id="chat-input"
         autoFocus={!isMobile}
-        selectedCommand={selectedCommand}
-        setSelectedCommand={setSelectedCommand}
         onChange={setValue}
         onPaste={onPaste}
         onEnter={submit}
@@ -283,65 +188,19 @@ export default function MessageComposer({
       />
       <div className="flex items-center justify-between">
         <div className="flex items-center -ml-1.5">
-          <VoiceButton disabled={disabled} />
           <UploadButton
             disabled={disabled}
             fileSpec={fileSpec}
             onFileUploadError={onFileUploadError}
             onFileUpload={onFileUpload}
           />
-          {showSettingsInComposer && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    id="chat-settings-open-modal"
-                    disabled={disabled}
-                    onClick={() => setChatSettingsOpen(true)}
-                    className="hover:bg-muted rounded-full"
-                    variant="ghost"
-                    size="icon"
-                  >
-                    <Settings className="!size-6" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{t('navigation.user.menu.settings')}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
           <OpenParentThreadButton />
           <McpButton disabled={disabled} />
-          {modes.map((mode) => (
-            <ModePicker
-              key={mode.id}
-              mode={mode}
-              disabled={disabled}
-              selectedOptionId={getSelectedOptionId(mode)}
-              onOptionSelect={handleModeSelect}
-            />
-          ))}
-          <CommandButton
-            disabled={disabled}
-            selectedCommandId={selectedCommand?.id}
-            onCommandSelect={setSelectedCommand}
-          />
-          <CommandButtons
-            disabled={disabled}
-            selectedCommandId={selectedCommand?.id}
-            onCommandSelect={setSelectedCommand}
-          />
-
-          <FavoriteButton disabled={disabled} onSelect={onFavoriteSelect} />
         </div>
         <div className="flex items-center gap-1">
           <SubmitButton
             onSubmit={submit}
-            disabled={
-              disabled ||
-              (!value.trim() && !selectedCommand && attachments.length === 0)
-            }
+            disabled={disabled || (!value.trim() && attachments.length === 0)}
           />
         </div>
       </div>

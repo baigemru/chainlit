@@ -1,27 +1,10 @@
 import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSetRecoilState } from 'recoil';
 
-import {
-  useAudio,
-  useAuth,
-  useChatData,
-  useConfig
-} from '@chainlit/react-client';
+import { useAuth, useConfig } from '@chainlit/react-client';
 
-import AudioPresence from '@/components/AudioPresence';
 import ButtonLink from '@/components/ButtonLink';
-import { Settings } from '@/components/icons/Settings';
-import { Button } from '@/components/ui/button';
 import { useSidebar } from '@/components/ui/sidebar';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from '@/components/ui/tooltip';
-import { Translator } from 'components/i18n';
-
-import { chatSettingsSidebarOpenState } from '@/state/project';
 
 import ApiKeys from './ApiKeys';
 import ChatProfiles from './ChatProfiles';
@@ -33,15 +16,10 @@ import { ThemeToggle } from './ThemeToggle';
 import UserNav from './UserNav';
 
 const Header = memo(() => {
-  const { audioConnection } = useAudio();
   const navigate = useNavigate();
   const { data, user } = useAuth();
   const { config } = useConfig();
-  const { chatSettingsInputs } = useChatData();
   const { open, openMobile, isMobile } = useSidebar();
-  const setChatSettingsSidebarOpen = useSetRecoilState(
-    chatSettingsSidebarOpenState
-  );
 
   const sidebarOpen = isMobile ? openMobile : open;
 
@@ -51,10 +29,6 @@ const Header = memo(() => {
   const links = (config?.ui?.header_links || []).filter(
     (link) => !link.authenticated_only || !!user
   );
-
-  const showSettingsInHeader =
-    config?.ui?.chat_settings_location === 'sidebar' &&
-    chatSettingsInputs.length > 0;
 
   return (
     <div
@@ -78,18 +52,6 @@ const Header = memo(() => {
         <ChatProfiles navigate={navigate} />
       </div>
 
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-        {audioConnection === 'on' ? (
-          <AudioPresence
-            type="server"
-            height={35}
-            width={70}
-            barCount={4}
-            barSpacing={2}
-          />
-        ) : null}
-      </div>
-
       <div />
       <div className="flex items-center gap-1">
         <ShareButton />
@@ -111,24 +73,6 @@ const Header = memo(() => {
               labelRefreshInterval={link.label_refresh_interval}
             />
           ))}
-        {showSettingsInHeader && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                id="chat-settings-header-button"
-                onClick={() => setChatSettingsSidebarOpen(true)}
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-muted-foreground"
-              >
-                <Settings className="!size-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <Translator path="chat.settings.title" />
-            </TooltipContent>
-          </Tooltip>
-        )}
         <ThemeToggle />
         <UserNav />
       </div>

@@ -105,19 +105,17 @@ thirteen names retired with the features behind them).
 | `chat_settings_change`  | **retired**      | chat settings are unused                                                                                                                                                                                                                                           |
 | `chat_settings_edit`    | **retired**      | chat settings are unused                                                                                                                                                                                                                                           |
 | —                       | `hb.ack`         | **New.** Answer to `hb`.                                                                                                                                                                                                                                           |
-| —                       | `rpc.result`     | **New as a message.** The result of `rpc.call`, which used to travel back inside a socket.io ack.                                                                                                                                                                  |
 
 ---
 
 ## Correlation
 
-Two message families used to be _unaddressed_, and both grew elaborate
-server-side choreography to compensate:
+One message family used to be _unaddressed_, and grew elaborate server-side
+choreography to compensate. (There were two: the other was the `call_fn`
+reply, correlated through a socket.io ack bound to the socket id and
+therefore unable to survive a reconnect. It is retired along with the
+copilot embedding, so the problem is gone rather than solved.)
 
-- **`rpc.call` / `rpc.result` / `rpc.cancel` carry `callId`.** socket.io
-  correlated a `call_fn` reply through its own ack machinery, which is bound
-  to the socket id and therefore does not survive a reconnect — hence the
-  unconditional `clear_call_fn` at the top of `connection_successful`.
 - **`ask.end` carries `stepId`.** The entire "never emit `clear_ask` over a
   live successor ask" dance in `socket.py` and `emitter.py` exists only
   because `clear_ask` addressed nothing. An addressed end lets the client

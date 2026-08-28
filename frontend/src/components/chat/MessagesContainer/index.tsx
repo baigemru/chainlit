@@ -197,7 +197,6 @@ const MessagesContainer = ({ navigate }: Props) => {
       allowHtml: config?.features?.unsafe_allow_html,
       latex: config?.features?.latex,
       renderUserMarkdown: config?.features?.user_message_markdown,
-      editable: !!config?.features.edit_message,
       loading,
       showFeedbackButtons: enableFeedback,
       uiName: config?.ui?.name || '',
@@ -278,14 +277,13 @@ const MessagesContainer = ({ navigate }: Props) => {
   const endedChatContext = useMemo(
     () => ({
       ...memoizedContext,
-      editable: false,
       loading: false,
       // A kept transcript can contain a copy of the step that is currently
       // in wait mode in the live conversation; ended sections never shimmer.
       activeWaitStepId: undefined,
-      // Feedback and favorites post against the live session, which never
-      // saw these steps — the server would reject them after the UI already
-      // showed them as accepted.
+      // Feedback posts against the live session, which never saw these
+      // steps — the server would reject it after the UI already showed it
+      // as accepted.
       showFeedbackButtons: false
     }),
     [memoizedContext]

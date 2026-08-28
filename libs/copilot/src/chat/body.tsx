@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
 import Alert from '@chainlit/app/src/components/Alert';
-import ChatSettingsModal from '@chainlit/app/src/components/ChatSettings';
 import { ErrorBoundary } from '@chainlit/app/src/components/ErrorBoundary';
 import { TaskList } from '@chainlit/app/src/components/Tasklist';
 import ChatFooter from '@chainlit/app/src/components/chat/Footer';
@@ -28,28 +27,18 @@ const Chat = () => {
   const layoutMaxWidth = useLayoutMaxWidth();
   const setAttachments = useSetRecoilState(attachmentsState);
   const autoScrollRef = useRef(true);
-  const { error, disabled, callFn } = useChatData();
+  const { error, disabled } = useChatData();
   const { uploadFile } = useChatInteract();
   const uploadFileRef = useRef(uploadFile);
 
   const fileSpec = useMemo(
     () => ({
-      max_size_mb:
-        config?.features?.spontaneous_file_upload?.max_size_mb || 500,
-      max_files: config?.features?.spontaneous_file_upload?.max_files || 20,
+      maxSizeMb: config?.features?.spontaneous_file_upload?.max_size_mb || 500,
+      maxFiles: config?.features?.spontaneous_file_upload?.max_files || 20,
       accept: config?.features?.spontaneous_file_upload?.accept || ['*/*']
     }),
     [config]
   );
-
-  useEffect(() => {
-    if (callFn) {
-      const event = new CustomEvent('chainlit-call-fn', {
-        detail: callFn
-      });
-      window.dispatchEvent(event);
-    }
-  }, [callFn]);
 
   useEffect(() => {
     uploadFileRef.current = uploadFile;
@@ -160,7 +149,6 @@ const Chat = () => {
             </Alert>
           </div>
         ) : null}
-        <ChatSettingsModal />
         <ErrorBoundary>
           <ScrollContainer
             autoScrollUserMessage={config?.features?.user_message_autoscroll}

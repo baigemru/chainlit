@@ -23,7 +23,7 @@ export const pruneAskActions = (
   incomingStepId?: string
 ): IAction[] => {
   if (!prevAsk) return actions;
-  if (incomingStepId && prevAsk.spec.step_id === incomingStepId) {
+  if (incomingStepId && prevAsk.spec.stepId === incomingStepId) {
     return actions;
   }
   const keys = prevAsk.spec.keys ?? [];

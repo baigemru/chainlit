@@ -68,7 +68,7 @@ const AskActionButtons = ({
 }) => {
   const { askUser } = useContext(MessageContext);
 
-  const belongsToMessage = askUser?.spec.step_id === messageId;
+  const belongsToMessage = askUser?.spec.stepId === messageId;
   const isAskingAction = askUser?.spec.type === 'action';
   const filteredActions = actions.filter((a) => {
     return a.forId === messageId && askUser?.spec.keys?.includes(a.id);

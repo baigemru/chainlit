@@ -3,24 +3,21 @@ import { useRecoilValue, useResetRecoilState, useSetRecoilState } from 'recoil';
 import {
   actionState,
   askUserState,
-  callFnState,
-  chatSettingsInputsState,
-  chatSettingsValueState,
   currentThreadIdState,
   elementState,
-  favoriteMessagesState,
   firstUserInteraction,
   loadingState,
   messagesState,
+  protocolErrorState,
   sessionIdState,
   sessionState,
   sideViewState,
   tasklistState,
-  threadIdToResumeState,
-  tokenCountState
+  threadIdToResumeState
 } from 'src/state';
 import { IFileRef, IStep } from 'src/types';
 import { addMessage } from 'src/utils/message';
+import { toWireStep } from 'src/utils/wire';
 import { v4 as uuidv4 } from 'uuid';
 
 import { ChainlitContext } from './context';
@@ -33,9 +30,7 @@ const useChatInteract = () => {
   const askUser = useRecoilValue(askUserState);
   const sessionId = useRecoilValue(sessionIdState);
 
-  const resetChatSettings = useResetRecoilState(chatSettingsInputsState);
   const resetSessionId = useResetRecoilState(sessionIdState);
-  const resetChatSettingsValue = useResetRecoilState(chatSettingsValueState);
 
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
@@ -43,31 +38,26 @@ const useChatInteract = () => {
   const setElements = useSetRecoilState(elementState);
   const setTasklists = useSetRecoilState(tasklistState);
   const setActions = useSetRecoilState(actionState);
-  const setTokenCount = useSetRecoilState(tokenCountState);
   const setIdToResume = useSetRecoilState(threadIdToResumeState);
   const setSideView = useSetRecoilState(sideViewState);
   const setCurrentThreadId = useSetRecoilState(currentThreadIdState);
-  const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
   const setAskUser = useSetRecoilState(askUserState);
-  const setCallFn = useSetRecoilState(callFnState);
+  const setProtocolError = useSetRecoilState(protocolErrorState);
 
   const clear = useCallback(() => {
-    session?.socket.emit('clear_session');
-    session?.socket.disconnect();
+    session?.socket.send({ t: 'session.clear' });
+    session?.socket.close();
     setIdToResume(undefined);
     resetSessionId();
-    // The old session is gone; a lingering ask/call would hold a dead
-    // callback (and possibly an awaitingReply lock) forever.
+    // The old session is gone; a lingering ask would hold a dead callback
+    // (and possibly an awaitingReply lock) forever.
     setAskUser(undefined);
-    setCallFn(undefined);
     setFirstUserInteraction(undefined);
+    setProtocolError(undefined);
     setMessages([]);
     setElements([]);
     setTasklists([]);
     setActions([]);
-    setTokenCount(0);
-    resetChatSettings();
-    resetChatSettingsValue();
     setSideView(undefined);
     setCurrentThreadId(undefined);
   }, [session]);
@@ -85,85 +75,14 @@ const useChatInteract = () => {
       }
       setMessages((oldMessages) => addMessage(oldMessages, message as IStep));
 
-      session?.socket.emit('client_message', { message, fileReferences });
-    },
-    [session?.socket]
-  );
-
-  const editMessage = useCallback(
-    (message: IStep) => {
-      session?.socket.emit('edit_message', { message });
-    },
-    [session?.socket]
-  );
-
-  const toggleMessageFavorite = useCallback(
-    (message: IStep) => {
-      const favorite = !(message.metadata?.favorite ?? false);
-      const updatedMetadata = {
-        ...(message.metadata || {}),
-        favorite
-      };
-
-      setMessages((oldMessages) =>
-        oldMessages.map((item) =>
-          item.id === message.id
-            ? { ...item, metadata: { ...(item.metadata || {}), favorite } }
-            : item
-        )
-      );
-
-      const nextMessage: IStep = {
-        ...message,
-        metadata: updatedMetadata
-      };
-
-      setFavoriteMessages((oldFavorites) => {
-        if (favorite) {
-          const filtered = oldFavorites.filter(
-            (step) => step.id !== message.id
-          );
-          return [nextMessage, ...filtered];
-        }
-        return oldFavorites.filter((step) => step.id !== message.id);
-      });
-
-      session?.socket.emit('message_favorite', { message: nextMessage });
-    },
-    [session?.socket, setFavoriteMessages, setMessages]
-  );
-
-  const windowMessage = useCallback(
-    (data: any) => {
-      session?.socket.emit('window_message', data);
-    },
-    [session?.socket]
-  );
-
-  const startAudioStream = useCallback(() => {
-    session?.socket.emit('audio_start');
-  }, [session?.socket]);
-
-  const sendAudioChunk = useCallback(
-    (
-      isStart: boolean,
-      mimeType: string,
-      elapsedTime: number,
-      data: Int16Array
-    ) => {
-      session?.socket.emit('audio_chunk', {
-        isStart,
-        mimeType,
-        elapsedTime,
-        data
+      session?.socket.send({
+        t: 'message.send',
+        message: toWireStep(message as IStep),
+        fileReferences
       });
     },
     [session?.socket]
   );
-
-  const endAudioStream = useCallback(() => {
-    session?.socket.emit('audio_end');
-  }, [session?.socket]);
 
   const replyMessage = useCallback(
     (message: IStep) => {
@@ -179,20 +98,6 @@ const useChatInteract = () => {
     [askUser]
   );
 
-  const updateChatSettings = useCallback(
-    (values: object) => {
-      session?.socket.emit('chat_settings_change', values);
-    },
-    [session?.socket]
-  );
-
-  const editChatSettings = useCallback(
-    (values: object) => {
-      session?.socket.emit('chat_settings_edit', values);
-    },
-    [session?.socket]
-  );
-
   const stopTask = useCallback(() => {
     setMessages((oldMessages) =>
       oldMessages.map((m) => {
@@ -203,7 +108,7 @@ const useChatInteract = () => {
 
     setLoading(false);
 
-    session?.socket.emit('stop');
+    session?.socket.send({ t: 'stop' });
   }, [session?.socket]);
 
   const uploadFile = useCallback(
@@ -218,16 +123,8 @@ const useChatInteract = () => {
     clear,
     replyMessage,
     sendMessage,
-    editMessage,
-    windowMessage,
-    startAudioStream,
-    sendAudioChunk,
-    endAudioStream,
     stopTask,
-    setIdToResume,
-    updateChatSettings,
-    editChatSettings,
-    toggleMessageFavorite
+    setIdToResume
   };
 };
 

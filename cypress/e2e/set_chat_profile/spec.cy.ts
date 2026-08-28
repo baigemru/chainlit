@@ -107,11 +107,6 @@ describe('Programmatic chat profile switch', () => {
 
     // The trigger exists exactly once, above the divider
     cy.get('.step:contains("go soft")').should('have.length', 1);
-    // ...and the retained half cannot be edited into the new session
-    cy.get('.chat-boundary')
-      .prevAll('.step')
-      .find('.edit-message')
-      .should('not.exist');
   });
 
   it('should not loop when the transit value equals the trigger', () => {

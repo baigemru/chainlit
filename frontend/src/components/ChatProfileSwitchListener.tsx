@@ -3,10 +3,10 @@ import { flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useSetRecoilState } from 'recoil';
 
+import type { SessionHandoff } from '@chainlit/react-client';
 import {
   IStep,
   askUserState,
-  callFnState,
   loadingState,
   messagesState,
   sessionIdState,
@@ -23,18 +23,8 @@ import {
   attachmentsState,
   chatBoundariesState,
   collapsedExcursionsState,
-  keptExcursionsState,
-  persistentCommandState
+  keptExcursionsState
 } from '@/state/chat';
-
-interface SetChatProfilePayload {
-  name: string;
-  keepTranscript?: boolean;
-  /** Set when the backend parked a transit message for the next session. */
-  hasTransitMessage?: boolean;
-  /** Id the backend parked the hand-off record under; adopt it verbatim. */
-  nextSessionId?: string | null;
-}
 
 export default function ChatProfileSwitchListener() {
   const navigate = useNavigate();
@@ -42,26 +32,24 @@ export default function ChatProfileSwitchListener() {
   const { session, chatProfile, setChatProfile } = useChatSession();
   const { clear } = useChatInteract();
   const setAskUser = useSetRecoilState(askUserState);
-  const setCallFn = useSetRecoilState(callFnState);
   const setLoading = useSetRecoilState(loadingState);
   const setMessages = useSetRecoilState(messagesState);
   const setSessionId = useSetRecoilState(sessionIdState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
   const setKeptExcursions = useSetRecoilState(keptExcursionsState);
   const setCollapsedExcursions = useSetRecoilState(collapsedExcursionsState);
-  const setPersistentCommand = useSetRecoilState(persistentCommandState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
 
   // Latest switch logic lives in a ref so the socket subscription below is
   // only re-registered when the socket itself changes.
-  const switchRef = useRef<(payload: SetChatProfilePayload) => void>();
+  const switchRef = useRef<(payload: SessionHandoff) => void>();
   switchRef.current = (payload) => {
-    const { name, hasTransitMessage, nextSessionId } = payload || {};
-    const keepTranscript = !!payload?.keepTranscript;
+    const { chatProfile: name, hasTransitMessage, nextSessionId } = payload;
+    const keepTranscript = !!payload.keepTranscript;
 
     if (!config?.chatProfiles?.some((profile) => profile.name === name)) {
       console.warn(
-        `set_chat_profile: unknown chat profile "${name}", ignoring.`
+        `session.handoff: unknown chat profile "${name}", ignoring.`
       );
       return;
     }
@@ -78,18 +66,16 @@ export default function ChatProfileSwitchListener() {
     //
     // flushSync keeps the whole teardown in ONE commit. A manual selection
     // runs in a discrete React event, so its state updates and the router
-    // update share a lane; here we run in a socket.io callback, where the
+    // update share a lane; here we run in a socket callback, where the
     // Recoil writes are scheduled at sync priority while the router update
     // is not. That split commits a render still located on /thread/<old>
     // but with the thread id already cleared, which makes Thread mount
     // AutoResumeThread and resume the previous thread over the new chat.
     flushSync(() => {
       setAskUser(undefined);
-      setCallFn(undefined);
       setLoading(false);
       setChatProfile(name);
       setAttachments([]);
-      setPersistentCommand(undefined);
 
       // Read through updaters so these are the values before clear() wipes
       // them, without subscribing this component to every streamed token.
@@ -120,7 +106,7 @@ export default function ChatProfileSwitchListener() {
 
       if (keepTranscript && kept === undefined) {
         console.error(
-          'set_chat_profile: could not read the transcript; keeping the chat cleared.'
+          'session.handoff: could not read the transcript; keeping the chat cleared.'
         );
       }
 
@@ -152,12 +138,9 @@ export default function ChatProfileSwitchListener() {
   useEffect(() => {
     const socket = session?.socket;
     if (!socket) return;
-    const handler = (payload: SetChatProfilePayload) =>
-      switchRef.current?.(payload);
-    socket.on('set_chat_profile', handler);
-    return () => {
-      socket.off('set_chat_profile', handler);
-    };
+    return socket.subscribe((message) => {
+      if (message.t === 'session.handoff') switchRef.current?.(message);
+    });
   }, [session?.socket]);
 
   return null;

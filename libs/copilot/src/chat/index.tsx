@@ -68,11 +68,7 @@ export default function ChatWrapper() {
 
     hasConnected.current = true;
     lastConnectedThreadId.current = copilotThreadId;
-    connect({
-      // @ts-expect-error window typing
-      transports: window.transports,
-      userEnv: {}
-    });
+    connect({ userEnv: {} });
   }, [copilotThreadId, idToResume, connect, sessionId]);
 
   useEffect(() => {

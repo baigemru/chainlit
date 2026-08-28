@@ -13,7 +13,6 @@ import {
   ChainlitContext,
   IStep,
   askUserState,
-  callFnState,
   currentThreadIdState,
   loadingState,
   messagesState,
@@ -29,8 +28,7 @@ import {
   chatBoundariesState,
   collapsedExcursionsState,
   keptExcursionsState,
-  openThreadTransitionState,
-  persistentCommandState
+  openThreadTransitionState
 } from '@/state/chat';
 
 // Guards the async window between the availability check and the state
@@ -60,11 +58,9 @@ export const useOpenThread = () => {
   const transition = useRecoilValue(openThreadTransitionState);
 
   const setAskUser = useSetRecoilState(askUserState);
-  const setCallFn = useSetRecoilState(callFnState);
   const setLoading = useSetRecoilState(loadingState);
   const setMessages = useSetRecoilState(messagesState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
-  const setPersistentCommand = useSetRecoilState(persistentCommandState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
   const setKeptExcursions = useSetRecoilState(keptExcursionsState);
   const setCollapsedExcursions = useSetRecoilState(collapsedExcursionsState);
@@ -117,10 +113,8 @@ export const useOpenThread = () => {
           // A pending AskUserMessage/AskFileMessage dies with the chat that
           // asked it, exactly as on a profile switch.
           setAskUser(undefined);
-          setCallFn(undefined);
           setLoading(false);
           setAttachments([]);
-          setPersistentCommand(undefined);
 
           // Read through updaters so these are the values at this moment,
           // without subscribing the caller to every streamed token.
@@ -167,11 +161,9 @@ export const useOpenThread = () => {
       transition,
       threadResumable,
       setAskUser,
-      setCallFn,
       setLoading,
       setMessages,
       setAttachments,
-      setPersistentCommand,
       setBoundaries,
       setKeptExcursions,
       setCollapsedExcursions,

@@ -4,7 +4,6 @@ import { useRecoilValue } from 'recoil';
 import { sideViewState, useAuth, useConfig } from '@chainlit/react-client';
 
 import ChatProfileSwitchListener from '@/components/ChatProfileSwitchListener';
-import ChatSettingsSidebar from '@/components/ChatSettings/ChatSettingsSidebar';
 import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
 import { TaskList } from '@/components/Tasklist';
@@ -31,8 +30,6 @@ const Page = ({ children }: Props) => {
     }
   }
 
-  const showSettingsSidebar = config?.ui?.chat_settings_location === 'sidebar';
-
   const mainContent = (
     <div className="flex flex-col h-full w-full">
       <Header />
@@ -50,7 +47,6 @@ const Page = ({ children }: Props) => {
           </div>
         </ResizablePanel>
         {sideView ? <ElementSideView /> : <TaskList isMobile={false} />}
-        {showSettingsSidebar && <ChatSettingsSidebar />}
       </ResizablePanelGroup>
     </div>
   );

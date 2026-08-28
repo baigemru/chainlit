@@ -225,7 +225,7 @@ describe('Access Control', () => {
             /("threadId":\s*")[^"]*(")/,
             `$1${stolenThreadId}$2`
           );
-          expect(request.url).to.include('/ws/socket.io/');
+          expect(request.url).to.include('/ws');
           expect(request.body).to.include(`"threadId":"${stolenThreadId}"`);
         }
       }

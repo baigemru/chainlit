@@ -1,5 +1,5 @@
 import { debounce } from 'lodash';
-import { useCallback, useContext, useEffect, useRef } from 'react';
+import { useCallback, useContext, useRef } from 'react';
 import {
   useRecoilCallback,
   useRecoilState,
@@ -7,49 +7,34 @@ import {
   useResetRecoilState,
   useSetRecoilState
 } from 'recoil';
-import io from 'socket.io-client';
 import { toast } from 'sonner';
 import {
   actionState,
   askUserState,
-  audioConnectionState,
-  callFnState,
   chatProfileState,
-  chatSettingsInputsState,
-  chatSettingsValueState,
-  commandsState,
   configState,
   currentThreadIdState,
   elementState,
-  favoriteMessagesState,
   firstUserInteraction,
-  isAiSpeakingState,
   loadingState,
   mcpState,
   messagesState,
-  modesState,
-  resumeThreadErrorState,
+  protocolErrorState,
   sessionIdState,
   sessionIdStorage,
   sessionState,
   sideViewState,
   tasklistState,
-  threadIdToResumeState,
-  tokenCountState,
-  wavRecorderState,
-  wavStreamPlayerState
+  threadIdToResumeState
 } from 'src/state';
 import {
   IAction,
+  IAsk,
   IAskElementResponse,
-  ICommand,
-  IElement,
   IFileRef,
   IMessageElement,
-  IMode,
   IStep,
-  ITasklistElement,
-  IThread
+  ITasklistElement
 } from 'src/types';
 import { pruneAskActions } from 'src/utils/ask';
 import {
@@ -59,16 +44,29 @@ import {
   updateMessageById,
   updateMessageContentById
 } from 'src/utils/message';
-
-import { OutputAudioChunk } from './types/audio';
+import {
+  toAction,
+  toElement,
+  toStep,
+  toStepPatch,
+  toThread,
+  toWireStep
+} from 'src/utils/wire';
 
 import { ChainlitContext } from './context';
-import type { IToken } from './useChatData';
+import type {
+  AskReplyValue,
+  Hello,
+  ProtocolAskSpec,
+  ServerMsgHandlers
+} from './protocol';
+import { CloseCode } from './protocol';
+import { ChainlitSocket, websocketUrl } from './socket';
 
 // True once any connection succeeded in this page's lifetime. Reported to
-// the server on connection_successful so it can distinguish a reconnect of
-// a loaded page (UI state intact) from a fresh page load that needs a full
-// restore of a pending ask's transcript/actions/element.
+// the server in `hello` so it can distinguish a reconnect of a loaded page
+// (UI state intact) from a fresh page load that needs a full restore of a
+// pending ask's transcript/actions/element.
 let pageHasEstablishedConnection = false;
 
 // For embedders that unmount and remount the whole widget (copilot): the
@@ -79,6 +77,16 @@ const resetPageConnectionFlag = () => {
 };
 export { resetPageConnectionFlag };
 
+/**
+ * Turn a wire ask spec into the flat shape the ask components read.
+ *
+ * The two are the same object: the union's per-kind fields (`keys`,
+ * `maxFiles`, `elementId`) are exactly the optional fields of `IAsk['spec']`,
+ * and the discriminator is spelled `type` on both sides.
+ */
+const toAskSpec = (spec: ProtocolAskSpec): IAsk['spec'] =>
+  ({ ...spec }) as IAsk['spec'];
+
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useRecoilValue(sessionIdState);
@@ -88,31 +96,21 @@ const useChatSession = () => {
   const authFailureHandledRef = useRef(false);
 
   const [session, setSession] = useRecoilState(sessionState);
-  const setIsAiSpeaking = useSetRecoilState(isAiSpeakingState);
-  const setAudioConnection = useSetRecoilState(audioConnectionState);
-  const resetChatSettingsValue = useResetRecoilState(chatSettingsValueState);
-  const setChatSettingsValue = useSetRecoilState(chatSettingsValueState);
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
   const setMcps = useSetRecoilState(mcpState);
-  const wavStreamPlayer = useRecoilValue(wavStreamPlayerState);
-  const wavRecorder = useRecoilValue(wavRecorderState);
   const setMessages = useSetRecoilState(messagesState);
   const setAskUser = useSetRecoilState(askUserState);
-  const setCallFn = useSetRecoilState(callFnState);
-  const setCommands = useSetRecoilState(commandsState);
-  const setModes = useSetRecoilState(modesState);
   const setSideView = useSetRecoilState(sideViewState);
   const setElements = useSetRecoilState(elementState);
   const setTasklists = useSetRecoilState(tasklistState);
   const setActions = useSetRecoilState(actionState);
-  const setChatSettingsInputs = useSetRecoilState(chatSettingsInputsState);
-  const setTokenCount = useSetRecoilState(tokenCountState);
+  const setProtocolError = useSetRecoilState(protocolErrorState);
   const [chatProfile, setChatProfile] = useRecoilState(chatProfileState);
-  // The socket handlers below are registered once per connect and would
-  // otherwise close over the profile that was active at that moment; the
-  // ref always carries the current one, so every incoming message is
-  // stamped with the profile it is actually generated under.
+  // The handlers below are registered once per connect and would otherwise
+  // close over the profile that was active at that moment; the ref always
+  // carries the current one, so every incoming message is stamped with the
+  // profile it is actually generated under.
   const chatProfileRef = useRef(chatProfile);
   chatProfileRef.current = chatProfile;
   // Hot-swap flag, latched. It cannot be read straight from the config:
@@ -126,11 +124,14 @@ const useChatSession = () => {
   if (config?.features?.hot_swap_chat_profile) hotSwapRef.current = true;
   const hotSwap = hotSwapRef.current;
   const idToResume = useRecoilValue(threadIdToResumeState);
-  const setThreadResumeError = useSetRecoilState(resumeThreadErrorState);
-  const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
 
   const [currentThreadId, setCurrentThreadId] =
     useRecoilState(currentThreadIdState);
+  // The thread id travels in every `hello`, and it changes without the
+  // socket being rebuilt — hence a ref rather than a dependency. This
+  // replaces the mutation of socket.io's `auth` dict.
+  const currentThreadIdRef = useRef(currentThreadId);
+  currentThreadIdRef.current = currentThreadId;
 
   // A dead ask's buttons must not outlive it in the actions atom (they
   // would render as regular action buttons whose click 404s). Called by
@@ -148,555 +149,481 @@ const useChatSession = () => {
     []
   );
 
-  // Use currentThreadId as thread id in websocket header
-  useEffect(() => {
-    if (session?.socket) {
-      session.socket.auth['threadId'] = currentThreadId || '';
-    }
-  }, [currentThreadId]);
+  // Ending an ask is addressed now: `ask.end` names the step it ends, so a
+  // clear that arrives after a successor ask took the slot is dropped here
+  // instead of taking the live form down with it.
+  const endAsk = useRecoilCallback(
+    ({ set, snapshot }) =>
+      (stepId: string) => {
+        const current = snapshot.getLoadable(askUserState).valueMaybe();
+        if (current && current.spec.stepId !== stepId) return;
+        set(actionState, (old) => pruneAskActions(old, current));
+        set(askUserState, undefined);
+      },
+    []
+  );
 
   const _connect = useCallback(
-    async ({
-      transports,
-      userEnv
-    }: {
-      transports?: string[];
-      userEnv: Record<string, string>;
-    }) => {
-      const { protocol, host, pathname } = new URL(client.httpEndpoint);
-      const uri = `${protocol}//${host}`;
-      const path =
-        pathname && pathname !== '/'
-          ? `${pathname}/ws/socket.io`
-          : '/ws/socket.io';
-
+    async ({ userEnv }: { userEnv: Record<string, string> }) => {
       try {
         await client.stickyCookie(sessionId);
       } catch (err) {
         console.error(`Failed to set sticky session cookie: ${err}`);
       }
 
-      const socket = io(uri, {
-        path,
-        withCredentials: true,
-        transports,
-        auth: {
-          clientType: client.type,
-          sessionId,
-          threadId: idToResume || '',
-          userEnv: JSON.stringify(userEnv),
-          chatProfile: chatProfileRef.current
-            ? encodeURIComponent(chatProfileRef.current)
-            : '',
-          // True only on the very first connect after a full page load: the
-          // server restores the old session then only to rescue a live
-          // pending ask; otherwise a reload means a fresh chat. Mutated to
-          // false after the first successful connect so automatic transport
-          // reconnects restore the session unconditionally.
-          pageLoad: !pageHasEstablishedConnection
+      const buildHello = (): Hello => ({
+        t: 'hello',
+        sessionId,
+        clientType: client.type,
+        threadId: currentThreadIdRef.current || idToResume || undefined,
+        chatProfile: chatProfileRef.current || undefined,
+        userEnv,
+        // True only on the very first connect after a full page load: the
+        // server restores the old session then only to rescue a live
+        // pending ask; otherwise a reload means a fresh chat. Flipped to
+        // false after the first successful handshake so automatic transport
+        // reconnects restore the session unconditionally.
+        pageLoad: !pageHasEstablishedConnection
+      });
+
+      const socket = new ChainlitSocket({
+        url: websocketUrl(client.httpEndpoint),
+        hello: buildHello,
+        onStatus: (status) => {
+          // A new object on every transition so consumers of sessionState
+          // re-render and re-read `socket.connected`, which is a getter on
+          // a mutable transport rather than a value in the atom.
+          setSession((old) =>
+            old?.socket === socket
+              ? { socket, error: status === 'ready' ? false : old.error }
+              : old
+          );
+        },
+        onClose: ({ code, opened, terminal }) => {
+          if (
+            terminal &&
+            code === CloseCode.SESSION_FORBIDDEN &&
+            !authFailureHandledRef.current
+          ) {
+            // The persisted session id belongs to a session this user may
+            // not claim (e.g. someone else logged in within this tab). Mint
+            // a fresh id instead of retrying against the same refusal
+            // forever — the id change rebuilds the socket. Once only: a
+            // refusal for another reason would repeat with the new id and
+            // must surface as an error.
+            authFailureHandledRef.current = true;
+            resetSessionId();
+            return;
+          }
+          // A connection that never opened is a failed attempt — an upgrade
+          // refused before the server accepted it, where no close frame
+          // exists to read, or an unreachable server. That and a close the
+          // transport will not retry are the two errors the UI reacts to; a
+          // drop it is about to retry is not one, and the retry that fails
+          // will report itself.
+          if (opened && !terminal) return;
+          setSession((old) => (old ? { ...old, error: true } : old));
         }
       });
+
+      const handlers: ServerMsgHandlers = {
+        // ---- lifecycle -------------------------------------------------
+        'session.ready': (msg) => {
+          pageHasEstablishedConnection = true;
+          authFailureHandledRef.current = false;
+          if (msg.chatProfile) setChatProfile(msg.chatProfile);
+          // The MCP servers are attached to the session, not the socket, so
+          // a reconnect has to re-establish them.
+          setMcps((prev) =>
+            prev.map((mcp) => {
+              let promise;
+              if (mcp.clientType === 'sse') {
+                promise = client.connectSseMCP(sessionId, mcp.name, mcp.url!);
+              } else if (mcp.clientType === 'streamable-http') {
+                promise = client.connectStreamableHttpMCP(
+                  sessionId,
+                  mcp.name,
+                  mcp.url!,
+                  mcp.headers || {}
+                );
+              } else {
+                promise = client.connectStdioMCP(
+                  sessionId,
+                  mcp.name,
+                  mcp.command!
+                );
+              }
+              promise
+                .then(async ({ success, mcp }) => {
+                  setMcps((prev) =>
+                    prev.map((existingMcp) =>
+                      existingMcp.name === mcp.name
+                        ? {
+                            ...existingMcp,
+                            status: success ? 'connected' : 'failed',
+                            tools: mcp ? mcp.tools : existingMcp.tools
+                          }
+                        : existingMcp
+                    )
+                  );
+                })
+                .catch(() => {
+                  setMcps((prev) =>
+                    prev.map((existingMcp) =>
+                      existingMcp.name === mcp.name
+                        ? { ...existingMcp, status: 'failed' }
+                        : existingMcp
+                    )
+                  );
+                });
+              return { ...mcp, status: 'connecting' };
+            })
+          );
+        },
+
+        error: (msg) => {
+          // One channel for every refusal the server can name. Consumers
+          // filter on `code`; nothing here decides on their behalf.
+          setProtocolError(msg);
+          console.warn(`Server error (${msg.code}): ${msg.message ?? ''}`);
+        },
+
+        hb: () => {
+          // Answered by the transport itself, before the fan-out.
+        },
+
+        reload: () => {
+          socket.send({ t: 'session.clear' });
+          try {
+            // The server asked for a clean restart (dev hot-reload): drop
+            // the persisted id so the reloaded page cannot race the clear
+            // and resurrect the session it was told to leave.
+            sessionStorage.removeItem(sessionIdStorage.key);
+          } catch (_error) {
+            // Storage unavailable — the reload proceeds regardless.
+          }
+          window.location.reload();
+        },
+
+        // ---- steps -----------------------------------------------------
+        'step.upsert': ({ step }) => {
+          const message = toStep(step);
+          setMessages((old) =>
+            // An upsert states the whole step, so `wait` is stated too:
+            // the explicit (possibly undefined) value overwrites any stored
+            // one instead of surviving the merge.
+            addMessage(old, {
+              ...stampChatProfile(message, chatProfileRef.current),
+              wait: message.wait
+            })
+          );
+        },
+
+        'step.update': ({ step }) => {
+          const patch = toStepPatch(step);
+          setMessages((old) =>
+            // Only the fields the frame carries are written: an absent one
+            // is "no opinion", an explicit null became an undefined that
+            // clears the stored value.
+            updateMessageById(old, step.id, patch)
+          );
+        },
+
+        'step.delete': ({ stepId }) => {
+          setMessages((old) => deleteMessageById(old, stepId));
+        },
+
+        'step.stream.start': ({ step }) => {
+          const message = toStep(step);
+          setMessages((old) =>
+            // Same as an upsert: a stream start for an id that was in wait
+            // mode must clear the stored `wait`, or the rotation text would
+            // hide the streamed tokens.
+            addMessage(old, {
+              ...stampChatProfile(message, chatProfileRef.current),
+              wait: message.wait
+            })
+          );
+        },
+
+        'step.stream.token': ({ id, token, isSequence, isInput }) => {
+          setMessages((old) =>
+            updateMessageContentById(old, id, token, !!isSequence, !!isInput)
+          );
+        },
+
+        // ---- elements and actions --------------------------------------
+        'element.upsert': (msg) => {
+          const element = toElement(msg.element);
+          if (!element.url && element.chainlitKey) {
+            element.url = client.getElementUrl(element.chainlitKey, sessionId);
+          }
+          if (element.type === 'tasklist') {
+            setTasklists((old) => upsertById(old, element as ITasklistElement));
+          } else {
+            setElements((old) => upsertById(old, element as IMessageElement));
+          }
+        },
+
+        'element.remove': ({ id }) => {
+          setElements((old) => old.filter((e) => e.id !== id));
+          setTasklists((old) => old.filter((e) => e.id !== id));
+        },
+
+        'action.add': (msg) => {
+          // Upsert by id: a re-emitted action (an ask restored after a
+          // reconnect) must not duplicate a button already in the state.
+          setActions((old) => upsertById(old, toAction(msg.action)));
+        },
+
+        'action.remove': ({ id }) => {
+          setActions((old) => old.filter((a) => a.id !== id));
+        },
+
+        // ---- asks ------------------------------------------------------
+        'ask.start': ({ spec, step }) => {
+          const askSpec = toAskSpec(spec);
+          const reply = (
+            payload: IStep | IFileRef[] | IAction | IAskElementResponse
+          ) => {
+            // A plain message rather than a request/response ack: it is
+            // buffered while the transport is down and redelivered after
+            // the reconnect, so a click during a network blip is not lost.
+            socket.send({
+              t: 'ask.reply',
+              stepId: askSpec.stepId,
+              value: toAskReplyValue(askSpec.type, payload)
+            });
+            setAskUser((prev) =>
+              prev && prev.spec.stepId === askSpec.stepId
+                ? { ...prev, awaitingReply: true }
+                : prev
+            );
+          };
+          // A foreign ask replacing the previous one orphans that ask's
+          // buttons — drop them. The step id guard inside makes the SAME
+          // ask's re-emit (reconnect restore) a no-op here.
+          pruneStaleAskActions(askSpec.stepId);
+          const message = toStep(step);
+          // A re-emitted ask (reconnect restore) simply rebinds the form to
+          // the live socket; addMessage upserts the message by id.
+          setAskUser({
+            spec: askSpec,
+            callback: reply,
+            parentId: message.parentId
+          });
+          setMessages((old) =>
+            addMessage(old, stampChatProfile(message, chatProfileRef.current))
+          );
+          setLoading(false);
+        },
+
+        'ask.end': ({ stepId, reason }) => {
+          endAsk(stepId);
+          if (reason === 'timeout') setLoading(false);
+        },
+
+        // ---- task indicator --------------------------------------------
+        'task.indicator': ({ running }) => {
+          setLoading(running);
+        },
+
+        // ---- threads ---------------------------------------------------
+        'thread.resume': ({ thread }) => {
+          const resumed = toThread(thread);
+          const isReadOnlyView = Boolean(
+            (resumed.metadata as Record<string, unknown> | undefined)
+              ?.viewer_read_only
+          );
+          if (!isReadOnlyView && idToResume && resumed.id !== idToResume) {
+            window.location.href = `/thread/${resumed.id}`;
+          }
+          if (!isReadOnlyView && idToResume) {
+            setCurrentThreadId(resumed.id);
+          }
+          let messages: IStep[] = [];
+          for (const step of resumed.steps) {
+            messages = addMessage(messages, step);
+          }
+          if (resumed.metadata?.chat_profile) {
+            setChatProfile(resumed.metadata.chat_profile);
+          }
+          setMessages(messages);
+          const elements = resumed.elements || [];
+          setTasklists(
+            (elements as ITasklistElement[]).filter(
+              (e) => e.type === 'tasklist'
+            )
+          );
+          setElements(
+            (elements as IMessageElement[]).filter(
+              (e) => ['avatar', 'tasklist'].indexOf(e.type) === -1
+            )
+          );
+        },
+
+        'thread.first_interaction': ({ interaction, threadId }) => {
+          setFirstUserInteraction(interaction);
+          setCurrentThreadId(threadId);
+        },
+
+        'thread.parent': () => {
+          // Router-dependent: ThreadReturnListener subscribes to this one.
+        },
+
+        'thread.open': () => {
+          // Router-dependent: ThreadReturnListener subscribes to this one.
+        },
+
+        // ---- profiles and sidebar --------------------------------------
+        'profile.changed': ({ chatProfile: name }) => {
+          // The only writer of the profile atom on the hot-swap path.
+          // `sync` tells a post-reconnect "adopt this value" apart from a
+          // real switch; both land the same way here.
+          if (!name) return;
+          setChatProfile(name);
+        },
+
+        'session.handoff': () => {
+          // Tears the session down and adopts a server-minted successor id.
+          // Router-dependent: ChatProfileSwitchListener owns it.
+        },
+
+        'sidebar.set': (msg) => {
+          setSideView((prev) => {
+            // Absence and null are different instructions here: a field the
+            // frame leaves out means "leave it alone", an explicit null on
+            // the title or the key clears it.
+            const hasTitle = 'title' in msg;
+            const hasKey = 'key' in msg;
+            const hasElements = 'elements' in msg;
+
+            const incoming = hasElements
+              ? (msg.elements ?? []).map((raw) => {
+                  const element = toElement(raw) as IMessageElement;
+                  if (!element.url && element.chainlitKey) {
+                    element.url = client.getElementUrl(
+                      element.chainlitKey,
+                      sessionId
+                    );
+                  }
+                  return element;
+                })
+              : undefined;
+
+            // `elements` has no null form: an empty list closes the sidebar.
+            if (incoming && !incoming.length) return undefined;
+
+            const title = hasTitle ? (msg.title ?? '') : prev?.title || '';
+            const key = hasKey ? (msg.key ?? undefined) : prev?.key;
+
+            // A sidebar already open under this key keeps the elements it is
+            // showing: `ElementSidebar.set_elements(key=...)` promises that,
+            // and replacing the array would remount a custom element and
+            // throw away whatever the user had typed into it.
+            const keepElements =
+              !!incoming && !!prev && key !== undefined && prev.key === key;
+            const elements =
+              incoming && !keepElements ? incoming : prev?.elements || [];
+
+            if (
+              prev &&
+              prev.title === title &&
+              prev.key === key &&
+              prev.elements === elements
+            ) {
+              return prev;
+            }
+            return { title, elements, key };
+          });
+        },
+
+        // ---- misc ------------------------------------------------------
+        toast: ({ message, type }) => {
+          if (!message) {
+            console.warn('No message received for toast.');
+            return;
+          }
+          switch (type) {
+            case 'info':
+              toast.info(message);
+              break;
+            case 'error':
+              toast.error(message);
+              break;
+            case 'success':
+              toast.success(message);
+              break;
+            case 'warning':
+              toast.warning(message);
+              break;
+            default:
+              toast(message);
+              break;
+          }
+        }
+      };
+
+      socket.subscribe((message) => {
+        // The table is a mapped type over every tag in the union, so a new
+        // message on the wire is a compile error here rather than silence
+        // at runtime.
+        (handlers[message.t] as (m: typeof message) => void)(message);
+      });
+
       if (
         typeof window !== 'undefined' &&
         (window as any).Cypress &&
         client.type !== 'copilot'
       ) {
-        // Exposed for e2e tests to simulate transport drops. Only under
-        // Cypress, and never for the copilot widget: a handle on the
-        // user's socket must not leak to page scripts in production.
-        (window as any).__chainlitSocket = socket;
+        // Exposed for e2e tests to simulate transport drops, shaped like the
+        // socket.io handle the specs were written against. Only under
+        // Cypress, and never for the copilot widget: a handle on the user's
+        // socket must not leak to page scripts in production.
+        (window as any).__chainlitSocket = {
+          get connected() {
+            return socket.connected;
+          },
+          get sendBuffer() {
+            return socket.sendBuffer;
+          },
+          connect: () => socket.connect(),
+          close: () => socket.close(),
+          io: {
+            reconnection: (enabled?: boolean) =>
+              socket.setReconnection(enabled),
+            engine: { close: () => socket.drop() }
+          }
+        };
       }
 
       setSession((old) => {
-        old?.socket?.removeAllListeners();
         old?.socket?.close();
-        return {
-          socket
-        };
+        return { socket };
       });
 
-      socket.on('connect', () => {
-        socket.emit('connection_successful');
-        pageHasEstablishedConnection = true;
-        (socket.auth as Record<string, unknown>)['pageLoad'] = false;
-        authFailureHandledRef.current = false;
-        setSession((s) => ({ ...s!, error: false }));
-        socket.emit('fetch_favorites');
-        setMcps((prev) =>
-          prev.map((mcp) => {
-            let promise;
-            if (mcp.clientType === 'sse') {
-              promise = client.connectSseMCP(sessionId, mcp.name, mcp.url!);
-            } else if (mcp.clientType === 'streamable-http') {
-              promise = client.connectStreamableHttpMCP(
-                sessionId,
-                mcp.name,
-                mcp.url!,
-                mcp.headers || {}
-              );
-            } else {
-              promise = client.connectStdioMCP(
-                sessionId,
-                mcp.name,
-                mcp.command!
-              );
-            }
-            promise
-              .then(async ({ success, mcp }) => {
-                setMcps((prev) =>
-                  prev.map((existingMcp) => {
-                    if (existingMcp.name === mcp.name) {
-                      return {
-                        ...existingMcp,
-                        status: success ? 'connected' : 'failed',
-                        tools: mcp ? mcp.tools : existingMcp.tools
-                      };
-                    }
-                    return existingMcp;
-                  })
-                );
-              })
-              .catch(() => {
-                setMcps((prev) =>
-                  prev.map((existingMcp) => {
-                    if (existingMcp.name === mcp.name) {
-                      return {
-                        ...existingMcp,
-                        status: 'failed'
-                      };
-                    }
-                    return existingMcp;
-                  })
-                );
-              });
-            return { ...mcp, status: 'connecting' };
-          })
-        );
-      });
-
-      socket.on('connect_error', (err) => {
-        if (
-          err?.message === 'session authorization failed' &&
-          !authFailureHandledRef.current
-        ) {
-          // The persisted session id belongs to a session this user may not
-          // claim (e.g. someone else logged in within this tab). Mint a
-          // fresh id instead of retrying against the same refusal forever.
-          // Once only: a refusal for another reason (e.g. a foreign thread
-          // id) would repeat with the new id and must surface as an error.
-          authFailureHandledRef.current = true;
-          resetSessionId();
-          return;
-        }
-        setSession((s) => ({ ...s!, error: true }));
-      });
-
-      socket.on('task_start', () => {
-        setLoading(true);
-      });
-
-      socket.on('task_end', () => {
-        setLoading(false);
-      });
-
-      socket.on('reload', () => {
-        socket.emit('clear_session');
-        try {
-          // The server asked for a clean restart (dev hot-reload): drop the
-          // persisted id so the reloaded page cannot race clear_session and
-          // resurrect the session it was told to leave.
-          sessionStorage.removeItem(sessionIdStorage.key);
-        } catch (_error) {
-          // Storage unavailable — the reload proceeds regardless.
-        }
-        window.location.reload();
-      });
-
-      socket.on('audio_connection', async (state: 'on' | 'off') => {
-        if (state === 'on') {
-          let isFirstChunk = true;
-          const startTime = Date.now();
-          const mimeType = 'pcm16';
-          try {
-            await wavRecorder.begin();
-            await wavStreamPlayer.connect();
-            await wavRecorder.record(async (data) => {
-              const elapsedTime = Date.now() - startTime;
-              socket.emit('audio_chunk', {
-                isStart: isFirstChunk,
-                mimeType,
-                elapsedTime,
-                data: data.mono
-              });
-              isFirstChunk = false;
-            });
-            wavStreamPlayer.onStop = () => setIsAiSpeaking(false);
-          } catch {
-            try {
-              await wavRecorder.end();
-            } catch {
-              // ignored
-            }
-            await wavStreamPlayer.interrupt();
-            socket.emit('audio_end');
-            setAudioConnection('off');
-            return;
-          }
-        } else {
-          await wavRecorder.end();
-          await wavStreamPlayer.interrupt();
-        }
-        setAudioConnection(state);
-      });
-
-      socket.on('audio_chunk', (chunk: OutputAudioChunk) => {
-        wavStreamPlayer.add16BitPCM(chunk.data, chunk.track);
-        setIsAiSpeaking(true);
-      });
-
-      socket.on('audio_interrupt', () => {
-        wavStreamPlayer.interrupt();
-      });
-
-      socket.on('resume_thread', (thread: IThread) => {
-        const isReadOnlyView = Boolean(
-          (thread as any)?.metadata?.viewer_read_only
-        );
-        if (!isReadOnlyView && idToResume && thread.id !== idToResume) {
-          window.location.href = `/thread/${thread.id}`;
-        }
-        if (!isReadOnlyView && idToResume) {
-          setCurrentThreadId(thread.id);
-        }
-        let messages: IStep[] = [];
-        for (const step of thread.steps) {
-          messages = addMessage(messages, step);
-        }
-        if (thread.metadata?.chat_profile) {
-          setChatProfile(thread.metadata?.chat_profile);
-        }
-        if (thread.metadata?.chat_settings) {
-          setChatSettingsValue(thread.metadata?.chat_settings);
-        }
-        setMessages(messages);
-        const elements = thread.elements || [];
-        setTasklists(
-          (elements as ITasklistElement[]).filter((e) => e.type === 'tasklist')
-        );
-        setElements(
-          (elements as IMessageElement[]).filter(
-            (e) => ['avatar', 'tasklist'].indexOf(e.type) === -1
-          )
-        );
-      });
-
-      socket.on('resume_thread_error', (error?: string) => {
-        setThreadResumeError(error);
-      });
-
-      socket.on('new_message', (message: IStep) => {
-        setMessages((oldMessages) =>
-          // For an already known id addMessage merges fields into the stored
-          // step; `wait` is transient, so the explicit (possibly undefined)
-          // value overwrites any stored one instead of surviving the merge.
-          addMessage(oldMessages, {
-            ...stampChatProfile(message, chatProfileRef.current),
-            wait: message.wait
-          })
-        );
-      });
-
-      socket.on(
-        'first_interaction',
-        (event: { interaction: string; thread_id: string }) => {
-          setFirstUserInteraction(event.interaction);
-          setCurrentThreadId(event.thread_id);
-        }
-      );
-
-      socket.on('update_message', (message: IStep) => {
-        setMessages((oldMessages) =>
-          updateMessageById(oldMessages, message.id, {
-            // updateMessageById merges fields into the stored step; `wait` is
-            // transient and an update without it must end wait mode, so the
-            // explicit (possibly undefined) value overwrites any stored one.
-            ...stampChatProfile(message, chatProfileRef.current),
-            wait: message.wait
-          })
-        );
-      });
-
-      socket.on('delete_message', (message: IStep) => {
-        setMessages((oldMessages) =>
-          deleteMessageById(oldMessages, message.id)
-        );
-      });
-
-      socket.on('stream_start', (message: IStep) => {
-        setMessages((oldMessages) =>
-          // Same as new_message: a stream_start for an id that was in wait
-          // mode must clear the stored `wait`, or the rotation text would
-          // hide the streamed tokens.
-          addMessage(oldMessages, {
-            ...stampChatProfile(message, chatProfileRef.current),
-            wait: message.wait
-          })
-        );
-      });
-
-      socket.on(
-        'stream_token',
-        ({ id, token, isSequence, isInput }: IToken) => {
-          setMessages((oldMessages) =>
-            updateMessageContentById(
-              oldMessages,
-              id,
-              token,
-              isSequence,
-              isInput
-            )
-          );
-        }
-      );
-
-      socket.on('ask', ({ msg, spec }, callback) => {
-        const reply = (
-          payload: IStep | IFileRef[] | IAction | IAskElementResponse
-        ) => {
-          // A plain event rather than the socket.io ack: plain emits are
-          // buffered while the transport is down and redelivered after
-          // reconnect, so a click during a network blip is not lost.
-          socket.emit('ask_reply', { stepId: spec.step_id, value: payload });
-          if (typeof callback === 'function') {
-            // Legacy ack path, kept for an older backend using sio.call.
-            callback(payload);
-          }
-          setAskUser((prev) =>
-            prev && prev.spec.step_id === spec.step_id
-              ? { ...prev, awaitingReply: true }
-              : prev
-          );
-        };
-        // A foreign ask replacing the previous one orphans that ask's
-        // buttons — drop them. The step_id guard inside makes the SAME
-        // ask's re-emit (reconnect restore) a no-op here.
-        pruneStaleAskActions(spec.step_id);
-        // A re-emitted ask (reconnect restore) simply rebinds the form to
-        // the live socket; addMessage upserts the message by id.
-        setAskUser({ spec, callback: reply, parentId: msg.parentId });
-        setMessages((oldMessages) =>
-          addMessage(oldMessages, stampChatProfile(msg, chatProfileRef.current))
-        );
-
-        setLoading(false);
-      });
-
-      // The only writer of the profile atom on the hot-swap path. sync=true
-      // is the post-reconnect resync ("adopt this value"), sync=false a real
-      // switch; both land the same way here, the flag exists for clarity and
-      // for anything that later needs to tell them apart.
-      socket.on('chat_profile_changed', (data) => {
-        if (!data?.chatProfile) return;
-        setChatProfile(data.chatProfile);
-        // sync=true is the post-reconnect resync ("adopt this value"), so
-        // nothing else changed. sync=false is a real switch, and the server
-        // cleared session.chat_settings in the same step — mirror it, or the
-        // settings modal keeps offering the previous profile's form and
-        // values, which no longer exist server-side.
-        if (data.sync === false) {
-          setChatSettingsInputs([]);
-          resetChatSettingsValue();
-        }
-      });
-
-      socket.on('ask_timeout', () => {
-        pruneStaleAskActions();
-        setAskUser(undefined);
-        setLoading(false);
-      });
-
-      socket.on('clear_ask', () => {
-        pruneStaleAskActions();
-        setAskUser(undefined);
-      });
-
-      socket.on('call_fn', ({ name, args }, callback) => {
-        setCallFn({ name, args, callback });
-      });
-
-      socket.on('clear_call_fn', () => {
-        setCallFn(undefined);
-      });
-
-      socket.on('call_fn_timeout', () => {
-        setCallFn(undefined);
-      });
-
-      socket.on('chat_settings', (inputs: any) => {
-        setChatSettingsInputs(inputs);
-        resetChatSettingsValue();
-      });
-
-      socket.on('set_commands', (commands: ICommand[]) => {
-        setCommands(commands);
-      });
-
-      socket.on('set_modes', (modes: IMode[]) => {
-        setModes(modes);
-      });
-
-      socket.on('set_favorites', (steps: IStep[]) => {
-        setFavoriteMessages(steps);
-      });
-
-      socket.on('set_sidebar_title', (title: string) => {
-        setSideView((prev) => {
-          if (prev?.title === title) return prev;
-          return { title, elements: prev?.elements || [] };
-        });
-      });
-
-      socket.on(
-        'set_sidebar_elements',
-        ({ elements, key }: { elements: IMessageElement[]; key?: string }) => {
-          if (!elements.length) {
-            setSideView(undefined);
-          } else {
-            elements.forEach((element) => {
-              if (!element.url && element.chainlitKey) {
-                element.url = client.getElementUrl(
-                  element.chainlitKey,
-                  sessionId
-                );
-              }
-            });
-            setSideView((prev) => {
-              if (prev?.key === key) return prev;
-              return { title: prev?.title || '', elements: elements, key };
-            });
-          }
-        }
-      );
-
-      socket.on('element', (element: IElement) => {
-        if (!element.url && element.chainlitKey) {
-          element.url = client.getElementUrl(element.chainlitKey, sessionId);
-        }
-
-        if (element.type === 'tasklist') {
-          setTasklists((old) => {
-            const index = old.findIndex((e) => e.id === element.id);
-            if (index === -1) {
-              return [...old, element];
-            } else {
-              return [...old.slice(0, index), element, ...old.slice(index + 1)];
-            }
-          });
-        } else {
-          setElements((old) => {
-            const index = old.findIndex((e) => e.id === element.id);
-            if (index === -1) {
-              return [...old, element];
-            } else {
-              return [...old.slice(0, index), element, ...old.slice(index + 1)];
-            }
-          });
-        }
-      });
-
-      socket.on('remove_element', (remove: { id: string }) => {
-        setElements((old) => {
-          return old.filter((e) => e.id !== remove.id);
-        });
-        setTasklists((old) => {
-          return old.filter((e) => e.id !== remove.id);
-        });
-      });
-
-      socket.on('action', (action: IAction) => {
-        // Upsert by id: a re-emitted action (ask restored after reconnect)
-        // must not duplicate a button that is still in the state.
-        setActions((old) => {
-          const index = old.findIndex((a) => a.id === action.id);
-          if (index === -1) {
-            return [...old, action];
-          }
-          return [...old.slice(0, index), action, ...old.slice(index + 1)];
-        });
-      });
-
-      socket.on('remove_action', (action: IAction) => {
-        setActions((old) => {
-          const index = old.findIndex((a) => a.id === action.id);
-          if (index === -1) return old;
-          return [...old.slice(0, index), ...old.slice(index + 1)];
-        });
-      });
-
-      socket.on('token_usage', (count: number) => {
-        setTokenCount((old) => old + count);
-      });
-
-      socket.on('window_message', (data: any) => {
-        if (window.parent) {
-          window.parent.postMessage(data, '*');
-        }
-      });
-
-      socket.on('toast', (data: { message: string; type: string }) => {
-        if (!data.message) {
-          console.warn('No message received for toast.');
-          return;
-        }
-
-        switch (data.type) {
-          case 'info':
-            toast.info(data.message);
-            break;
-          case 'error':
-            toast.error(data.message);
-            break;
-          case 'success':
-            toast.success(data.message);
-            break;
-          case 'warning':
-            toast.warning(data.message);
-            break;
-          default:
-            toast(data.message);
-            break;
-        }
-      });
+      socket.connect();
     },
     // Stable length: React forbids a dep array that changes size between
     // renders, so the hot-swap case neutralizes the value instead of
     // dropping the entry.
-    [
-      setSession,
-      sessionId,
-      idToResume,
-      hotSwap ? null : chatProfile,
-      resetSessionId
-    ]
+    [setSession, sessionId, idToResume, hotSwap ? null : chatProfile]
   );
 
   const connect = useCallback(debounce(_connect, 200), [_connect]);
 
   const disconnect = useCallback(() => {
-    if (session?.socket) {
-      session.socket.removeAllListeners();
-      session.socket.close();
-    }
+    session?.socket.close();
   }, [session]);
 
   // Ask the server to switch in place. The atom is NOT updated
-  // optimistically: it follows chat_profile_changed only, so a refusal
-  // leaves nothing to roll back and the client can never show a profile the
-  // server is not running.
+  // optimistically: it follows `profile.changed` only, so a refusal leaves
+  // nothing to roll back and the client can never show a profile the server
+  // is not running.
   const switchChatProfile = useCallback(
     (name: string) => {
       if (!session?.socket?.connected) return false;
-      session.socket.emit('switch_chat_profile', { chatProfile: name });
+      session.socket.send({ t: 'profile.switch', chatProfile: name });
       return true;
     },
     [session]
@@ -713,6 +640,57 @@ const useChatSession = () => {
     switchChatProfile,
     hotSwapChatProfile: hotSwap
   };
+};
+
+/** Insert or replace by id, preserving position. */
+const upsertById = <T extends { id: string }>(items: T[], item: T): T[] => {
+  const index = items.findIndex((existing) => existing.id === item.id);
+  if (index === -1) return [...items, item];
+  return [...items.slice(0, index), item, ...items.slice(index + 1)];
+};
+
+/**
+ * Stamp the reply's `kind`.
+ *
+ * The wire's reply value is a tagged union — a text answer, a file list, an
+ * action and an element submission are all objects, so nothing but the tag
+ * tells them apart. The ask's own spec already says which one is coming, so
+ * that is what decides it, rather than sniffing the payload's shape.
+ */
+const toAskReplyValue = (
+  type: IAsk['spec']['type'],
+  payload: IStep | IFileRef[] | IAction | IAskElementResponse
+): AskReplyValue => {
+  switch (type) {
+    case 'file':
+      return { kind: 'file', files: payload as IFileRef[] };
+    case 'action': {
+      const action = payload as IAction;
+      return {
+        kind: 'action',
+        action: {
+          id: action.id,
+          name: action.name,
+          payload: action.payload,
+          label: action.label,
+          tooltip: action.tooltip,
+          icon: action.icon,
+          forId: action.forId
+        }
+      };
+    }
+    case 'element': {
+      const response = payload as IAskElementResponse;
+      return {
+        kind: 'element',
+        submitted: response.submitted,
+        props: response.props ?? {}
+      };
+    }
+    case 'text':
+    default:
+      return { kind: 'text', step: toWireStep(payload as IStep) };
+  }
 };
 
 export { useChatSession };

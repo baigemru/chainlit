@@ -1,6 +1,5 @@
 import { ChevronsRight, Maximize, Minimize, PanelRight } from 'lucide-react';
 
-import AudioPresence from '@chainlit/app/src/components/AudioPresence';
 import { Logo } from '@chainlit/app/src/components/Logo';
 import ChatProfiles from '@chainlit/app/src/components/header/ChatProfiles';
 import NewChatButton from '@chainlit/app/src/components/header/NewChat';
@@ -12,7 +11,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from '@chainlit/app/src/components/ui/dropdown-menu';
-import { IChainlitConfig, useAudio } from '@chainlit/react-client';
+import { IChainlitConfig } from '@chainlit/react-client';
 
 import { useCopilotInteract } from '../hooks';
 import { DisplayMode } from '../types';
@@ -42,7 +41,6 @@ const Header = ({
   setIsOpen
 }: Props): JSX.Element => {
   const { config } = projectConfig;
-  const { audioConnection } = useAudio();
   const { startNewChat } = useCopilotInteract();
 
   const hasChatProfiles = !!config?.chatProfiles.length;
@@ -53,15 +51,6 @@ const Header = ({
         {hasChatProfiles ? <ChatProfiles /> : <Logo className="w-[100px]" />}
       </div>
       <div className="flex items-center">
-        {audioConnection === 'on' ? (
-          <AudioPresence
-            type="server"
-            height={20}
-            width={40}
-            barCount={4}
-            barSpacing={2}
-          />
-        ) : null}
         <NewChatButton
           className="text-muted-foreground mt-[1.5px]"
           onConfirm={startNewChat}

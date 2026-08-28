@@ -1,15 +1,20 @@
 import { IAction } from './action';
 import { IStep } from './step';
 
+/**
+ * Answer to a custom-element ask. The element's own props are nested rather
+ * than spread over the top level, where a prop named `type` or `id` could
+ * shadow a protocol field.
+ */
 export interface IAskElementResponse {
   submitted: boolean;
-  [key: string]: unknown;
+  props?: Record<string, unknown>;
 }
 
 export interface FileSpec {
   accept?: string[] | Record<string, string[]>;
-  max_size_mb?: number;
-  max_files?: number;
+  maxSizeMb?: number;
+  maxFiles?: number;
 }
 
 export interface ActionSpec {
@@ -26,9 +31,9 @@ export interface IAsk {
   ) => void;
   spec: {
     type: 'text' | 'file' | 'action' | 'element';
-    step_id: string;
+    stepId: string;
     timeout: number;
-    element_id?: string;
+    elementId?: string;
   } & FileSpec &
     ActionSpec;
   parentId?: string;

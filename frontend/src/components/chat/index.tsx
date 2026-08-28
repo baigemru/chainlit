@@ -36,7 +36,7 @@ const Chat = () => {
   const setThreads = useSetRecoilState(threadHistoryState);
 
   const autoScrollRef = useRef(true);
-  const { error, disabled, callFn } = useChatData();
+  const { error, disabled } = useChatData();
   const { uploadFile } = useChatInteract();
   const uploadFileRef = useRef(uploadFile);
   const navigate = useNavigate();
@@ -51,9 +51,8 @@ const Chat = () => {
   // This provides better type safety and clearer file type expectations.
   const fileSpec = useMemo(
     () => ({
-      max_size_mb:
-        config?.features?.spontaneous_file_upload?.max_size_mb || 500,
-      max_files: config?.features?.spontaneous_file_upload?.max_files || 20,
+      maxSizeMb: config?.features?.spontaneous_file_upload?.max_size_mb || 500,
+      maxFiles: config?.features?.spontaneous_file_upload?.max_files || 20,
       accept: config?.features?.spontaneous_file_upload?.accept || {
         'application/*': [], // All application files
         'audio/*': [], // All audio files
@@ -67,15 +66,6 @@ const Chat = () => {
 
   const { t } = useTranslation();
   const layoutMaxWidth = useLayoutMaxWidth();
-
-  useEffect(() => {
-    if (callFn) {
-      const event = new CustomEvent('chainlit-call-fn', {
-        detail: callFn
-      });
-      window.dispatchEvent(event);
-    }
-  }, [callFn]);
 
   useEffect(() => {
     uploadFileRef.current = uploadFile;

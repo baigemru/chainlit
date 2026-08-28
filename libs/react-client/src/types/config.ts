@@ -20,11 +20,6 @@ export interface ChatProfile {
   starters?: IStarter[];
 }
 
-export interface IAudioConfig {
-  enabled: boolean;
-  sample_rate: number;
-}
-
 export interface IOAuthProviderDetail {
   id: string;
   loginEnabled: boolean;
@@ -54,8 +49,6 @@ export interface IChainlitConfig {
     default_theme?: 'light' | 'dark';
     layout?: 'default' | 'wide';
     default_sidebar_state?: 'open' | 'closed' | 'hidden';
-    chat_settings_location?: 'message_composer' | 'sidebar';
-    default_chat_settings_open?: boolean;
     confirm_new_chat?: boolean;
     cot: 'hidden' | 'tool_call' | 'full';
     cot_display?: 'list' | 'compact';
@@ -104,14 +97,11 @@ export interface IChainlitConfig {
       max_files?: number;
       accept?: string[] | Record<string, string[]>;
     };
-    audio: IAudioConfig;
     unsafe_allow_html?: boolean;
     user_message_autoscroll?: boolean;
     assistant_message_autoscroll?: boolean;
     latex?: boolean;
     user_message_markdown?: boolean;
-    edit_message?: boolean;
-    favorites?: boolean;
     hot_swap_chat_profile?: boolean;
     mcp?: {
       enabled?: boolean;

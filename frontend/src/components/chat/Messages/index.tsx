@@ -21,7 +21,7 @@ interface Props {
   scorableRun?: IStep;
 }
 
-const CL_RUN_NAMES = ['on_chat_start', 'on_message', 'on_audio_end'];
+const CL_RUN_NAMES = ['on_chat_start', 'on_message'];
 
 const hasActiveToolStep = (step: IStep): boolean => {
   return (

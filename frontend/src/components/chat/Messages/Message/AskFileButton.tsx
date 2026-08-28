@@ -159,7 +159,7 @@ const _AskFileButton = ({
           </p>
           <p className="text-sm text-muted-foreground">
             <Translator path="chat.fileUpload.sizeLimit" />{' '}
-            {askUser.spec.max_size_mb}mb
+            {askUser.spec.maxSizeMb}mb
           </p>
         </div>
         <Button
@@ -189,7 +189,7 @@ interface AskFileButtonProps {
 
 const AskFileButton = ({ messageId, onError }: AskFileButtonProps) => {
   const messageContext = useContext(MessageContext);
-  const belongsToMessage = messageContext.askUser?.spec.step_id === messageId;
+  const belongsToMessage = messageContext.askUser?.spec.stepId === messageId;
   const isAskFile = messageContext.askUser?.spec.type === 'file';
 
   if (!belongsToMessage || !isAskFile || !messageContext?.uploadFile)

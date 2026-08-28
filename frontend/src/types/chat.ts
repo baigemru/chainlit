@@ -1,4 +1,4 @@
-import { Socket } from '@chainlit/react-client';
+import { ChainlitSocket } from '@chainlit/react-client';
 
 export interface IToken {
   id: number | string;
@@ -7,6 +7,6 @@ export interface IToken {
 }
 
 export interface ISession {
-  socket: Socket;
+  socket: ChainlitSocket;
   error?: boolean;
 }

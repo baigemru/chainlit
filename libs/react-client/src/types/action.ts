@@ -8,9 +8,3 @@ export interface IAction {
   tooltip: string;
   icon?: string;
 }
-
-export interface ICallFn {
-  callback: (payload: Record<string, any>) => void;
-  name: string;
-  args: Record<string, any>;
-}

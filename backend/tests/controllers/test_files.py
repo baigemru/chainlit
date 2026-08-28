@@ -15,7 +15,7 @@ the caller when there is no caller.
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterator, Mapping, Optional
+from typing import Any, Dict, Iterator, Mapping, Optional, Set
 
 import pytest
 from litestar.di import Provide
@@ -78,8 +78,14 @@ class StubRegistry:
     def __init__(self, sessions: Optional[Dict[str, StubSession]] = None) -> None:
         self.sessions = sessions or {}
 
-    def get(self, session_id: str) -> Optional[StubSession]:
+    def find(self, session_id: str) -> Optional[StubSession]:
         return self.sessions.get(session_id)
+
+    def has_live_task(self, thread_id: Optional[str]) -> bool:
+        return False
+
+    def protected_step_ids(self, thread_id: Optional[str]) -> Set[str]:
+        return set()
 
 
 @pytest.fixture

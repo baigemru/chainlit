@@ -86,7 +86,7 @@ class StubRegistry:
         self.live_threads: Set[str] = set()
         self.protected: Dict[str, Set[str]] = {}
 
-    def get(self, session_id: str) -> Optional[StubSession]:
+    def find(self, session_id: str) -> Optional[StubSession]:
         return self.sessions.get(session_id)
 
     def has_live_task(self, thread_id: str) -> bool:

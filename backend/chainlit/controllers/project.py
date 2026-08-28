@@ -36,17 +36,16 @@ it as the ``sessions`` dependency.
 from __future__ import annotations
 
 from typing import (
+    AbstractSet,
     Annotated,
     Any,
     Dict,
     List,
     Mapping,
     Optional,
-    Protocol,
     Sequence,
     Set,
     Tuple,
-    runtime_checkable,
 )
 from uuid import UUID
 
@@ -62,6 +61,7 @@ from litestar.params import FromPath, FromQuery, JSONBody, QueryParameter
 from litestar.types import Empty
 
 import chainlit.config
+from chainlit.controllers.sessions import LiveSession, SessionRegistry
 from chainlit.markdown import get_markdown_str
 from chainlit.persistence.records import (
     ElementRecord,
@@ -86,9 +86,7 @@ __all__ = (
     "ElementPayload",
     "FeedbackDelete",
     "FeedbackUpdate",
-    "LiveSession",
     "ProjectController",
-    "SessionRegistry",
     "ThreadDelete",
     "ThreadRename",
     "ThreadShare",
@@ -115,49 +113,6 @@ PRIVATE_METADATA_KEYS = ("chat_profile", "chat_settings", "env")
 # The only element type a client is allowed to write. Everything else is
 # written by the app itself, over the socket.
 WRITABLE_ELEMENT_TYPE = "custom"
-
-
-@runtime_checkable
-class LiveSession(Protocol):
-    """The half of a live websocket session these routes touch."""
-
-    #: The user the socket belongs to, or ``None`` with no authentication.
-    #: Only ``.identifier`` is read.
-    user: Optional[Any]
-
-    async def call_action(self, action: Mapping[str, Any]) -> Any:
-        """Run the app's callback for this action and return its result.
-
-        Raises ``LookupError`` when the app registered no callback under the
-        action's name; the route turns that into a 404. Everything the old
-        handler did around the call — initialising the context variable,
-        marking the session's first interaction, kicking off the thread
-        init — is the session's own business and stays inside it.
-        """
-        ...
-
-
-@runtime_checkable
-class SessionRegistry(Protocol):
-    """The live websocket sessions, as the project routes see them.
-
-    Bound by the application under the dependency key ``sessions``. The last
-    two methods are about a *thread* rather than one session, because the
-    question they answer — "is anything still holding these steps?" — can
-    only be answered by looking at every session on that thread.
-    """
-
-    def get(self, session_id: str) -> Optional[LiveSession]:
-        """The live session with this id, or ``None`` if there is none."""
-        ...
-
-    def has_live_task(self, thread_id: str) -> bool:
-        """Whether any session on this thread is currently running a task."""
-        ...
-
-    def protected_step_ids(self, thread_id: str) -> Set[str]:
-        """Steps a live pending ask is holding, which must stay visible."""
-        ...
 
 
 class FeedbackUpdate(msgspec.Struct, rename="camel", omit_defaults=True):
@@ -273,7 +228,7 @@ def is_resume_delete(step: Any) -> bool:
     return metadata.get(RESUME_POLICY_KEY) == RESUME_POLICY_DELETE
 
 
-def doomed_step_ids(steps: Sequence[Any], protected: Set[str]) -> Set[str]:
+def doomed_step_ids(steps: Sequence[Any], protected: AbstractSet[str]) -> Set[str]:
     """The flagged steps nothing is holding, plus everything nested under one.
 
     A child left behind would keep a ``parentId`` pointing at a step the
@@ -743,7 +698,7 @@ class ProjectController(Controller):
         request: Request[Any, Any, Any],
     ) -> LiveSession:
         """The live session with this id, if it is the caller's."""
-        session = sessions.get(session_id)
+        session = sessions.find(session_id)
         if session is None:
             raise NotFoundException("Session not found")
         identifier = caller_identifier(request)

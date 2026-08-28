@@ -77,7 +77,6 @@ from chainlit.transit_store import (
     transit_sweeper,
 )
 from chainlit.ws.connection import make_websocket_handler
-from chainlit.ws.lookup import SessionLookup
 from chainlit.ws.registry import SessionRegistry
 
 if TYPE_CHECKING:
@@ -434,7 +433,7 @@ class ChainlitPlugin(InitPlugin):
         # deciding something about the application it was added to.
         app_config.dependencies.setdefault(
             "sessions",
-            Provide(lambda: SessionLookup(self._sessions), sync_to_thread=False),
+            Provide(lambda: self._sessions, sync_to_thread=False, use_cache=True),
         )
         app_config.dependencies.setdefault(
             "persistence_enabled",

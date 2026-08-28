@@ -39,7 +39,6 @@ from chainlit.protocol.payloads import (
 )
 from chainlit.utils import utc_now
 from chainlit.ws.handshake import Arrival, sweep_superseded
-from chainlit.ws.lookup import SessionLookup
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import Session, TranscriptEntry
 
@@ -233,7 +232,7 @@ class ApplicationRunner:
 
         # Filtered before anything reads it: the hooks and the client both
         # get a thread already free of the steps a resume takes away.
-        detail = hide_resume_deleted(detail, SessionLookup(self.registry))
+        detail = hide_resume_deleted(detail, self.registry)
 
         metadata = dict(detail.metadata or {})
         session.state.update(

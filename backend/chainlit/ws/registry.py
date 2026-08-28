@@ -73,7 +73,10 @@ from __future__ import annotations
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol, cast
+
+if TYPE_CHECKING:
+    from chainlit.ws.session import Session
 
 __all__ = [
     "Claim",
@@ -285,6 +288,16 @@ class SessionRegistry:
         """The entry held under this id, or ``None`` if there is none."""
         return self._entries.get(session_id)
 
+    def find(self, session_id: str) -> Optional["Session"]:
+        """The session held under this id, without its bookkeeping.
+
+        What the HTTP routes are given: a controller has no business with
+        the entry around a session, and handing it over would let one
+        write to it.
+        """
+        entry = self._entries.get(session_id)
+        return None if entry is None else cast("Session", entry.session)
+
     def holds(self, entry: SessionEntry) -> bool:
         """Whether this exact entry is still the tenant of its id.
 
@@ -419,7 +432,7 @@ class SessionRegistry:
         before the resume="delete" decision -- the whole point is that the
         conversation reads as idle again by the time that decision is made,
         so the caller must have performed the evictions before it asks
-        ``thread_has_live_task`` or ``protected_step_ids``.
+        ``has_live_task`` or ``protected_step_ids``.
 
         The arriving session is excluded, and cannot in practice be a
         candidate anyway: handing it the socket is what marks it connected,
@@ -454,7 +467,7 @@ class SessionRegistry:
 
     # --- Policy: what a conversation's other sessions protect ---------
 
-    def thread_has_live_task(self, thread_id: Optional[str]) -> bool:
+    def has_live_task(self, thread_id: Optional[str]) -> bool:
         """Whether work is running anywhere in this conversation.
 
         A running task on *any* session means the conversation is alive, and

@@ -601,7 +601,7 @@ def test_work_running_in_a_tab_that_is_still_open_makes_the_thread_live(
 ):
     _bystander(registry, connected=True, running_task=True)
 
-    assert registry.thread_has_live_task(THREAD) is True
+    assert registry.has_live_task(THREAD) is True
 
 
 def test_work_running_behind_a_dropped_socket_still_makes_the_thread_live(
@@ -612,13 +612,13 @@ def test_work_running_behind_a_dropped_socket_still_makes_the_thread_live(
     that work is producing."""
     _bystander(registry, connected=False, running_task=True)
 
-    assert registry.thread_has_live_task(THREAD) is True
+    assert registry.has_live_task(THREAD) is True
 
 
 def test_an_idle_conversation_has_no_live_task(registry: SessionRegistry):
     _bystander(registry, connected=True, live_ask=True)
 
-    assert registry.thread_has_live_task(THREAD) is False
+    assert registry.has_live_task(THREAD) is False
 
 
 def test_work_running_in_another_conversation_does_not_make_this_one_live(
@@ -626,13 +626,13 @@ def test_work_running_in_another_conversation_does_not_make_this_one_live(
 ):
     _bystander(registry, running_task=True, thread=OTHER_THREAD)
 
-    assert registry.thread_has_live_task(THREAD) is False
+    assert registry.has_live_task(THREAD) is False
 
 
 def test_a_thread_that_is_no_thread_is_never_live(registry: SessionRegistry):
     registry.register(FakeSession(id="s1", has_live_task=True), thread_id=None)
 
-    assert registry.thread_has_live_task(None) is False
+    assert registry.has_live_task(None) is False
 
 
 def test_a_question_waiting_in_another_session_protects_its_own_step(
@@ -704,7 +704,7 @@ def test_evicting_the_abandoned_session_makes_the_conversation_idle_again(
         running_task=True,
     )
 
-    assert registry.thread_has_live_task(THREAD) is True
+    assert registry.has_live_task(THREAD) is True
     assert registry.protected_step_ids(THREAD) == frozenset({"a-question-of-its-own"})
 
     for entry in registry.abandoned_ask_sessions(
@@ -713,7 +713,7 @@ def test_evicting_the_abandoned_session_makes_the_conversation_idle_again(
         assert registry.should_evict(entry, THREAD, arriving_session_id="arriving")
         registry.discard(entry)
 
-    assert registry.thread_has_live_task(THREAD) is False
+    assert registry.has_live_task(THREAD) is False
     assert registry.protected_step_ids(THREAD) == frozenset()
     assert registry.get("bystander-0") is None
 
@@ -727,7 +727,7 @@ def test_a_live_tab_survives_the_sweep_and_goes_on_protecting(
     _bystander(registry, connected=True, running_task=True)
 
     assert _evicted(registry) == []
-    assert registry.thread_has_live_task(THREAD) is True
+    assert registry.has_live_task(THREAD) is True
 
 
 # --- Independence ---------------------------------------------------------

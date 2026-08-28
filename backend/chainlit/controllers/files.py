@@ -30,9 +30,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
-    Protocol,
     Tuple,
-    runtime_checkable,
 )
 
 from litestar import Controller, Request, get, post
@@ -49,11 +47,10 @@ from litestar.types import Empty
 
 import chainlit.config
 from chainlit._utils import is_path_inside
+from chainlit.controllers.sessions import LiveSession, SessionRegistry
 
 __all__ = (
     "FilesController",
-    "LiveSession",
-    "SessionRegistry",
     "caller_identifier",
     "served_file",
 )
@@ -69,50 +66,6 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 AVATAR_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_ .-]+$")
 
 Theme = Literal["light", "dark"]
-
-
-@runtime_checkable
-class LiveSession(Protocol):
-    """The half of a live websocket session the file routes touch.
-
-    Deliberately not the real ``Session`` class: this module must keep
-    working while that class is being rebuilt, and naming only these five
-    members says exactly what the join has to provide.
-    """
-
-    #: The authenticated user the socket belongs to, or ``None`` when the
-    #: deployment runs without authentication. Only ``.identifier`` is read.
-    user: Optional[Any]
-
-    #: The per-session spool directory. Created here if it does not exist,
-    #: because a session that has never uploaded anything has no directory.
-    files_dir: Path
-
-    #: Uploaded files by id, each with a ``path`` and a ``type``.
-    files: Mapping[str, Mapping[str, Any]]
-
-    #: The upload constraints of each pending ``ask``, keyed by the id of the
-    #: message that asked. An entry carries ``accept`` and ``max_size_mb``.
-    files_spec: Mapping[str, Any]
-
-    async def persist_file(
-        self, name: str, mime: str, content: bytes
-    ) -> Mapping[str, Any]:
-        """Spool the bytes and return the reference the client uploads to."""
-        ...
-
-
-@runtime_checkable
-class SessionRegistry(Protocol):
-    """The live websocket sessions, as the file routes see them.
-
-    One method, because one method is all these routes need. The application
-    binds the real registry under the dependency key ``sessions``.
-    """
-
-    def get(self, session_id: str) -> Optional[LiveSession]:
-        """The live session with this id, or ``None`` if there is none."""
-        ...
 
 
 def caller_identifier(request: Request[Any, Any, Any]) -> Optional[str]:
@@ -275,7 +228,7 @@ class FilesController(Controller):
         exactly, so the created-status default would read as a failed upload
         on the client while the file sat safely on disk.
         """
-        session = sessions.get(session_id)
+        session = sessions.find(session_id)
         if session is None:
             raise NotFoundException("Session not found")
         assert_session_belongs_to(session, request)
@@ -314,7 +267,7 @@ class FilesController(Controller):
         session_id: FromQuery[str],
     ) -> File:
         """Serve a file back out of the session that uploaded it."""
-        session = sessions.get(session_id)
+        session = sessions.find(session_id)
         if session is None:
             raise NotFoundException("Session not found")
         assert_session_belongs_to(session, request)

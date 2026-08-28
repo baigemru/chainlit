@@ -1,24 +1,40 @@
-"""Wiring: the engine config, the alembic hookup and the unit of work."""
+"""Wiring: the engine config, the alembic hookup and the unit of work.
+
+Migrations
+----------
+
+There is no migration helper here. The alembic environment
+(``migrations/env.py``) runs on the engine advanced_alchemy's CLI hands it, so
+a deployment migrates with::
+
+    LITESTAR_APP=your_module:app litestar database upgrade
+
+where ``app`` is the ``Litestar`` instance carrying ``ChainlitPlugin`` (which
+registers ``Persistence.plugin()``, which is what puts the ``database``
+command group on the CLI). ``litestar database current`` / ``downgrade`` /
+``check`` work the same way. Programmatic callers use
+``advanced_alchemy.extensions.litestar.AlembicCommands(persistence.config)``
+-- from a thread without a running event loop, because alembic drives the
+async engine with ``asyncio.run``.
+"""
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional, Type
 
-from advanced_alchemy.config import AlembicAsyncConfig, AsyncSessionConfig
-
-# EngineConfig must come from the Litestar extension, not from
-# advanced_alchemy.config: they are two distinct classes with the same name,
-# and SQLAlchemyAsyncConfig here is the extension's one.
+# Everything from the Litestar extension, not from advanced_alchemy.config:
+# EngineConfig and SQLAlchemyAsyncConfig exist as two distinct classes with
+# the same name, and the extension's are the ones the plugin understands.
 from advanced_alchemy.extensions.litestar import (
+    AlembicAsyncConfig,
+    AsyncSessionConfig,
     EngineConfig,
     SQLAlchemyAsyncConfig,
     SQLAlchemyPlugin,
+    providers,
 )
-from advanced_alchemy.extensions.litestar.providers import create_service_dependencies
-from alembic.config import Config as AlembicConfig
 from litestar.di import Provide
-from sqlalchemy import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from chainlit.persistence.models import SCHEMA_NAME, Base
@@ -32,35 +48,6 @@ from chainlit.persistence.services import (
 
 MIGRATIONS_PATH = Path(__file__).parent / "migrations"
 VERSION_TABLE = "alembic_version"
-
-
-def alembic_config(url: Optional[str] = None) -> AlembicConfig:
-    """Build the alembic config for this package's migrations.
-
-    There is no alembic.ini: the migrations ship inside the wheel, so the
-    script location has to be resolved from ``__file__`` rather than from a
-    file the deployment is expected to have copied somewhere.
-    """
-    cfg = AlembicConfig()
-    cfg.set_main_option("script_location", str(MIGRATIONS_PATH))
-    if url is not None:
-        # Escaped: a password with a '%' in it would otherwise be read as
-        # ConfigParser interpolation.
-        cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
-    return cfg
-
-
-def upgrade_database(connection: Connection, revision: str = "head") -> None:
-    """Migrate through an already-open synchronous connection.
-
-    Async callers reach this through ``connection.run_sync(upgrade_database)``;
-    alembic's own machinery is synchronous all the way down.
-    """
-    from alembic import command
-
-    cfg = alembic_config()
-    cfg.attributes["connection"] = connection
-    command.upgrade(cfg, revision)
 
 
 def sqlalchemy_config(
@@ -116,9 +103,10 @@ def sqlalchemy_config(
         # registry keeps its own empty MetaData and anything driving DDL or
         # autogenerate through the config sees no tables at all.
         metadata=Base.metadata,
-        # The ORM never writes an `updated_at` column of its own here — the
-        # thread service sets "updatedAt" explicitly, and the listener would
-        # only go looking for a column that does not exist.
+        # The listener keys on a mapped attribute named `updated_at`, which
+        # Thread *has* -- but it hooks the ORM's before_flush, and every write
+        # in this package is a Core statement that never goes through a flush.
+        # It would never fire; off, so nobody wonders why it did not.
         enable_touch_updated_timestamp_listener=False,
         # No model uses FileObject/StoredObject: element blobs live in
         # `objectKey`/`url` as plain text, so the listener has nothing to do.
@@ -152,12 +140,6 @@ class UnitOfWork:
     steps: StepService
     elements: ElementService
     feedbacks: FeedbackService
-
-    async def commit(self) -> None:
-        await self.session.commit()
-
-    async def rollback(self) -> None:
-        await self.session.rollback()
 
 
 @dataclass
@@ -204,19 +186,19 @@ class Persistence:
         unusable set of query parameters in the schema.
         """
         return {
-            **create_service_dependencies(
+            **providers.create_service_dependencies(
                 self.user_service, key="users", config=self.config
             ),
-            **create_service_dependencies(
+            **providers.create_service_dependencies(
                 self.thread_service, key="threads", config=self.config
             ),
-            **create_service_dependencies(
+            **providers.create_service_dependencies(
                 self.step_service, key="steps", config=self.config
             ),
-            **create_service_dependencies(
+            **providers.create_service_dependencies(
                 self.element_service, key="elements", config=self.config
             ),
-            **create_service_dependencies(
+            **providers.create_service_dependencies(
                 self.feedback_service, key="feedbacks", config=self.config
             ),
         }
@@ -264,7 +246,10 @@ class Persistence:
             yield self.bind(session)
             return
 
-        async with self.config.get_session() as owned:
+        # The session maker directly rather than `config.get_session()`: that
+        # wrapper is the maker plus a call to advanced_alchemy's own deprecated
+        # `set_async_context`, and the suite treats deprecations as errors.
+        async with self.config.create_session_maker()() as owned:
             uow = self.bind(owned)
             try:
                 yield uow
@@ -272,7 +257,3 @@ class Persistence:
                 await owned.rollback()
                 raise
             await owned.commit()
-
-    async def close(self) -> None:
-        engine = self.config.get_engine()
-        await engine.dispose()

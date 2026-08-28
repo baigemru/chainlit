@@ -4,13 +4,13 @@ import uuid
 from datetime import UTC, datetime, timedelta, timezone
 
 from sqlalchemy import Text, cast, literal, select, update
-from sqlalchemy.dialects import sqlite
+from sqlalchemy.dialects import postgresql
 
 from chainlit.persistence import StepRecord, UnitOfWork
 from chainlit.persistence.models import STEPS, ISOTimestamp
 from tests.persistence.conftest import at, iso, make_thread, new_id
 
-DIALECT = sqlite.dialect()
+DIALECT = postgresql.dialect()
 COLUMN = ISOTimestamp()
 
 

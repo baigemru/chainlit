@@ -17,15 +17,16 @@ The package is layered bottom-up:
 
 Nothing here imports from ``chainlit.data``: the two live side by side until
 the rebuild lands.
+
+The re-exports below are a convenience for tests and host apps; the package's
+own modules and the controllers import from the submodules directly.
 """
 
 from chainlit.persistence.config import (
     MIGRATIONS_PATH,
     Persistence,
     UnitOfWork,
-    alembic_config,
     sqlalchemy_config,
-    upgrade_database,
 )
 from chainlit.persistence.models import (
     SCHEMA_NAME,
@@ -118,7 +119,5 @@ __all__ = [
     "UserRepository",
     "UserService",
     "WriterRegistry",
-    "alembic_config",
     "sqlalchemy_config",
-    "upgrade_database",
 ]

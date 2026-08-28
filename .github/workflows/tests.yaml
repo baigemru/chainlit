@@ -13,28 +13,8 @@ jobs:
     name: python ${{ matrix.python-version }}
     env:
       BACKEND_DIR: ./backend
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/pnpm-node-install
-        name: Install Node, pnpm and dependencies.
-      - uses: ./.github/actions/uv-python-install
-        name: Install Python, uv and Python dependencies
-        with:
-          python-version: ${{ matrix.python-version }}
-          uv-args: --extra tests --extra custom-data
-      - name: Run backend tests
-        run: uv run --no-project pytest --cov=chainlit/
-      - name: Run frontend tests
-        run: pnpm run test
-
-  # The persistence layer compiles a different statement for PostgreSQL than
-  # for SQLite -- the jsonb metadata merge, LEAST, ON CONFLICT and NULL
-  # ordering all differ -- so the SQLite run above leaves every production-only
-  # branch untested. Same tests, real dialect.
-  persistence-postgres:
-    runs-on: ubuntu-latest
-    name: persistence on postgres
-    env:
+      # The persistence tests are PostgreSQL-only and read this; the service
+      # below is what it points at.
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/chainlit_test
     services:
       postgres:
@@ -52,11 +32,15 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/pnpm-node-install
+        name: Install Node, pnpm and dependencies.
       - uses: ./.github/actions/uv-python-install
         name: Install Python, uv and Python dependencies
         with:
-          python-version: '3.14'
-          # custom-data carries asyncpg, which the URL above needs.
+          python-version: ${{ matrix.python-version }}
+          # custom-data carries asyncpg, which TEST_DATABASE_URL needs.
           uv-args: --extra tests --extra custom-data
-      - name: Run the persistence tests against PostgreSQL
-        run: uv run --no-project pytest backend/tests/persistence -q
+      - name: Run backend tests
+        run: uv run --no-project pytest --cov=chainlit/
+      - name: Run frontend tests
+        run: pnpm run test

@@ -10,7 +10,7 @@ Revises:
 Create Date: 2026-08-27
 """
 
-from typing import Optional, Sequence, Union
+from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -24,28 +24,16 @@ depends_on: Union[str, Sequence[str], None] = None
 SCHEMA = "chainlit"
 
 
-def schema() -> Optional[str]:
-    """The schema to build in, for the dialect actually connected.
-
-    SQLite has no schemas: env.py folds `chainlit` into the default one with a
-    ``schema_translate_map``, but alembic's ALTER helpers format the table
-    name as a plain string and never consult that map, so the collapse has to
-    be repeated here.
-    """
-    return None if op.get_bind().dialect.name == "sqlite" else SCHEMA
-
-
 def qualified(table: str) -> str:
-    """A foreign-key target, schema-qualified where there is a schema."""
-    prefix = schema()
-    return f"{prefix}.{table}" if prefix else table
+    """A foreign-key target, schema-qualified."""
+    return f"{SCHEMA}.{table}"
 
 
 # Types are spelled out here instead of imported from the models: a migration
 # has to keep describing the schema as it was on the day it ran, and the
 # models will not.
 JSONB = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
-TEXT_ARRAY = sa.ARRAY(sa.Text()).with_variant(sa.JSON(), "sqlite")
+TEXT_ARRAY = sa.ARRAY(sa.Text())
 # createdAt/start/end hold ISO strings with a literal trailing "Z".
 ISO_TEXT = sa.Text()
 
@@ -59,7 +47,7 @@ def upgrade() -> None:
         sa.Column("createdAt", ISO_TEXT, nullable=True),
         sa.PrimaryKeyConstraint("id", name="pk_users"),
         sa.UniqueConstraint("identifier", name="uq_users_identifier"),
-        schema=schema(),
+        schema=SCHEMA,
     )
 
     op.create_table(
@@ -88,13 +76,13 @@ def upgrade() -> None:
             name="fk_threads_parentThreadId_threads",
             ondelete="SET NULL",
         ),
-        schema=schema(),
+        schema=SCHEMA,
     )
     op.create_index(
         "threads_parent_thread_id_idx",
         "threads",
         ["parentThreadId"],
-        schema=schema(),
+        schema=SCHEMA,
     )
 
     op.create_table(
@@ -129,7 +117,7 @@ def upgrade() -> None:
             name="fk_steps_threadId_threads",
             ondelete="CASCADE",
         ),
-        schema=schema(),
+        schema=SCHEMA,
     )
 
     op.create_table(
@@ -155,7 +143,7 @@ def upgrade() -> None:
             name="fk_elements_threadId_threads",
             ondelete="CASCADE",
         ),
-        schema=schema(),
+        schema=SCHEMA,
     )
 
     op.create_table(
@@ -178,14 +166,14 @@ def upgrade() -> None:
             name="fk_feedbacks_threadId_threads",
             ondelete="CASCADE",
         ),
-        schema=schema(),
+        schema=SCHEMA,
     )
 
 
 def downgrade() -> None:
-    op.drop_table("feedbacks", schema=schema())
-    op.drop_table("elements", schema=schema())
-    op.drop_table("steps", schema=schema())
-    op.drop_index("threads_parent_thread_id_idx", "threads", schema=schema())
-    op.drop_table("threads", schema=schema())
-    op.drop_table("users", schema=schema())
+    op.drop_table("feedbacks", schema=SCHEMA)
+    op.drop_table("elements", schema=SCHEMA)
+    op.drop_table("steps", schema=SCHEMA)
+    op.drop_index("threads_parent_thread_id_idx", "threads", schema=SCHEMA)
+    op.drop_table("threads", schema=SCHEMA)
+    op.drop_table("users", schema=SCHEMA)

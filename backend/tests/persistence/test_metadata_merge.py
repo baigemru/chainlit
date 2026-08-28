@@ -69,12 +69,11 @@ async def test_a_key_the_patch_never_mentions_is_untouched(uow: UnitOfWork) -> N
 async def test_a_nested_object_is_replaced_not_merged(uow: UnitOfWork) -> None:
     """The merge is shallow: a top-level key is written over, whole.
 
-    A recursive merge would keep ``chat_profile`` here. That is what SQLite's
-    ``json_patch()`` does — it is RFC 7396 — and it disagrees with production,
-    where the merge is ``metadata - keys || incoming``, and with the legacy
-    layer, which computed ``{**stored, **incoming}`` in Python. The wire has
-    no way to say "drop one nested key", so leaving stale nested keys behind
-    is a bug the caller cannot work around.
+    A recursive merge (RFC 7396, ``jsonb_set`` per nested path) would keep
+    ``chat_profile`` here. The merge is ``metadata - keys || incoming``, the
+    same shape as the legacy layer's ``{**stored, **incoming}`` in Python. The
+    wire has no way to say "drop one nested key", so leaving stale nested keys
+    behind is a bug the caller cannot work around.
     """
     thread_id = await make_thread(
         uow, metadata={"session": {"chat_profile": "gpt", "tab": 1}}
@@ -107,7 +106,7 @@ async def test_a_nested_null_is_stored_rather_than_deleted(uow: UnitOfWork) -> N
 
 
 async def test_a_key_with_a_path_metacharacter_round_trips(uow: UnitOfWork) -> None:
-    """Metadata keys are user data, and SQLite addresses them by JSON path."""
+    """Metadata keys are user data; nothing may read ``.`` or ``[`` as a path."""
     thread_id = await make_thread(uow, metadata={"a.b": 1, "c[0]": 2, 'q"k': 3, "d": 4})
 
     await uow.threads.patch(
@@ -132,7 +131,6 @@ async def test_the_merge_marks_the_thread_active(uow: UnitOfWork) -> None:
             thread_id=uuid.UUID(thread_id),
             patch={"b": 2},
             updated_at=at(hour=13),
-            dialect_name=uow.threads.dialect,
         )
     )
 

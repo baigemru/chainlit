@@ -27,6 +27,46 @@ session never is.
 enqueues the element's row when it succeeds, so an unreachable bucket can
 delay that one row and nothing else. The ordered queue is for database
 writes; an upload is not one.
+
+*Coalesce repeat writes of one row.* The consumer sends whole messages, never
+a token at a time, so a batch holds at most one write per step and there is
+nothing to fold. The fold that used to run here was built for a stream of
+per-token updates and was the most intricate code in the module -- it had to
+reproduce ``LEAST``/``CASE`` in Python to stay equivalent to the upsert --
+and code that exists for a load profile nobody generates is a liability, not
+a feature. The database-side ``LEAST``/``CASE`` stay: they are about two
+writers racing, not about one writer's batch.
+
+Restoring token streaming
+-------------------------
+
+If the emitter ever sends ``step.stream.token`` frames, every token becomes a
+``SaveStep`` carrying a longer ``output``, and a 300-token message becomes 300
+upserts of one row inside one transaction. Coalescing is what made that one
+upsert. The checklist:
+
+1. Restore the trio ``coalesce`` / ``merge_steps`` / ``merge_thread_patches``
+   and the ``_stored_form`` helper, all from the commit that removed
+   coalescing (``git log -S coalesce -- backend/chainlit/persistence/writer.py``).
+   They fold repeat ``SaveStep``/``PatchThread`` ops of one row into the
+   first one's position, treat ``DeleteStep`` as a barrier and never merge
+   elements; ``merge_steps`` keeps the earliest ``start`` (compared in stored
+   form) and refuses a placeholder ``type``, exactly as the upsert does.
+2. Put the call back in ``SessionWriter._apply``, between splitting the
+   fences out of the batch and calling ``_write``::
+
+       ops = coalesce([item for item in batch if not isinstance(item, _Fence)])
+
+3. Restore the tests from the same commit: the ``coalescing`` section of
+   ``tests/persistence/test_writer.py``, in particular
+   ``test_coalescing_is_equivalent_to_writing_each_fragment``, which is the
+   property that licenses the fold at all.
+4. The wire side already exists: ``StepStreamStart`` (``step.stream.start``)
+   and ``StepStreamToken`` (``step.stream.token``) are defined in
+   ``chainlit/protocol/server.py``. What is missing is a ``stream_token``
+   method on the emitter facade that produces a ``StepStreamToken`` and
+   submits the partial ``SaveStep`` -- there is no such method today because
+   nothing streams.
 """
 
 from __future__ import annotations
@@ -47,14 +87,9 @@ from typing import (
     Union,
 )
 
-import msgspec
-from msgspec import UNSET
-
 from chainlit.logger import logger
 from chainlit.persistence.config import Persistence, UnitOfWork
-from chainlit.persistence.models import iso_datetime, iso_text
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
-from chainlit.persistence.statements import PLACEHOLDER_STEP_TYPE
 
 # A batch is capped so one burst cannot hold a transaction open indefinitely.
 BATCH_LIMIT = 256
@@ -129,114 +164,6 @@ class _Fence:
     def resolve(self) -> None:
         if not self.future.done():
             self.future.set_result(None)
-
-
-# msgspec does not cache this: it rebuilds the FieldInfo tuple on every call,
-# and at ~28us a call that was the entire cost of a merge -- which runs once
-# per streaming token. Hoisted, a 300-token message coalesces in 0.2ms rather
-# than 8.7ms of synchronous work on the consumer's loop.
-_STEP_FIELDS = tuple(info.name for info in msgspec.structs.fields(StepRecord))
-_THREAD_PATCH_FIELDS = tuple(info.name for info in msgspec.structs.fields(ThreadPatch))
-
-
-def _stored_form(value: str) -> str:
-    """The text the database would hold for this timestamp.
-
-    ``_column_values`` parses the wire string and the column type re-renders
-    it as UTC, so ``2026-08-27T10:00:00+02:00`` is stored as
-    ``2026-08-27T08:00:00.000000Z``. Comparing the wire strings instead would
-    order them by codepoint, which is a different answer.
-    """
-    return iso_text(iso_datetime(value)) or value
-
-
-def merge_steps(earlier: StepRecord, later: StepRecord) -> StepRecord:
-    """Fold two writes of one step into the write they are equivalent to.
-
-    Equivalent, not merely similar: the two columns the upsert does not write
-    straight through are folded the same way the database folds them, so
-    coalescing can never change what ends up stored.
-
-    * ``start`` keeps the earlier of the two, compared in the form the column
-      actually holds. An explicit ``None`` says nothing, because ``LEAST``
-      skips NULLs on both dialects — so a later write that clears ``start``
-      does not clear it there either.
-    * ``type`` refuses a placeholder over a settled type.
-    * everything else is last-write-wins, and a field left ``UNSET`` says
-      nothing at all — which is the whole reason the record type can serve
-      both creation and update.
-    """
-    changes: Dict[str, Any] = {}
-    for name in _STEP_FIELDS:
-        value = getattr(later, name)
-        if value is UNSET:
-            continue
-        if name == "start":
-            prior = earlier.start
-            if value is None:
-                continue
-            if isinstance(prior, str) and isinstance(value, str):
-                value = min(prior, value, key=_stored_form)
-        elif name == "type":
-            if value == PLACEHOLDER_STEP_TYPE and earlier.type != PLACEHOLDER_STEP_TYPE:
-                continue
-        changes[name] = value
-    return msgspec.structs.replace(earlier, **changes)
-
-
-def merge_thread_patches(earlier: ThreadPatch, later: ThreadPatch) -> ThreadPatch:
-    """Fold two thread patches. Metadata merges per key, as the database does."""
-    changes: Dict[str, Any] = {}
-    for name in _THREAD_PATCH_FIELDS:
-        value = getattr(later, name)
-        if value is UNSET:
-            continue
-        if name == "metadata" and isinstance(earlier.metadata, dict):
-            value = {**earlier.metadata, **value}
-        changes[name] = value
-    return msgspec.structs.replace(earlier, **changes)
-
-
-def coalesce(ops: Sequence[Op]) -> List[Op]:
-    """Collapse repeat writes of one row, keeping the first one's position.
-
-    A streaming message issues an update per token; without this each is a
-    row in its own right in the batch. The merged write stays where the first
-    fragment was, so nothing overtakes anything it was issued behind.
-
-    A delete is a barrier: writes after it describe a row that has to be
-    created again, and merging across it would resurrect the deleted state.
-    Elements are never merged — an element is a distinct object, and two of
-    them both have to land.
-    """
-    result: List[Op] = []
-    steps: Dict[str, int] = {}
-    threads: Dict[str, int] = {}
-
-    for op in ops:
-        if isinstance(op, SaveStep):
-            position = steps.get(op.record.id)
-            if position is not None:
-                prior = result[position]
-                assert isinstance(prior, SaveStep)
-                result[position] = SaveStep(merge_steps(prior.record, op.record))
-                continue
-            steps[op.record.id] = len(result)
-        elif isinstance(op, DeleteStep):
-            steps.pop(op.step_id, None)
-        elif isinstance(op, PatchThread):
-            position = threads.get(op.thread_id)
-            if position is not None:
-                prior = result[position]
-                assert isinstance(prior, PatchThread)
-                result[position] = PatchThread(
-                    op.thread_id, merge_thread_patches(prior.patch, op.patch)
-                )
-                continue
-            threads[op.thread_id] = len(result)
-        result.append(op)
-
-    return result
 
 
 class SessionWriter:
@@ -544,7 +471,7 @@ class SessionWriter:
     async def _apply(self, batch: Sequence[Union[Op, _Fence]]) -> None:
         fences = [item for item in batch if isinstance(item, _Fence)]
         try:
-            ops = coalesce([item for item in batch if not isinstance(item, _Fence)])
+            ops = [item for item in batch if not isinstance(item, _Fence)]
             if ops:
                 await self._write(ops)
         finally:
@@ -554,9 +481,10 @@ class SessionWriter:
     async def _write(self, ops: Sequence[Op]) -> None:
         """One transaction for the batch, falling back to one per op.
 
-        Batching is what makes a streaming message cheap, but it also means a
-        single rejected write would roll back every innocent write beside it.
-        On failure the batch is replayed op by op so the damage is confined to
+        One transaction, so a burst of writes costs one round of commit
+        overhead rather than one per op -- but it also means a single
+        rejected write would roll back every innocent write beside it. On
+        failure the batch is replayed op by op so the damage is confined to
         the op that actually caused it.
         """
         try:

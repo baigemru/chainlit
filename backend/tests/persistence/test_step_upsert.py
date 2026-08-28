@@ -110,11 +110,11 @@ async def test_start_moves_backwards_when_an_earlier_value_arrives(
 
 
 async def test_start_survives_a_null_stored_value(uow: UnitOfWork) -> None:
-    """SQLite's min() returns NULL if either argument is NULL.
+    """LEAST skips NULLs; a comparison that did not would lose the value.
 
     A step created without a start — the common case for a placeholder parent
-    — would lose the first real start it is ever given if the fallback were a
-    plain min().
+    — must keep the first real start it is ever given, not have it thrown away
+    against the NULL already stored.
     """
     thread_id = await make_thread(uow)
     step_id = new_id()

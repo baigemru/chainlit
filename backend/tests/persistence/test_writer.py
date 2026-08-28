@@ -1,4 +1,4 @@
-"""The ordered writer: order, coalescing, the gate, the fence, uploads.
+"""The ordered writer: order, the gate, the fence, uploads.
 
 These run against the real database on both dialects, because the properties
 under test are properties of what ends up stored — an in-memory double would
@@ -14,10 +14,8 @@ import pytest
 
 from chainlit.persistence import Persistence, UnitOfWork
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
-from chainlit.persistence.statements import PLACEHOLDER_STEP_TYPE
 from chainlit.persistence.writer import (
     DeleteElement,
-    DeleteStep,
     Op,
     PatchThread,
     SaveElement,
@@ -25,11 +23,9 @@ from chainlit.persistence.writer import (
     SessionWriter,
     Upload,
     WriterRegistry,
-    coalesce,
-    merge_steps,
 )
 
-from .conftest import at, iso, new_id
+from .conftest import new_id
 
 
 class Recorder(SessionWriter):
@@ -222,192 +218,6 @@ async def test_closed_writer_drops_further_submissions(
     await writer.drain(timeout=1.0)
 
     assert await rows(uow, "STEPS") == []
-
-
-# ------------------------------------------------------------------- coalescing
-
-
-def test_coalesce_folds_repeat_writes_of_one_step():
-    thread = new_id()
-    identifier = new_id()
-    ops = [
-        SaveStep(step(thread, identifier, output="a")),
-        SaveStep(step(thread, identifier, output="ab")),
-        SaveStep(step(thread, identifier, output="abc")),
-    ]
-    folded = coalesce(ops)
-
-    assert len(folded) == 1
-    assert folded[0].record.output == "abc"
-
-
-def test_coalesce_keeps_the_first_fragments_position():
-    """The merged write does not overtake anything it was issued behind."""
-    thread = new_id()
-    streaming = new_id()
-    other = step(thread, name="other")
-    ops = [
-        SaveStep(step(thread, streaming, output="a")),
-        SaveStep(other),
-        SaveStep(step(thread, streaming, output="ab")),
-    ]
-    folded = coalesce(ops)
-
-    assert [op.record.id for op in folded] == [streaming, other.id]
-
-
-def test_coalesce_does_not_merge_across_a_delete():
-    """A write after a delete describes a row that has to be created again."""
-    thread = new_id()
-    identifier = new_id()
-    ops = [
-        SaveStep(step(thread, identifier, output="before")),
-        DeleteStep(identifier),
-        SaveStep(step(thread, identifier, output="after")),
-    ]
-    folded = coalesce(ops)
-
-    assert [type(op).__name__ for op in folded] == [
-        "SaveStep",
-        "DeleteStep",
-        "SaveStep",
-    ]
-
-
-def test_coalesce_never_merges_elements():
-    """Two elements are two objects; both rows have to land."""
-    thread = new_id()
-    parent = new_id()
-    first = element(thread, parent)
-    second = element(thread, parent)
-    folded = coalesce([SaveElement(first), SaveElement(second)])
-
-    assert [op.record.id for op in folded] == [first.id, second.id]
-
-
-def test_coalesce_merges_thread_metadata_per_key():
-    thread = new_id()
-    folded = coalesce(
-        [
-            PatchThread(thread, ThreadPatch(name="one", metadata={"a": 1, "b": 1})),
-            PatchThread(thread, ThreadPatch(metadata={"b": 2, "c": 3})),
-        ]
-    )
-
-    assert len(folded) == 1
-    assert folded[0].patch.name == "one"
-    assert folded[0].patch.metadata == {"a": 1, "b": 2, "c": 3}
-
-
-def test_merge_keeps_the_earliest_start_and_refuses_a_placeholder_type():
-    thread = new_id()
-    identifier = new_id()
-    early = iso(at(hour=10))
-    late = iso(at(hour=11))
-
-    merged = merge_steps(
-        step(thread, identifier, type="user_message", start=late, output="a"),
-        step(thread, identifier, type=PLACEHOLDER_STEP_TYPE, start=early),
-    )
-
-    assert merged.start == early
-    assert merged.type == "user_message"
-    assert merged.output == "a"
-
-
-@pytest.mark.parametrize(
-    "fragments",
-    [
-        pytest.param(
-            [
-                {"type": "assistant_message", "start": iso(at(hour=11)), "output": ""},
-                {"output": "he"},
-                {"output": "hello", "streaming": False},
-            ],
-            id="streaming",
-        ),
-        pytest.param(
-            [
-                {"type": "assistant_message", "start": iso(at(hour=11))},
-                {"type": PLACEHOLDER_STEP_TYPE, "start": iso(at(hour=10))},
-                {"metadata": {"k": "v"}, "end": iso(at(hour=12))},
-            ],
-            id="placeholder-and-backdated-start",
-        ),
-        pytest.param(
-            [
-                {"type": "assistant_message", "start": iso(at(hour=10))},
-                {"start": None, "output": "cleared"},
-            ],
-            id="start-cleared-by-a-later-write",
-        ),
-        pytest.param(
-            [
-                {"type": "assistant_message", "start": "2026-08-27T10:00:00+02:00"},
-                {"start": "2026-08-27T09:00:00Z"},
-            ],
-            id="start-with-an-offset",
-        ),
-        pytest.param(
-            [
-                {"type": "tool", "input": "q", "is_error": False},
-                {"is_error": True, "output": "boom"},
-            ],
-            id="error",
-        ),
-    ],
-)
-async def test_coalescing_is_equivalent_to_writing_each_fragment(
-    persistence: Persistence, uow: UnitOfWork, fragments: List[Dict[str, Any]]
-):
-    """The folded write stores exactly what the sequence of writes stores.
-
-    This is the property that licenses coalescing at all: the upsert does not
-    write ``start`` and ``type`` straight through, so a fold that ignored that
-    would quietly change history under a streaming message.
-    """
-    sequential_thread = new_id()
-    folded_thread = new_id()
-    sequential_id = new_id()
-    folded_id = new_id()
-
-    for fields in fragments:
-        await uow.steps.save(step(sequential_thread, sequential_id, **fields))
-    await uow.session.commit()
-
-    records = [step(folded_thread, folded_id, **fields) for fields in fragments]
-    merged = records[0]
-    for record in records[1:]:
-        merged = merge_steps(merged, record)
-    await uow.steps.save(merged)
-    await uow.session.commit()
-
-    left = await uow.steps.fetch(sequential_id)
-    right = await uow.steps.fetch(folded_id)
-    assert left is not None
-    assert right is not None
-
-    ignored = {"id", "thread_id"}
-    for info in msgspec.structs.fields(StepRecord):
-        if info.name in ignored:
-            continue
-        assert getattr(left, info.name) == getattr(right, info.name), info.name
-
-
-async def test_a_streaming_message_becomes_one_write(
-    writer: Recorder, thread_id: str, uow: UnitOfWork
-):
-    """Forty tokens, one row written once — not forty transactions."""
-    identifier = new_id()
-    writer.submit(SaveStep(step(thread_id, identifier, type="assistant_message")))
-    for index in range(40):
-        writer.submit(SaveStep(step(thread_id, identifier, output="x" * (index + 1))))
-    await writer.drain(timeout=10.0)
-
-    assert len([op for op in writer.applied if isinstance(op, SaveStep)]) == 1
-    stored = await uow.steps.fetch(identifier)
-    assert stored is not None
-    assert stored.output == "x" * 40
 
 
 # ------------------------------------------------------------------- the fence

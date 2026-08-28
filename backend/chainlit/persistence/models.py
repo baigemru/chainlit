@@ -8,17 +8,20 @@ keys, and timestamps kept as ISO **text** with a literal trailing ``Z``.
 Nothing here inherits from advanced_alchemy's ``UUIDBase``/audit mixins: those
 hardcode snake_case ``created_at``/``updated_at`` columns, which this schema
 does not have.
+
+No relationships either. Every read in this package is a Core statement over
+the ``Table`` objects at the bottom of the file -- the joins are written out
+where they are used -- so a relationship would be a second, unused way to
+reach the same rows, and one that lazy-loads on an async session.
 """
 
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from advanced_alchemy.base import BasicAttributes
-from advanced_alchemy.types import JsonB
+from advanced_alchemy.extensions.litestar import base, types
 from sqlalchemy import (
     ARRAY,
-    JSON,
     Boolean,
     Dialect,
     ForeignKey,
@@ -30,7 +33,7 @@ from sqlalchemy import (
     TypeDecorator,
     Uuid,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 SCHEMA_NAME = "chainlit"
 
@@ -44,9 +47,8 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
-# text[] on PostgreSQL; SQLite has no array type, so the test/dev variant
-# stores the same list as JSON.
-TagArray = ARRAY(Text()).with_variant(JSON(), "sqlite")
+# text[], as deployed.
+TagArray = ARRAY(Text())
 
 
 def iso_text(value: Optional[datetime]) -> Optional[str]:
@@ -105,7 +107,7 @@ class ISOTimestamp(TypeDecorator[datetime]):
         return iso_datetime(value)
 
 
-class Base(BasicAttributes, DeclarativeBase):
+class Base(base.BasicAttributes, DeclarativeBase):
     """Declarative base pinned to the ``chainlit`` schema.
 
     ``BasicAttributes`` is advanced_alchemy's plain mixin — TYPE_CHECKING
@@ -128,7 +130,7 @@ class User(Base):
     # `metadata` is taken by DeclarativeBase, hence the trailing underscore on
     # the attribute; the column keeps its name.
     metadata_: Mapped[Dict[str, Any]] = mapped_column(
-        "metadata", JsonB, nullable=False, default=dict
+        "metadata", types.JsonB, nullable=False, default=dict
     )
     created_at: Mapped[Optional[datetime]] = mapped_column(
         "createdAt", ISOTimestamp(), nullable=True
@@ -170,23 +172,13 @@ class Thread(Base):
     # declaring it NOT NULL here makes `alembic check` against prod non-empty,
     # which is exactly the acceptance gate for these models. Reads coerce None.
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "metadata", JsonB, nullable=True, default=dict
+        "metadata", types.JsonB, nullable=True, default=dict
     )
     parent_thread_id: Mapped[Optional[UUID]] = mapped_column(
         "parentThreadId",
         Uuid(),
         ForeignKey(f"{SCHEMA_NAME}.threads.id", ondelete="SET NULL"),
         nullable=True,
-    )
-
-    # lazy="raise" everywhere: an accidental lazy load inside an async session
-    # raises MissingGreenlet at runtime, which is a worse failure than the
-    # explicit error you get here.
-    steps: Mapped[List["Step"]] = relationship(
-        back_populates="thread", lazy="raise", viewonly=True
-    )
-    elements: Mapped[List["Element"]] = relationship(
-        back_populates="thread", lazy="raise", viewonly=True
     )
 
 
@@ -220,7 +212,7 @@ class Step(Base):
         "isError", Boolean(), nullable=True
     )
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "metadata", JsonB, nullable=True
+        "metadata", types.JsonB, nullable=True
     )
     tags: Mapped[Optional[List[str]]] = mapped_column("tags", TagArray, nullable=True)
     input: Mapped[Optional[str]] = mapped_column("input", Text(), nullable=True)
@@ -236,7 +228,7 @@ class Step(Base):
         "end", ISOTimestamp(), nullable=True
     )
     generation: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "generation", JsonB, nullable=True
+        "generation", types.JsonB, nullable=True
     )
     # Stored as text, not boolean: the wire value is either a bool or the name
     # of a renderer ("json", "python", ...).
@@ -249,17 +241,10 @@ class Step(Base):
         "defaultOpen", Boolean(), nullable=True
     )
     modes: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "modes", JsonB, nullable=True
+        "modes", types.JsonB, nullable=True
     )
     auto_collapse: Mapped[Optional[bool]] = mapped_column(
         "autoCollapse", Boolean(), nullable=True
-    )
-
-    thread: Mapped["Thread"] = relationship(
-        back_populates="steps", lazy="raise", viewonly=True
-    )
-    feedback: Mapped[Optional["Feedback"]] = relationship(
-        back_populates="step", lazy="raise", uselist=False, viewonly=True
     )
 
 
@@ -293,7 +278,7 @@ class Element(Base):
     for_id: Mapped[Optional[UUID]] = mapped_column("forId", Uuid(), nullable=True)
     mime: Mapped[Optional[str]] = mapped_column("mime", Text(), nullable=True)
     props: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "props", JsonB, nullable=True
+        "props", types.JsonB, nullable=True
     )
     # Added by migration 0002 — part of the element contract the frontend
     # already sends, dropped on the floor by the deployed schema.
@@ -301,11 +286,7 @@ class Element(Base):
         "autoPlay", Boolean(), nullable=True
     )
     player_config: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "playerConfig", JsonB, nullable=True
-    )
-
-    thread: Mapped[Optional["Thread"]] = relationship(
-        back_populates="elements", lazy="raise", viewonly=True
+        "playerConfig", types.JsonB, nullable=True
     )
 
 
@@ -333,10 +314,6 @@ class Feedback(Base):
     )
     value: Mapped[int] = mapped_column("value", Integer(), nullable=False)
     comment: Mapped[Optional[str]] = mapped_column("comment", Text(), nullable=True)
-
-    step: Mapped["Step"] = relationship(
-        back_populates="feedback", lazy="raise", viewonly=True
-    )
 
 
 # The Table objects, for the Core statements. Reaching through ``__table__``

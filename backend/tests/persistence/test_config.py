@@ -13,7 +13,8 @@ from chainlit.persistence import Persistence
 from chainlit.persistence.config import sqlalchemy_config
 from chainlit.persistence.models import Base
 
-URL = "sqlite+aiosqlite://"
+# Never connected to: these tests build configs, not engines with connections.
+URL = "postgresql+asyncpg://nobody:nothing@127.0.0.1:1/never"
 
 
 def test_engine_settings_reach_the_engine_config() -> None:
@@ -72,10 +73,11 @@ def test_metadata_is_registered_with_advanced_alchemy() -> None:
 
 
 def test_listeners_that_have_nothing_to_do_are_off() -> None:
-    """Both listeners look for columns and types this schema does not have.
+    """Neither listener can ever fire here.
 
-    `updatedAt` is written explicitly by the thread service, and element blobs
-    are plain `objectKey`/`url` text rather than FileObject columns.
+    The timestamp one hooks the ORM flush, and every write in this package is
+    a Core statement that never flushes; the file-object one looks for
+    FileObject columns, and element blobs are plain `objectKey`/`url` text.
     """
     config = sqlalchemy_config(URL)
 
@@ -89,3 +91,22 @@ def test_alembic_config_targets_the_chainlit_schema() -> None:
     assert config.alembic_config.version_table_name == "alembic_version"
     assert config.alembic_config.version_table_schema == "chainlit"
     assert config.alembic_config.script_location.endswith("migrations")
+
+
+def test_the_unit_of_work_is_five_services_and_a_session() -> None:
+    """No commit/rollback of its own: the session decides, and the two
+    callers that own a session (``Persistence.uow`` and the request's
+    before-send handler) already do that on it directly."""
+    from chainlit.persistence.config import UnitOfWork
+
+    assert {f for f in UnitOfWork.__dataclass_fields__} == {
+        "session",
+        "users",
+        "threads",
+        "steps",
+        "elements",
+        "feedbacks",
+    }
+    assert not any(
+        callable(getattr(UnitOfWork, name, None)) for name in ("commit", "rollback")
+    )

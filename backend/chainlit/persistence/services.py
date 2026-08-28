@@ -22,11 +22,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, cast
 
-from advanced_alchemy.exceptions import wrap_sqlalchemy_exception
-from advanced_alchemy.service import SQLAlchemyAsyncRepositoryService
+from advanced_alchemy.extensions.litestar import exceptions, service
 from msgspec import UNSET, Struct
-from msgspec.structs import fields
+from msgspec.structs import asdict, fields
 from sqlalchemy import CursorResult, Result, Row, RowMapping, delete, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import Executable
 
 from chainlit.persistence import statements
@@ -142,7 +142,7 @@ def _column_values(record: Struct, skip: Sequence[str] = ()) -> Dict[str, Any]:
 
 
 class ChainlitService:
-    """What the five services share: the dialect, and how a statement runs.
+    """What the five services share: how a statement runs.
 
     Almost every rule in this package is a Core statement rather than a
     repository call, which is deliberate -- the rules have to run inside the
@@ -159,12 +159,14 @@ class ChainlitService:
     # assigned, so nothing here shadows it.
     repository: Any
 
+    # Only for advanced_alchemy's error translation, which keys its taxonomy on
+    # the dialect. The statements themselves are PostgreSQL-only and never ask.
     @property
     def dialect(self) -> str:
         return self.repository.session.get_bind().dialect.name
 
     async def execute(self, statement: Executable) -> Result[Any]:
-        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
             return await self.repository.session.execute(statement)
 
     # Reading the result is inside the wrap too, and that is the whole point
@@ -174,23 +176,23 @@ class ChainlitService:
     # exactly the taxonomy this class exists to close.
 
     async def fetch_one(self, statement: Executable) -> Any:
-        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
             result = await self.repository.session.execute(statement)
             return result.one()
 
     async def fetch_one_or_none(self, statement: Executable) -> Optional[Any]:
-        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
             result = await self.repository.session.execute(statement)
             return result.one_or_none()
 
     async def fetch_scalar(self, statement: Executable) -> Any:
-        with wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
             result = await self.repository.session.execute(statement)
             return result.scalar_one_or_none()
 
 
 class UserService(
-    ChainlitService, SQLAlchemyAsyncRepositoryService[User, UserRepository]
+    ChainlitService, service.SQLAlchemyAsyncRepositoryService[User, UserRepository]
 ):
     """Users, keyed on their identifier."""
 
@@ -213,9 +215,8 @@ class UserService(
             identifier=identifier,
             metadata=metadata or {},
             created_at=now(),
-            dialect_name=self.dialect,
         )
-        return self.row_to_record(await self.fetch_one(statement))
+        return row_to_user(await self.fetch_one(statement))
 
     def to_record(self, model: User) -> UserRecord:
         return UserRecord(
@@ -225,18 +226,9 @@ class UserService(
             metadata=model.metadata_ or {},
         )
 
-    def row_to_record(self, row: Row[Any]) -> UserRecord:
-        mapping: RowMapping = row._mapping
-        return UserRecord(
-            id=str(mapping["id"]),
-            identifier=mapping["identifier"],
-            created_at=from_datetime(mapping["createdAt"]) or "",
-            metadata=mapping["metadata"] or {},
-        )
-
 
 class StepService(
-    ChainlitService, SQLAlchemyAsyncRepositoryService[Step, StepRepository]
+    ChainlitService, service.SQLAlchemyAsyncRepositoryService[Step, StepRepository]
 ):
     """Steps, written by a conditional upsert."""
 
@@ -253,10 +245,8 @@ class StepService(
         the row, and without the guard PostgreSQL rejects the whole write.
         """
         values = _column_values(record, skip=("feedback",))
-        await self.execute(
-            statements.ensure_thread(values["threadId"], now(), self.dialect)
-        )
-        await self.execute(statements.upsert_step(values, self.dialect))
+        await self.execute(statements.ensure_thread(values["threadId"], now()))
+        await self.execute(statements.upsert_step(values))
 
     async def fetch(self, step_id: str) -> Optional[StepRecord]:
         identifier = to_uuid(step_id)
@@ -273,7 +263,8 @@ class StepService(
 
 
 class ElementService(
-    ChainlitService, SQLAlchemyAsyncRepositoryService[Element, ElementRepository]
+    ChainlitService,
+    service.SQLAlchemyAsyncRepositoryService[Element, ElementRepository],
 ):
     """Elements attached to steps."""
 
@@ -281,7 +272,7 @@ class ElementService(
 
     async def save(self, record: ElementRecord) -> None:
         values = _column_values(record)
-        await self.execute(statements.upsert_element(values, self.dialect))
+        await self.execute(statements.upsert_element(values))
 
     async def fetch(self, thread_id: str, element_id: str) -> Optional[ElementRecord]:
         table = ELEMENTS
@@ -302,7 +293,8 @@ class ElementService(
 
 
 class FeedbackService(
-    ChainlitService, SQLAlchemyAsyncRepositoryService[Feedback, FeedbackRepository]
+    ChainlitService,
+    service.SQLAlchemyAsyncRepositoryService[Feedback, FeedbackRepository],
 ):
     """Thumbs up/down on a step."""
 
@@ -317,9 +309,7 @@ class FeedbackService(
             "value": record.value,
             "comment": record.comment,
         }
-        surviving = await self.fetch_scalar(
-            statements.upsert_feedback(values, self.dialect)
-        )
+        surviving = await self.fetch_scalar(statements.upsert_feedback(values))
         return str(surviving)
 
     async def remove(self, feedback_id: str) -> bool:
@@ -333,7 +323,7 @@ class FeedbackService(
 
 
 class ThreadService(
-    ChainlitService, SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]
+    ChainlitService, service.SQLAlchemyAsyncRepositoryService[Thread, ThreadRepository]
 ):
     """Threads: the history page, and the row every step hangs off."""
 
@@ -371,7 +361,7 @@ class ThreadService(
         }
         assignments: Dict[str, Any] = {"updatedAt": moment, **values}
 
-        statement = statements.insert_for(self.dialect)(THREADS).values(**insert_values)
+        statement = insert(THREADS).values(**insert_values)
         await self.execute(
             statement.on_conflict_do_update(
                 index_elements=[THREADS.c["id"]], set_=assignments
@@ -384,7 +374,6 @@ class ThreadService(
                     thread_id=identifier,
                     patch=patch.metadata,
                     updated_at=moment,
-                    dialect_name=self.dialect,
                 )
             )
 
@@ -407,16 +396,11 @@ class ThreadService(
             await self.execute(statements.thread_elements_query([identifier]))
         ).all()
 
+        # ThreadDetail is ThreadRecord plus the two lists, so the summary's
+        # fields are the detail's fields; listing them again is how the two
+        # drift apart.
         return ThreadDetail(
-            id=summary.id,
-            created_at=summary.created_at,
-            updated_at=summary.updated_at,
-            name=summary.name,
-            user_id=summary.user_id,
-            user_identifier=summary.user_identifier,
-            tags=summary.tags,
-            metadata=summary.metadata,
-            parent_thread_id=summary.parent_thread_id,
+            **asdict(summary),
             steps=[row_to_step(row) for row in step_rows],
             elements=[row_to_element(row) for row in element_rows],
         )
@@ -459,6 +443,17 @@ class ThreadService(
         await self.execute(delete(ELEMENTS).where(ELEMENTS.c["threadId"] == identifier))
         await self.execute(delete(STEPS).where(STEPS.c["threadId"] == identifier))
         await self.execute(delete(THREADS).where(THREADS.c["id"] == identifier))
+
+
+def row_to_user(row: Row[Any]) -> UserRecord:
+    """A ``users`` row -- what the RETURNING upsert hands back."""
+    mapping: RowMapping = row._mapping
+    return UserRecord(
+        id=str(mapping["id"]),
+        identifier=mapping["identifier"],
+        created_at=from_datetime(mapping["createdAt"]) or "",
+        metadata=mapping["metadata"] or {},
+    )
 
 
 def row_to_thread(row: Row[Any]) -> ThreadRecord:

@@ -540,7 +540,8 @@ class TestAskElementMessage:
         await answer(session, AskElementReply(submitted=True, props={"field": "value"}))
         result = await sending
 
-        assert result == {"submitted": True, "props": {"field": "value"}}
+        # Spread, not nested: the app reads its own props off the top level.
+        assert result == {"field": "value", "submitted": True}
         assert msg.content == "Thanks for submitting"
         assert [e.element.id for e in frames(session, ElementUpsert)] == ["element_123"]
         assert [r.id for r in frames(session, ElementRemove)] == ["element_123"]
@@ -552,7 +553,7 @@ class TestAskElementMessage:
         msg = AskElementMessage(content="Submit", element=element)
         sending = asyncio.create_task(msg.send())
         await answer(session, AskElementReply(submitted=False))
-        assert (await sending) == {"submitted": False, "props": {}}
+        assert (await sending) == {"submitted": False}
         assert msg.content == "Cancelled"
 
     async def test_send_timeout(self, ctx, session, no_author_rename):

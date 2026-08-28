@@ -296,7 +296,11 @@ class Emitter:
         if isinstance(value, AskActionReply):
             return msgspec.to_builtins(value.action)
         if isinstance(value, AskElementReply):
-            return {"submitted": value.submitted, "props": dict(value.props)}
+            # Nested on the wire (a closed struct cannot spread arbitrary
+            # props), spread for the application: ``response["keywords"]``
+            # is the API every app was written against, and "submitted" is
+            # the one key of ours in it.
+            return {**value.props, "submitted": value.submitted}
         return (
             msgspec.to_builtins(value) if isinstance(value, msgspec.Struct) else value
         )

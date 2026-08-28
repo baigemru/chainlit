@@ -96,11 +96,13 @@ class AskActionResponse(TypedDict):
     id: str
 
 
-class AskElementResponse(TypedDict, total=False):
-    """Reply of a custom-element ask: the props travel nested, not spread."""
+class AskElementResponse(Dict[str, Any]):
+    """Reply of a custom-element ask: the element's props, plus ``submitted``.
 
-    submitted: bool
-    props: Dict[str, Any]
+    The wire nests the props (a closed struct cannot spread arbitrary keys);
+    the application gets them spread, the shape it has always read --
+    ``response["keywords"]`` -- with ``submitted`` alongside.
+    """
 
 
 class _AsDict:

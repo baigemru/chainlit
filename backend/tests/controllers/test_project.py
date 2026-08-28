@@ -33,6 +33,7 @@ from litestar.di import Provide
 from litestar.testing import create_async_test_client
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+import chainlit.config
 from chainlit.controllers.project import ProjectController
 from chainlit.persistence import Persistence
 from chainlit.persistence.records import (
@@ -275,6 +276,38 @@ async def test_a_language_that_is_not_a_language_is_refused(client) -> None:
     """``language`` is interpolated into a filesystem path downstream."""
     response = await client.get("/project/translations?language=../../../etc/passwd")
     assert response.status_code == 400
+
+
+async def test_translations_are_read_off_disk_once_per_language(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second identical request is answered from the response cache.
+
+    The cache key is the path plus the sorted query, so a different
+    ``?language=`` is a different entry and reads its own file -- asserted
+    too, because a cache that ignored the query would serve English to
+    everyone after the first request.
+    """
+    # Patched on the class: the config is a pydantic model and refuses an
+    # instance attribute it has no field for.
+    cls = type(chainlit.config.config)
+    original = cls.load_translation
+    calls: List[str] = []
+
+    def counting(self: Any, language: str) -> Dict[str, Any]:
+        calls.append(language)
+        return original(self, language)
+
+    monkeypatch.setattr(cls, "load_translation", counting)
+
+    first = await client.get("/project/translations?language=en-US")
+    second = await client.get("/project/translations?language=en-US")
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert len(calls) == 1
+
+    assert (await client.get("/project/translations?language=fr-FR")).status_code == 200
+    assert len(calls) == 2
 
 
 # --------------------------------------------------------------------------
@@ -629,7 +662,7 @@ async def test_an_element_write_into_another_users_session_is_refused(
         },
     )
 
-    assert response.status_code == 401
+    assert response.status_code == 404
     async with persistence.uow() as uow:
         element = await uow.elements.fetch(thread_id, element_id)
     assert element is not None
@@ -990,13 +1023,24 @@ async def test_an_action_runs_against_its_own_session(
 async def test_an_action_in_another_users_session_is_refused(
     client, auth, registry: StubRegistry
 ) -> None:
+    """``404``, and the same ``404`` a session that does not exist gets.
+
+    Bob's session id is not a capability, and neither is confirming that it
+    is live: a ``401``/``403`` here would tell Alice that the id she holds
+    belongs to a session that exists right now.
+    """
     login(client, auth, ALICE)
     response = await client.post(
         "/project/action",
         json={"sessionId": "bob-session", "action": {"name": "greet", "id": "1"}},
     )
+    vanished = await client.post(
+        "/project/action",
+        json={"sessionId": "vanished", "action": {"name": "greet", "id": "1"}},
+    )
 
-    assert response.status_code == 401
+    assert response.status_code == 404
+    assert response.json() == vanished.json()
     assert registry.sessions["bob-session"].called == []
 
 

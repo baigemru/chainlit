@@ -14,8 +14,13 @@ The branding routes (``/favicon``, ``/logo``, ``/avatars``) are public. They
 are fetched by the login page, so putting them behind the authentication
 middleware would render an unbranded, half-broken login screen to exactly the
 users who cannot get past it. ``exclude_from_auth`` is an *opt key*, and on an
-excluded route ``connection.user`` raises rather than returning ``None`` — so
-nothing below reads the user on one.
+excluded route ``connection.user`` raises rather than returning ``None`` (see
+:data:`chainlit.security.AuthedRequest`) — so nothing below reads the user on
+one.
+
+A session that is not the caller's is a ``404``, not a ``401``: the rule is
+:func:`chainlit.controllers.caller.assert_session_owner`, and the reason is
+written there.
 """
 
 from __future__ import annotations
@@ -33,70 +38,30 @@ from typing import (
     Tuple,
 )
 
-from litestar import Controller, Request, get, post
+from litestar import Controller, get, post
 from litestar.datastructures import UploadFile
 from litestar.di import NamedDependency
-from litestar.exceptions import (
-    ClientException,
-    NotAuthorizedException,
-    NotFoundException,
-)
+from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery, MultipartBody
 from litestar.response import File
-from litestar.types import Empty
 
 import chainlit.config
 from chainlit._utils import is_path_inside
-from chainlit.controllers.sessions import LiveSession, SessionRegistry
+from chainlit.controllers import FRONTEND_DIST
+from chainlit.controllers.caller import assert_session_owner
+from chainlit.controllers.sessions import SessionRegistry
+from chainlit.security import AuthedRequest
 
 __all__ = (
     "FilesController",
-    "caller_identifier",
     "served_file",
 )
-
-# Where the built frontend lives inside the installed package. The same
-# constant ``chainlit.plugin`` derives for the static assets router; it is
-# recomputed rather than imported because the plugin is what registers *this*
-# module, and importing back into it would close a cycle.
-FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 # The avatar id is interpolated into a glob against a public directory, so it
 # is validated before it is used, not after.
 AVATAR_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_ .-]+$")
 
 Theme = Literal["light", "dark"]
-
-
-def caller_identifier(request: Request[Any, Any, Any]) -> Optional[str]:
-    """Who is calling, or ``None`` when the deployment has no authentication.
-
-    ``connection.user`` *raises* when the authentication middleware did not
-    run — which is both the unauthenticated deployment and every route that
-    opts out. Reading the scope directly is the only way to ask the question
-    without having to know which of the two it is.
-    """
-    user = request.scope.get("user", Empty)
-    if user is Empty or user is None:
-        return None
-    return getattr(user, "identifier", None)
-
-
-def assert_session_belongs_to(
-    session: LiveSession, request: Request[Any, Any, Any]
-) -> None:
-    """Refuse a session that belongs to somebody else.
-
-    With no authentication there is nobody to compare against and every
-    caller is the owner, which is the same rule the deployment already chose
-    by not configuring a login.
-    """
-    identifier = caller_identifier(request)
-    if identifier is None:
-        return
-    owner = getattr(session.user, "identifier", None)
-    if owner != identifier:
-        raise NotAuthorizedException("This session belongs to another user")
 
 
 def served_file(path: Path, media_type: Optional[str] = None) -> File:
@@ -215,7 +180,7 @@ class FilesController(Controller):
     @post("/project/file", status_code=200)
     async def upload_file(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: MultipartBody[UploadFile],
         sessions: NamedDependency[SessionRegistry],
         session_id: FromQuery[str],
@@ -231,7 +196,7 @@ class FilesController(Controller):
         session = sessions.find(session_id)
         if session is None:
             raise NotFoundException("Session not found")
-        assert_session_belongs_to(session, request)
+        assert_session_owner(session, request)
 
         spec = session.files_spec.get(ask_parent_id) if ask_parent_id else None
         if ask_parent_id and spec is None:
@@ -261,7 +226,7 @@ class FilesController(Controller):
     @get("/project/file/{file_id:str}")
     async def get_file(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         sessions: NamedDependency[SessionRegistry],
         file_id: FromPath[str],
         session_id: FromQuery[str],
@@ -270,7 +235,7 @@ class FilesController(Controller):
         session = sessions.find(session_id)
         if session is None:
             raise NotFoundException("Session not found")
-        assert_session_belongs_to(session, request)
+        assert_session_owner(session, request)
 
         entry = session.files.get(file_id)
         if entry is None:

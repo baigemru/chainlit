@@ -6,8 +6,8 @@ uvicorn deliver four hundred intact frames on every one of the four ws
 implementations. The queue is here for three things concurrent ``send`` does
 not give:
 
-*One point of ordering.* A step upsert, the tokens that stream into it and
-the ``ask.start`` that follows are issued by different coroutines and mean
+*One point of ordering.* A step upsert, the element attached to it and the
+``ask.start`` that follows are issued by different coroutines and mean
 nothing out of order. Interleaved ``await socket.send_text(...)`` calls are
 ordered by whichever coroutine the loop happens to resume, which is not an
 order anybody chose.
@@ -18,9 +18,8 @@ own coroutines are the buffer, and the buffer is unbounded. With one, the
 backlog is a number with a limit and a name.
 
 *One owner of the close.* A close frame that interleaves with a data frame
-is a protocol error, and "everything I queued has reached the socket" is not
-a question a caller can answer from outside. Both belong to whoever owns the
-send side, so the writer performs the close itself.
+is a protocol error, and the writer is the only thing that can know a frame
+is not mid-write. So the writer performs the close itself.
 
 What this module refuses to do
 ------------------------------
@@ -29,15 +28,10 @@ What this module refuses to do
 ``put_nowait`` returns ``False`` on a full queue (``channels/subscriber.py``
 lines 51-57) and the plugin's ``_sub_worker`` throws the return value away
 (``channels/plugin.py`` line 312). Every tag on this wire is a delta --
-``step.update`` patches a bubble that must already exist, ``step.stream.token``
-appends to it, ``element.remove`` addresses one by id -- and there is no ack,
-so a client that misses one is wrong from then on and neither end can tell.
-Silence is the one policy that cannot be recovered from.
-
-*Wait for quiescence.* ``drain`` pushes a fence and waits for that one
-object, so it means "everything issued before the call reached the socket",
-not "the queue is empty" -- which a streaming session never is. This is the
-same shape, and the same reason, as ``persistence.writer.SessionWriter.drain``.
+``step.update`` patches a bubble that must already exist, ``element.remove``
+addresses one by id -- and there is no ack, so a client that misses one is
+wrong from then on and neither end can tell. Silence is the one policy that
+cannot be recovered from.
 
 *Die with the socket.* A Chainlit session outlives its connection. See
 ``attach``.
@@ -47,19 +41,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from types import TracebackType
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    AsyncIterator,
-    Callable,
-    Final,
-    Optional,
-    Tuple,
-    Union,
-)
+from typing import TYPE_CHECKING, Any, Final, Optional, Tuple, Union
 
 from litestar.status_codes import WS_1000_NORMAL_CLOSURE
 
@@ -72,11 +54,10 @@ if TYPE_CHECKING:
     from chainlit.protocol.server import ServerMsg
 
 __all__ = [
-    "DEFAULT_DRAIN_TIMEOUT",
+    "CLOSE_TIMEOUT",
     "DEFAULT_MAX_BACKLOG",
     "FORCE_CLOSE_GRACE",
     "Outbound",
-    "Overflow",
 ]
 
 
@@ -84,12 +65,15 @@ DEFAULT_MAX_BACKLOG: Final[int] = 1024
 """Frames one connection may fall behind by before the policy fires.
 
 Counted in frames, not bytes, because the writer encodes -- a queued
-``ServerMsg`` has no size yet -- and because the thing that actually piles up
-is ``step.stream.token``. One frame per token means 1024 is about one long
-completion: the largest burst a healthy client absorbs in a single breath, so
-a smaller bound would fire the policy on ordinary streaming. Much larger and
-a wedged connection holds tens of megabytes hostage while the view it is
-holding is minutes stale and the resume path would rebuild it in one frame.
+``ServerMsg`` has no size yet. This wire carries whole messages: a step goes
+out once, complete, with its elements and actions alongside it, so a healthy
+client is never more than a handful of frames behind and the only burst that
+really happens is the transcript replay on reconnect -- one upsert per step
+and per attachment. 1024 is comfortably past the longest conversation this
+server replays that way, so the bound fires only on a peer that has stopped
+reading. Much larger and a wedged connection holds tens of megabytes hostage
+while the view it is holding is minutes stale and the resume path would
+rebuild it in one frame.
 
 The worst case is not the typical one: ``MAX_FRAME_BYTES`` is 8 MiB, so 1024
 *maximal* frames would be 8 GiB. Nothing queues a thousand thread snapshots
@@ -98,10 +82,9 @@ whose app sends large elements in bulk should lower it, which is why it is a
 constructor argument and not a constant baked into the loop.
 """
 
-DEFAULT_DRAIN_TIMEOUT: Final[float] = 10.0
-"""What a caller waiting for the socket to catch up is willing to spend.
-Matches ``persistence.writer.DRAIN_TIMEOUT``: the two are usually awaited by
-the same handler, on the same shutdown."""
+CLOSE_TIMEOUT: Final[float] = 10.0
+"""How long a graceful ``close`` waits for the backlog to reach the socket
+before it stops being graceful."""
 
 FORCE_CLOSE_GRACE: Final[float] = 1.0
 """How long a writer gets to answer an abort before it is cancelled outright,
@@ -112,52 +95,13 @@ does not come back on its own -- so a close built only on a flag it will read
 connections that need one."""
 
 
-@dataclass(frozen=True, slots=True)
-class Overflow:
-    """The moment the backlog bound was hit. Handed to ``on_overflow``."""
-
-    tag: str
-    """The ``t`` of the frame that did not fit."""
-
-    backlog: int
-    """Frames waiting when it was refused."""
-
-    dropped: int
-    """Frames this queue has refused in total, including this one."""
-
-
-# --------------------------------------------------------------------------
-# Queue items
-# --------------------------------------------------------------------------
-
-
-class _Control:
+class _Close:
     """A marker travelling in the queue rather than a frame on the wire.
 
-    Control items are exempt from the backlog bound. A fence that could be
-    refused would make ``drain`` unusable on exactly the connection it exists
-    to describe, and a close that could be refused would leave the socket
-    open forever at the one moment it must not be.
+    Close the socket once everything queued in front of it has been sent.
+    Exempt from the backlog bound: a close that could be refused would leave
+    the socket open forever at the one moment it must not be.
     """
-
-    __slots__ = ()
-
-
-class _Fence(_Control):
-    """Resolves once everything queued in front of it has reached the socket."""
-
-    __slots__ = ("future",)
-
-    def __init__(self, future: "asyncio.Future[bool]") -> None:
-        self.future = future
-
-    def resolve(self, reached: bool) -> None:
-        if not self.future.done():
-            self.future.set_result(reached)
-
-
-class _Close(_Control):
-    """Close the socket once everything queued in front of it has been sent."""
 
     __slots__ = ("code", "reason")
 
@@ -166,17 +110,7 @@ class _Close(_Control):
         self.reason = reason
 
 
-# Spelled with the two concrete controls rather than their base: the
-# writer narrows by `isinstance` against each, and a bare `_Control`
-# left in the union survives both checks, so the frame that reaches
-# `encode_server` is not a `ServerMsg` as far as the type checker is
-# concerned.
-_Item = Union["ServerMsg", _Fence, _Close]
-
-
-# --------------------------------------------------------------------------
-# The queue
-# --------------------------------------------------------------------------
+_Item = Union["ServerMsg", _Close]
 
 
 class Outbound:
@@ -193,13 +127,7 @@ class Outbound:
     what has not been sent stays queued for the next one. A frame that was
     mid-``send_text`` when the socket died stays at the head of the queue and
     is sent again by the next writer: a duplicate is harmless here (upserts
-    and patches are idempotent, and ``step.stream.token`` losses are not),
-    a hole is not.
-
-    That retention is right for a reconnect that resumes where it left off
-    and wrong for one that replays a snapshot -- ``thread.resume`` *replaces*
-    the client's feed, so deltas queued before it are describing a feed that
-    no longer exists. Call ``discard`` before queueing a snapshot.
+    and patches are idempotent), a hole is not.
 
     Close
     -----
@@ -228,16 +156,11 @@ class Outbound:
     """
 
     def __init__(
-        self,
-        *,
-        max_backlog: int = DEFAULT_MAX_BACKLOG,
-        on_overflow: Optional[Callable[[Overflow], None]] = None,
-        name: str = "",
+        self, *, max_backlog: int = DEFAULT_MAX_BACKLOG, name: str = ""
     ) -> None:
         if max_backlog < 1:
             raise ValueError("max_backlog must be at least 1")
         self._max_backlog = max_backlog
-        self._on_overflow = on_overflow
         self._name = name
 
         self._items: deque[_Item] = deque()
@@ -250,19 +173,7 @@ class Outbound:
 
         self._closed = False
         self._closed_event = asyncio.Event()
-        self._close_code: Optional[int] = None
-        self._close_reason = ""
         self._fatal: Optional[tuple[int, str]] = None
-
-        self._sent = 0
-        self._dropped = 0
-        self._overflowed = False
-
-    def __repr__(self) -> str:
-        return (
-            f"<Outbound {self._name!r} backlog={self._pending} sent={self._sent} "
-            f"dropped={self._dropped} closed={self._closed}>"
-        )
 
     # ------------------------------------------------------------ observation
 
@@ -270,11 +181,11 @@ class Outbound:
     def pending_frames(self) -> Tuple["ServerMsg", ...]:
         """The messages queued and not yet written, in order.
 
-        The fences and the close marker are not messages and are left out:
-        they are how this queue talks to itself, and a caller counting
-        what a session is about to say should not have to know they exist.
+        The close marker is not a message and is left out: it is how this
+        queue talks to itself, and a caller counting what a session is about
+        to say should not have to know it exists.
         """
-        return tuple(item for item in self._items if not isinstance(item, _Control))
+        return tuple(item for item in self._items if not isinstance(item, _Close))
 
     @property
     def backlog(self) -> int:
@@ -282,36 +193,8 @@ class Outbound:
         return self._pending
 
     @property
-    def sent(self) -> int:
-        """Frames handed to the socket."""
-        return self._sent
-
-    @property
-    def dropped(self) -> int:
-        """Frames ``send`` refused -- the backlog was full, or it was closed.
-
-        The counter is the point. A queue whose overflow is only a ``False``
-        return value is a queue whose overflow nobody notices.
-        """
-        return self._dropped
-
-    @property
-    def overflowed(self) -> bool:
-        """Whether the backlog bound was ever hit."""
-        return self._overflowed
-
-    @property
     def closed(self) -> bool:
         return self._closed
-
-    @property
-    def close_code(self) -> Optional[int]:
-        """The code the socket was closed with, or ``None`` while it is open."""
-        return self._close_code
-
-    @property
-    def close_reason(self) -> str:
-        return self._close_reason
 
     @property
     def attached(self) -> bool:
@@ -327,8 +210,7 @@ class Outbound:
         is not a dropped frame -- it *closes the connection*
         (``CloseCode.BACKLOG_EXCEEDED``), because a client that missed a delta
         on this wire cannot be repaired in place, and reconnect-and-resume
-        rebuilds it correctly in one frame. The refusal is counted in
-        ``dropped``, logged, and passed to ``on_overflow``.
+        rebuilds it correctly in one frame.
 
         The code is its own, not ``INTERNAL``: nothing failed here. The
         server is fine and the session is intact -- the peer stopped reading
@@ -336,7 +218,6 @@ class Outbound:
         "internal server error" tells it nothing about.
         """
         if self._closed or self._fatal is not None:
-            self._dropped += 1
             logger.debug(
                 "Outbound %s refused a %s frame: the connection is closing.",
                 self._name,
@@ -345,8 +226,6 @@ class Outbound:
             return False
 
         if self._pending >= self._max_backlog:
-            self._dropped += 1
-            self._overflowed = True
             logger.error(
                 "Outbound %s overflowed at %d queued frames; refusing a %s and "
                 "closing the connection. The client is not reading.",
@@ -354,47 +233,13 @@ class Outbound:
                 self._pending,
                 _tag_of(msg),
             )
-            event = Overflow(
-                tag=_tag_of(msg), backlog=self._pending, dropped=self._dropped
-            )
             self.abort(CloseCode.BACKLOG_EXCEEDED, "outbound backlog exceeded")
-            self._notify_overflow(event)
             return False
 
         self._items.append(msg)
         self._pending += 1
         self._wake.set()
         return True
-
-    def _notify_overflow(self, event: Overflow) -> None:
-        if self._on_overflow is None:
-            return
-        try:
-            self._on_overflow(event)
-        except Exception:
-            logger.warning(
-                "Outbound %s overflow callback failed", self._name, exc_info=True
-            )
-
-    def discard(self) -> int:
-        """Drop every frame still waiting; keep the fences and the close.
-
-        For the reconnect that replays a snapshot rather than resuming: after
-        ``thread.resume`` the client's feed is replaced, so the deltas queued
-        against the old one are garbage. Returns how many were dropped; they
-        are counted in ``dropped`` too, because they were.
-        """
-        if not self._pending:
-            return 0
-        kept: deque[_Item] = deque(
-            item for item in self._items if isinstance(item, _Control)
-        )
-        count = self._pending
-        self._items = kept
-        self._pending = 0
-        self._dropped += count
-        logger.debug("Outbound %s discarded %d queued frame(s).", self._name, count)
-        return count
 
     # ------------------------------------------------------------ writer task
 
@@ -421,27 +266,7 @@ class Outbound:
         Not a close: the queue stays usable and a later ``attach`` picks the
         backlog up where this one left it.
         """
-        writer, self._writer, self._socket = self._writer, None, None
-        if writer is None:
-            return
-        writer.cancel()
-        try:
-            await writer
-        except asyncio.CancelledError:
-            if _cancelled_from_outside():
-                raise
-        self._sweep_fences(reached=False)
-
-    @asynccontextmanager
-    async def attached_to(
-        self, socket: "WebSocket[Any, Any, Any]"
-    ) -> AsyncIterator["Outbound"]:
-        """``attach`` for the life of the block, ``detach`` on the way out."""
-        self.attach(socket)
-        try:
-            yield self
-        finally:
-            await self.detach()
+        await self._reap_writer()
 
     async def _run(self, socket: "WebSocket[Any, Any, Any]") -> None:
         try:
@@ -455,10 +280,8 @@ class Outbound:
             await self._shutdown(socket, CloseCode.INTERNAL, "outbound writer failed")
         finally:
             # However this writer ends -- close, socket loss, cancellation
-            # from an enclosing task group -- nothing is draining the queue
-            # any more, so no fence can still be honoured and the handle must
-            # not keep an attached-looking queue from being re-attached.
-            self._sweep_fences(reached=False)
+            # from an enclosing task group -- the handle must not keep an
+            # attached-looking queue from being re-attached.
             if self._writer is asyncio.current_task():
                 self._writer = None
                 self._socket = None
@@ -467,9 +290,7 @@ class Outbound:
         while True:
             if self._fatal is not None:
                 code, reason = self._fatal
-                self._items = deque(
-                    item for item in self._items if isinstance(item, _Fence)
-                )
+                self._items.clear()
                 self._pending = 0
                 await self._shutdown(socket, code, reason)
                 return
@@ -485,11 +306,6 @@ class Outbound:
             # the frame for the next writer instead of eating it.
             item = self._items[0]
 
-            if isinstance(item, _Fence):
-                self._items.popleft()
-                item.resolve(True)
-                continue
-
             if isinstance(item, _Close):
                 self._items.popleft()
                 await self._shutdown(socket, item.code, item.reason)
@@ -502,7 +318,6 @@ class Outbound:
                 # a reason to take the client's connection away.
                 self._items.popleft()
                 self._pending -= 1
-                self._dropped += 1
                 logger.exception(
                     "Outbound %s could not encode a %s frame; dropping it.",
                     self._name,
@@ -513,7 +328,6 @@ class Outbound:
             if len(frame) > MAX_FRAME_BYTES:
                 self._items.popleft()
                 self._pending -= 1
-                self._dropped += 1
                 logger.error(
                     "Outbound %s built a %s frame of %d bytes, over the %d byte "
                     "limit; closing.",
@@ -547,67 +361,10 @@ class Outbound:
                     type(exc).__name__,
                     self._pending,
                 )
-                self._sweep_fences(reached=False)
                 return
 
             self._items.popleft()
             self._pending -= 1
-            self._sent += 1
-
-    # ------------------------------------------------------------------ fence
-
-    async def drain(self, timeout: float = DEFAULT_DRAIN_TIMEOUT) -> bool:
-        """Wait until everything queued before this call reached the socket.
-
-        Returns whether it did. ``False`` means the deadline passed, the
-        socket died first, or the queue was already closed -- in every case
-        the caller has learned that the frames it cared about are not on the
-        wire, which is the only thing it can act on.
-
-        Frames queued *after* the call are not waited for. That is the point
-        of the fence and the reason this is not ``queue.join()``: on a session
-        that is streaming, "the queue is empty" is a state that never arrives,
-        and a shutdown path that waited for it would hang.
-
-        Returns immediately when no writer is attached. Nothing is trying to
-        send the backlog, so waiting for it would burn the whole deadline to
-        learn what is already known.
-        """
-        if self._closed or self._writer is None or self._writer.done():
-            return not self._items and not self._closed
-        if not self._items:
-            return True
-
-        loop = asyncio.get_running_loop()
-        fence = _Fence(loop.create_future())
-        self._items.append(fence)
-        self._wake.set()
-        try:
-            return await asyncio.wait_for(asyncio.shield(fence.future), timeout)
-        except TimeoutError:
-            logger.warning(
-                "Outbound %s did not drain within %ss; %d frame(s) still queued.",
-                self._name,
-                timeout,
-                self._pending,
-            )
-            fence.resolve(False)
-            return False
-
-    def _sweep_fences(self, *, reached: bool) -> None:
-        """Resolve every waiting fence and take it out of the queue.
-
-        Called on every terminal transition and whenever the writer stops. A
-        fence left behind is a ``drain`` blocked for its full deadline on a
-        connection that is already gone.
-        """
-        remaining: deque[_Item] = deque()
-        for item in self._items:
-            if isinstance(item, _Fence):
-                item.resolve(reached)
-            else:
-                remaining.append(item)
-        self._items = remaining
 
     # ------------------------------------------------------------------ close
 
@@ -616,8 +373,7 @@ class Outbound:
 
         For a failure that has already made the connection meaningless. The
         writer performs the close when it can; with no writer attached there
-        is no socket to close, so the queue simply becomes closed and says
-        why.
+        is no socket to close, so the queue simply becomes closed.
 
         The writer often *cannot*, and the overflow case is the proof: a
         backlog only fills because the peer stopped reading, which means the
@@ -633,7 +389,7 @@ class Outbound:
         self._fatal = (int(code), reason)
         self._wake.set()
         if self._writer is None or self._writer.done():
-            self._mark_closed(int(code), reason)
+            self._mark_closed()
             return
         self._closer = asyncio.ensure_future(self._force(int(code), reason))
 
@@ -666,14 +422,14 @@ class Outbound:
                     self._name,
                     type(exc).__name__,
                 )
-        self._mark_closed(code, reason)
+        self._mark_closed()
 
     async def close(
         self,
         code: int = WS_1000_NORMAL_CLOSURE,
         reason: str = "",
         *,
-        timeout: float = DEFAULT_DRAIN_TIMEOUT,
+        timeout: float = CLOSE_TIMEOUT,
     ) -> None:
         """Flush what is queued, then close. Idempotent, and always terminal.
 
@@ -689,7 +445,7 @@ class Outbound:
             # Nothing is draining the queue, so there is nothing to flush and
             # no socket of ours to close politely.
             await self._reap_writer()
-            self._mark_closed(int(code), reason)
+            self._mark_closed()
             return
 
         self._items.append(_Close(int(code), reason))
@@ -708,7 +464,7 @@ class Outbound:
         await self._await_closer()
         await self._reap_writer()
         if not self._closed:  # pragma: no cover - _force always marks it
-            self._mark_closed(int(code), reason)
+            self._mark_closed()
 
     async def wait_closed(self) -> None:
         """Block until the socket has been closed by the writer."""
@@ -751,7 +507,7 @@ class Outbound:
         self, socket: "WebSocket[Any, Any, Any]", code: int, reason: str
     ) -> None:
         """Send the close frame. Only ever called from the writer."""
-        self._mark_closed(int(code), reason)
+        self._mark_closed()
         try:
             await socket.close(code=int(code), reason=reason)
         except asyncio.CancelledError:
@@ -763,28 +519,11 @@ class Outbound:
                 type(exc).__name__,
             )
 
-    def _mark_closed(self, code: int, reason: str) -> None:
-        if not self._closed:
-            self._closed = True
-            self._close_code = code
-            self._close_reason = reason
-        self._sweep_fences(reached=False)
+    def _mark_closed(self) -> None:
+        self._closed = True
         self._pending = 0
         self._items.clear()
         self._closed_event.set()
-
-    # ------------------------------------------------------- context manager
-
-    async def __aenter__(self) -> "Outbound":
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: Optional[type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> None:
-        await self.close()
 
 
 def _cancelled_from_outside() -> bool:

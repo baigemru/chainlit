@@ -12,14 +12,12 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, List, Sequence, Set
+from typing import Any, List, Sequence
 
 from chainlit.protocol.codec import encode_server
 from chainlit.protocol.payloads import AskActionSpec, Step as StepPayload, TextElement
 from chainlit.protocol.server import AskStart, StepUpsert
 from chainlit.ws.handshake import (
-    RESUME_POLICY_DELETE,
-    RESUME_POLICY_KEY,
     arrive,
     restore,
     sweep_superseded,
@@ -290,13 +288,9 @@ async def test_the_spinner_is_the_last_thing_said() -> None:
 class _Store:
     def __init__(self, entries: Sequence[TranscriptEntry]) -> None:
         self.entries = list(entries)
-        self.deleted: List[Set[str]] = []
 
     async def transcript_of(self, thread_id: str) -> Sequence[TranscriptEntry]:
         return self.entries
-
-    async def delete_steps(self, thread_id: str, step_ids: Set[str]) -> None:
-        self.deleted.append(set(step_ids))
 
 
 async def test_an_empty_memory_falls_back_to_what_was_written_down() -> None:
@@ -343,47 +337,3 @@ async def test_a_live_memory_is_not_overwritten_by_storage() -> None:
     await restore(session, thread_store=store)
 
     assert [item.step.id for item in queued(session, StepUpsert)] == ["live"]
-
-
-async def test_the_steps_a_resume_may_delete_go_with_their_children() -> None:
-    """Deleting a parent and orphaning its children reads worse than either."""
-
-    session = make("s1")
-    session.thread_id = "t1"
-    session.resumed_thread_id = "t1"
-    store = _Store(
-        [
-            TranscriptEntry(
-                step=StepPayload(
-                    id="form", metadata={RESUME_POLICY_KEY: RESUME_POLICY_DELETE}
-                )
-            ),
-            TranscriptEntry(step=StepPayload(id="child", parent_id="form")),
-            TranscriptEntry(step=StepPayload(id="kept")),
-        ]
-    )
-
-    await restore(session, thread_store=store, prune=True)
-
-    assert store.deleted == [{"form", "child"}]
-    assert tags(session).count("step.upsert") == 1
-
-
-async def test_a_step_a_live_question_is_waiting_on_is_never_deleted() -> None:
-
-    session = make("s1")
-    session.thread_id = "t1"
-    session.resumed_thread_id = "t1"
-    store = _Store(
-        [
-            TranscriptEntry(
-                step=StepPayload(
-                    id="form", metadata={RESUME_POLICY_KEY: RESUME_POLICY_DELETE}
-                )
-            )
-        ]
-    )
-
-    await restore(session, thread_store=store, prune=True, protected_step_ids={"form"})
-
-    assert store.deleted == []

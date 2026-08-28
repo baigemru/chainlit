@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from secrets import compare_digest, token_urlsafe
 from typing import Annotated, Any, Dict, Optional
 
-from litestar import Controller, Request, Response, get, post
+from litestar import Controller, Response, get, post
 from litestar.datastructures import Cookie
 from litestar.di import NamedDependency, Provide
 from litestar.exceptions import (
@@ -75,6 +75,7 @@ from msgspec import Struct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chainlit.config import config
+from chainlit.controllers.caller import caller
 from chainlit.logger import logger
 from chainlit.oauth_providers import (
     get_configured_oauth_providers,
@@ -84,7 +85,7 @@ from chainlit.oauth_providers import (
     get_oauth_provider_details,
 )
 from chainlit.persistence.services import UserService
-from chainlit.security import ChainlitAuth, Identity
+from chainlit.security import AuthedRequest, ChainlitAuth, Identity
 
 __all__ = (
     "PUBLIC",
@@ -271,7 +272,7 @@ def cleared_state_cookie() -> Cookie:
     return _state_cookie("", 0)
 
 
-def state_is_valid(request: Request[Any, Any, Any], state: Optional[str]) -> bool:
+def state_is_valid(request: AuthedRequest, state: Optional[str]) -> bool:
     """Compare the provider's ``state`` against the cookie this app wrote.
 
     Constant time, and a missing cookie is a failure rather than a
@@ -294,7 +295,7 @@ def root_path() -> str:
     return "" if root == "/" else root
 
 
-def user_facing_url(request: Request[Any, Any, Any]) -> str:
+def user_facing_url(request: AuthedRequest) -> str:
     """The URL the browser used, as far as this deployment can tell.
 
     Behind a proxy the request URL is the internal one, and the provider was
@@ -506,7 +507,7 @@ class AuthController(Controller):
     @post("/auth/jwt", status_code=HTTP_200_OK, opt=PUBLIC)
     async def jwt_auth(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         security: SkipValidation[NamedDependency[Optional[ChainlitAuth]]] = None,
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
     ) -> Response[Any]:
@@ -542,7 +543,7 @@ class AuthController(Controller):
     @post("/logout", status_code=HTTP_200_OK, opt=PUBLIC)
     async def logout(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         security: SkipValidation[NamedDependency[Optional[ChainlitAuth]]] = None,
     ) -> Any:
         """Drop the cookie, then let the app have its say.
@@ -550,6 +551,10 @@ class AuthController(Controller):
         Public: a browser holding an expired or malformed cookie is exactly
         the one that most needs to be able to clear it. With no auth
         configured there is no cookie to clear, and nothing is written.
+
+        A hand-built ``Response`` -- one of two in the controllers, with
+        ``set_session_cookie`` -- because the cookie is decided per request
+        and the decorator's ``response_cookies`` is static.
         """
         response: Response[Any] = Response(
             content={"success": True},
@@ -598,9 +603,7 @@ class AuthController(Controller):
             cookies=[state_cookie(state)],
         )
 
-    def _sibling_callback_uri(
-        self, request: Request[Any, Any, Any], suffix: str
-    ) -> str:
+    def _sibling_callback_uri(self, request: AuthedRequest, suffix: str) -> str:
         """``/auth/oauth/x/<suffix>`` -> ``/auth/oauth/x/callback``.
 
         The alternate entry points differ only in which IdP the provider
@@ -612,7 +615,7 @@ class AuthController(Controller):
     @get("/auth/oauth/{provider_id:str}", opt=PUBLIC)
     async def oauth_login(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         provider_id: FromPath[str],
         login_hint: FromQuery[Optional[str]] = None,
     ) -> Redirect:
@@ -627,7 +630,7 @@ class AuthController(Controller):
 
     @get("/auth/oauth/{provider_id:str}/register", opt=PUBLIC)
     async def oauth_register(
-        self, request: Request[Any, Any, Any], provider_id: FromPath[str]
+        self, request: AuthedRequest, provider_id: FromPath[str]
     ) -> Redirect:
         """Redirect to the provider's registration page."""
         provider = self._provider_or_raise(provider_id)
@@ -646,7 +649,7 @@ class AuthController(Controller):
 
     @get("/auth/oauth/{provider_id:str}/vk", opt=PUBLIC)
     async def oauth_vk_login(
-        self, request: Request[Any, Any, Any], provider_id: FromPath[str]
+        self, request: AuthedRequest, provider_id: FromPath[str]
     ) -> Redirect:
         """Straight to VK, skipping the provider's own login page."""
         provider = self._provider_or_raise(provider_id)
@@ -663,7 +666,7 @@ class AuthController(Controller):
 
     @get("/auth/oauth/{provider_id:str}/yandex", opt=PUBLIC)
     async def oauth_yandex_login(
-        self, request: Request[Any, Any, Any], provider_id: FromPath[str]
+        self, request: AuthedRequest, provider_id: FromPath[str]
     ) -> Redirect:
         """Straight to Yandex, skipping the provider's own login page."""
         provider = self._provider_or_raise(provider_id)
@@ -681,7 +684,7 @@ class AuthController(Controller):
     @get("/auth/oauth/{provider_id:str}/callback", opt=PUBLIC)
     async def oauth_callback(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         provider_id: FromPath[str],
         security: SkipValidation[NamedDependency[Optional[ChainlitAuth]]] = None,
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
@@ -727,22 +730,22 @@ class AuthController(Controller):
     @get("/user")
     async def current_user(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
     ) -> Optional[AuthenticatedUser]:
         """The signed-in user, joined with what the data layer knows.
 
         Not excluded from auth, so the middleware has already rejected a
-        request with no usable cookie. ``scope`` is read rather than
-        ``request.user`` for the one case the middleware is not installed at
-        all -- an app with no authentication -- where the property would
-        raise and the old route answered ``null``.
+        request with no usable cookie. The scope is read (through ``caller``)
+        rather than ``request.user`` for the one case the middleware is not
+        installed at all -- an app with no authentication -- where the
+        property would raise and the old route answered ``null``.
 
         Reads, and only writes when the row is missing. An unconditional
         upsert here would push the metadata frozen into the token at login
         back over whatever has been written since.
         """
-        identity = request.scope.get("user")
+        identity = caller(request)
         if identity is None:
             return None
 
@@ -779,12 +782,14 @@ class AuthController(Controller):
 
     @post("/set-session-cookie", status_code=HTTP_200_OK, opt=PUBLIC)
     async def set_session_cookie(
-        self, request: Request[Any, Any, Any], data: JSONBody[SessionCookieRequest]
+        self, request: AuthedRequest, data: JSONBody[SessionCookieRequest]
     ) -> Response[Any]:
         """Pin the websocket session id, for load balancers doing affinity.
 
         ``SameSite=None`` off localhost because the copilot embeds this app
-        cross-origin, and that requires ``Secure``.
+        cross-origin, and that requires ``Secure``. That is also why this is
+        a hand-built ``Response``: the cookie's attributes depend on the
+        request, and ``response_cookies`` on the decorator cannot.
         """
         client = request.client
         is_local = bool(client and client.host in LOCAL_HOSTS)

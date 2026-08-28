@@ -25,7 +25,6 @@ import { IAttachment, attachmentsState } from 'state/chat';
 
 import { Attachments } from './Attachments';
 import Input, { InputMethods } from './Input';
-import McpButton from './Mcp';
 import OpenParentThreadButton from './OpenParentThreadButton';
 import SubmitButton from './SubmitButton';
 import UploadButton from './UploadButton';
@@ -195,7 +194,6 @@ export default function MessageComposer({
             onFileUpload={onFileUpload}
           />
           <OpenParentThreadButton />
-          <McpButton disabled={disabled} />
         </div>
         <div className="flex items-center gap-1">
           <SubmitButton

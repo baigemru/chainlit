@@ -565,9 +565,6 @@ class _Run:
                 await run._during_restore(kind, session)
                 return entries
 
-            async def delete_steps(self, thread_id: str, step_ids: Set[str]) -> None:
-                await backing.delete_steps(thread_id, step_ids)
-
         return _Interposed()
 
     async def _during_restore(self, event: str, session: Session) -> None:

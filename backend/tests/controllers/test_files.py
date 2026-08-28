@@ -173,12 +173,15 @@ def test_an_upload_to_another_users_session_is_refused(
 
     Session ids travel in a query string, so they end up in logs, referrers
     and shared URLs. Without this check anyone holding one can write files
-    into somebody else's conversation.
+    into somebody else's conversation. ``404``, indistinguishable from an
+    unknown session: whether the id in a pasted URL is *live* is not for
+    this route to confirm.
     """
     login(client, auth, ALICE)
     response = upload(client, "bob-session")
 
-    assert response.status_code == 401
+    assert response.status_code == 404
+    assert response.json() == upload(client, "no-such-session").json()
     assert registry.sessions["bob-session"].persisted == []
 
 
@@ -271,7 +274,7 @@ def test_a_stored_file_is_not_served_to_another_user(
     login(client, auth, BOB)
     response = client.get("/project/file/file-1?session_id=alice-session")
 
-    assert response.status_code == 401
+    assert response.status_code == 404
     assert b"stored bytes" not in response.content
 
 

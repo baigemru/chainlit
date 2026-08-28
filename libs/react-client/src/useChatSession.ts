@@ -17,7 +17,6 @@ import {
   elementState,
   firstUserInteraction,
   loadingState,
-  mcpState,
   messagesState,
   protocolErrorState,
   sessionIdState,
@@ -98,7 +97,6 @@ const useChatSession = () => {
   const [session, setSession] = useRecoilState(sessionState);
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
-  const setMcps = useSetRecoilState(mcpState);
   const setMessages = useSetRecoilState(messagesState);
   const setAskUser = useSetRecoilState(askUserState);
   const setSideView = useSetRecoilState(sideViewState);
@@ -232,53 +230,6 @@ const useChatSession = () => {
           pageHasEstablishedConnection = true;
           authFailureHandledRef.current = false;
           if (msg.chatProfile) setChatProfile(msg.chatProfile);
-          // The MCP servers are attached to the session, not the socket, so
-          // a reconnect has to re-establish them.
-          setMcps((prev) =>
-            prev.map((mcp) => {
-              let promise;
-              if (mcp.clientType === 'sse') {
-                promise = client.connectSseMCP(sessionId, mcp.name, mcp.url!);
-              } else if (mcp.clientType === 'streamable-http') {
-                promise = client.connectStreamableHttpMCP(
-                  sessionId,
-                  mcp.name,
-                  mcp.url!,
-                  mcp.headers || {}
-                );
-              } else {
-                promise = client.connectStdioMCP(
-                  sessionId,
-                  mcp.name,
-                  mcp.command!
-                );
-              }
-              promise
-                .then(async ({ success, mcp }) => {
-                  setMcps((prev) =>
-                    prev.map((existingMcp) =>
-                      existingMcp.name === mcp.name
-                        ? {
-                            ...existingMcp,
-                            status: success ? 'connected' : 'failed',
-                            tools: mcp ? mcp.tools : existingMcp.tools
-                          }
-                        : existingMcp
-                    )
-                  );
-                })
-                .catch(() => {
-                  setMcps((prev) =>
-                    prev.map((existingMcp) =>
-                      existingMcp.name === mcp.name
-                        ? { ...existingMcp, status: 'failed' }
-                        : existingMcp
-                    )
-                  );
-                });
-              return { ...mcp, status: 'connecting' };
-            })
-          );
         },
 
         error: (msg) => {

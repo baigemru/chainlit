@@ -571,8 +571,3 @@ class ThreadStoreAdapter:
         async with self.persistence.uow() as unit:
             detail = await unit.threads.get_detail(thread_id)
         return _transcript_of(detail) if detail is not None else []
-
-    async def delete_steps(self, thread_id: str, step_ids: set[str]) -> None:
-        async with self.persistence.uow() as unit:
-            for step_id in step_ids:
-                await unit.steps.remove(step_id)

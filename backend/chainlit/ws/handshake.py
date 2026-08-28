@@ -10,10 +10,9 @@ means: keep what is running, and only start over when nothing is.
 Two properties of this module are load-bearing and easy to lose.
 
 **The side effects happen once.** Evicting the sessions this arrival
-supersedes, and deleting the steps a resume is allowed to take away, are
-irreversible. They belong to the *first* entry into the resume branch, not
-to every reconnect that follows -- a client that blips twice must not have
-its transcript pruned twice.
+supersedes is irreversible, and so is the resume itself (the hooks it
+fires, the steps it hides). They belong to the *first* entry into the
+resume branch, not to every reconnect that follows.
 
 **The replay is not a blocking prefix.** ``session.ready`` goes out before
 it, because that is the frame the client flushes its outbound buffer on --
@@ -82,10 +81,6 @@ class ThreadStore(Protocol):
 
     async def transcript_of(self, thread_id: str) -> Sequence[TranscriptEntry]:
         """The conversation as it was written down, oldest first."""
-        ...
-
-    async def delete_steps(self, thread_id: str, step_ids: Set[str]) -> None:
-        """Remove these steps and their attachments, permanently."""
         ...
 
 
@@ -226,8 +221,6 @@ async def restore(
     session: Session,
     *,
     thread_store: Optional[ThreadStore] = None,
-    protected_step_ids: Optional[Set[str]] = None,
-    prune: bool = False,
     fresh_page_load: bool = True,
 ) -> None:
     """Rebuild the client's screen, in the order it has to be rebuilt in.
@@ -243,9 +236,9 @@ async def restore(
     4. the form last, carrying what is *left* of its deadline, never a
        fresh one.
 
-    ``prune`` is the once-only half: it deletes the steps a resume may take
-    away, and the caller must pass it exactly once per resumed session,
-    never on the reconnects that follow.
+    Nothing here deletes. The steps a resume takes away are hidden by
+    ``controllers.project.hide_resume_deleted`` before the snapshot is
+    built, and the same filter serves the HTTP read path.
     """
     entries: Sequence[TranscriptEntry] = list(session.transcript)
     if (
@@ -260,12 +253,6 @@ async def restore(
         # session resume. The id in the hello is the client's claim, not
         # its right, and a refused claim must not be answered from storage.
         entries = await thread_store.transcript_of(session.thread_id)
-
-    if prune and thread_store is not None and session.thread_id:
-        doomed = _doomed_step_ids(entries, protected_step_ids or set())
-        if doomed:
-            await thread_store.delete_steps(session.thread_id, doomed)
-            entries = [e for e in entries if e.step.id not in doomed]
 
     if session.first_interaction and session.thread_id:
         session.send(
@@ -324,37 +311,3 @@ async def restore(
     # only honest value for it is the one that is true once everything else
     # has been said.
     session.send(TaskIndicator(running=session.has_live_task))
-
-
-def _doomed_step_ids(
-    entries: Sequence[TranscriptEntry], protected: Set[str]
-) -> Set[str]:
-    """Steps a resume may delete, and everything hanging off them.
-
-    Descends transitively: deleting a parent and leaving its children
-    orphans them into a conversation with no context, which reads worse
-    than either keeping or deleting the whole branch.
-    """
-
-    doomed: Set[str] = set()
-    for entry in entries:
-        step_id = entry.step.id
-        if not step_id or step_id in protected:
-            continue
-        if (entry.step.metadata or {}).get(RESUME_POLICY_KEY) == RESUME_POLICY_DELETE:
-            doomed.add(step_id)
-
-    changed = True
-    while changed:
-        changed = False
-        for entry in entries:
-            step_id = entry.step.id
-            if (
-                step_id
-                and step_id not in doomed
-                and step_id not in protected
-                and entry.step.parent_id in doomed
-            ):
-                doomed.add(step_id)
-                changed = True
-    return doomed

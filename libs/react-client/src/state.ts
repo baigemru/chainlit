@@ -9,7 +9,6 @@ import {
   IAsk,
   IAuthConfig,
   IChainlitConfig,
-  IMcp,
   IMessageElement,
   IStep,
   ITasklistElement,
@@ -219,36 +218,4 @@ export const sideViewState = atom<
 export const currentThreadIdState = atom<string | undefined>({
   key: 'CurrentThreadId',
   default: undefined
-});
-
-const localStorageEffect =
-  <T>(key: string): AtomEffect<T> =>
-  ({ setSelf, onSet }) => {
-    // When the atom is first initialized, try to get its value from localStorage
-    const savedValue = localStorage.getItem(key);
-    if (savedValue != null) {
-      try {
-        setSelf(JSON.parse(savedValue));
-      } catch (error) {
-        console.error(
-          `Error parsing localStorage value for key "${key}":`,
-          error
-        );
-      }
-    }
-
-    // Subscribe to state changes and update localStorage
-    onSet((newValue, _, isReset) => {
-      if (isReset) {
-        localStorage.removeItem(key);
-      } else {
-        localStorage.setItem(key, JSON.stringify(newValue));
-      }
-    });
-  };
-
-export const mcpState = atom<IMcp[]>({
-  key: 'Mcp',
-  default: [],
-  effects: [localStorageEffect<IMcp[]>('mcp_storage_key')]
 });

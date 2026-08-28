@@ -86,9 +86,7 @@ __all__ = [
     "SessionView",
     "has_live_work",
     "is_abandoned_ask_session",
-    "is_disconnected",
     "is_owned_by",
-    "is_parked_on_live_ask",
 ]
 
 
@@ -199,16 +197,6 @@ def is_owned_by(entry: SessionEntry, user_identifier: Optional[str]) -> bool:
     return entry.user_identifier == user_identifier
 
 
-def is_disconnected(entry: SessionEntry) -> bool:
-    """Whether nobody is on the other end of this session any more."""
-    return not entry.connected
-
-
-def is_parked_on_live_ask(entry: SessionEntry) -> bool:
-    """Whether this session is blocked on a question that can still be answered."""
-    return entry.session.has_live_ask
-
-
 def has_live_work(entry: SessionEntry) -> bool:
     """Whether dropping this session would take something from the user.
 
@@ -238,16 +226,16 @@ def is_abandoned_ask_session(entry: SessionEntry, thread_id: Optional[str]) -> b
     """
     if thread_id is None or entry.thread_id != thread_id:
         return False
-    return is_disconnected(entry) and is_parked_on_live_ask(entry)
+    return not entry.connected and entry.session.has_live_ask
 
 
 class SessionRegistry:
     """Live sessions, keyed by session id and indexed by thread.
 
     The thread index is the part that must not be a scan: it is read on
-    every resume, by the eviction sweep and by both protection queries. The
-    user filter is a scan on purpose -- it answers no question on the hot
-    path, and a third index is a third thing to keep consistent.
+    every resume, by the eviction sweep and by both protection queries.
+    There is deliberately no index by user -- nothing asks that question,
+    and a second index is a second thing to keep consistent.
     """
 
     def __init__(self) -> None:
@@ -364,16 +352,6 @@ class SessionRegistry:
         if thread_id is None:
             return ()
         return tuple(self._by_thread.get(thread_id, {}).values())
-
-    def entries_of_user(
-        self, user_identifier: Optional[str]
-    ) -> tuple[SessionEntry, ...]:
-        """Every session of one user. A scan -- see the class docstring."""
-        return tuple(
-            entry
-            for entry in self._entries.values()
-            if is_owned_by(entry, user_identifier)
-        )
 
     def __contains__(self, session_id: object) -> bool:
         return session_id in self._entries

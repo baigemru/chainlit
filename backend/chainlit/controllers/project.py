@@ -30,7 +30,17 @@ routes act on an in-memory websocket session, and the resume filter asks the
 live registry which steps a running ask is still holding. That registry
 belongs to the websocket package; this module declares
 :class:`SessionRegistry` and :class:`LiveSession` for what it needs and takes
-it as the ``sessions`` dependency.
+it as the ``sessions`` dependency. A session that is not the caller's gets the
+same ``404`` an unknown one does, for the same reason as the thread rule --
+see :func:`chainlit.controllers.caller.assert_session_owner`.
+
+**The resume-delete filter has one owner, and it is this module.**
+:func:`hide_resume_deleted` (with :func:`doomed_step_ids` and
+:func:`is_resume_delete` under it) is what both readers of a stored thread
+apply: the HTTP routes below, and ``ApplicationRunner._resume`` when a socket
+reopens a thread. The websocket handshake used to carry its own copy; it does
+not any more, so a change to what "a resume would delete" means is made here
+and nowhere else.
 """
 
 from __future__ import annotations
@@ -50,17 +60,17 @@ from typing import (
 from uuid import UUID
 
 import msgspec
-from litestar import Controller, Request, delete, get, post, put
+from litestar import Controller, delete, get, post, put
 from litestar.di import NamedDependency
-from litestar.exceptions import (
-    ClientException,
-    NotAuthorizedException,
-    NotFoundException,
-)
+from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery, JSONBody, QueryParameter
-from litestar.types import Empty
 
 import chainlit.config
+from chainlit.controllers.caller import (
+    assert_session_owner,
+    caller,
+    caller_identifier,
+)
 from chainlit.controllers.sessions import LiveSession, SessionRegistry
 from chainlit.markdown import get_markdown_str
 from chainlit.persistence.records import (
@@ -80,9 +90,11 @@ from chainlit.persistence.services import (
     from_datetime,
     now,
 )
-from chainlit.ws.handshake import RESUME_POLICY_DELETE, RESUME_POLICY_KEY
+from chainlit.security import AuthedRequest
 
 __all__ = (
+    "RESUME_POLICY_DELETE",
+    "RESUME_POLICY_KEY",
     "ElementPayload",
     "FeedbackDelete",
     "FeedbackUpdate",
@@ -90,7 +102,17 @@ __all__ = (
     "ThreadDelete",
     "ThreadRename",
     "ThreadShare",
+    "doomed_step_ids",
+    "hide_resume_deleted",
+    "is_resume_delete",
 )
+
+# The metadata flag ``cl.Message(resume="delete")`` writes. The writer is
+# ``chainlit.message``; the literals are repeated here rather than imported
+# because that module drags the whole runtime (context, elements, literalai)
+# in behind it, and the HTTP half must stay importable without the transport.
+RESUME_POLICY_KEY = "resume_policy"
+RESUME_POLICY_DELETE = "delete"
 
 # The language a translation file may be named after. It is interpolated into
 # a filesystem path by ``ChainlitConfig.load_translation``, so it is
@@ -185,21 +207,8 @@ class ActionRan(Ok, rename="camel"):
     response: Any = None
 
 
-def caller_identifier(request: Request[Any, Any, Any]) -> Optional[str]:
-    """Who is calling, or ``None`` when the deployment has no authentication.
-
-    ``connection.user`` raises when the authentication middleware did not
-    run — the unauthenticated deployment, and every route that opts out.
-    Reading the scope answers the question without having to know which.
-    """
-    user = request.scope.get("user", Empty)
-    if user is Empty or user is None:
-        return None
-    return getattr(user, "identifier", None)
-
-
 async def assert_thread_author(
-    threads: ThreadService, thread_id: UUID, request: Request[Any, Any, Any]
+    threads: ThreadService, thread_id: UUID, request: AuthedRequest
 ) -> None:
     """Refuse a thread that is not the caller's.
 
@@ -221,7 +230,11 @@ async def assert_thread_author(
 
 
 def is_resume_delete(step: Any) -> bool:
-    """Whether this step is flagged as not surviving a resume."""
+    """Whether this step is flagged as not surviving a resume.
+
+    The one reader of :data:`RESUME_POLICY_KEY`; the filters above it are
+    built on this and nothing else looks at the flag.
+    """
     metadata = getattr(step, "metadata", None)
     if not isinstance(metadata, Mapping):
         return False
@@ -258,10 +271,12 @@ def hide_resume_deleted(
 ) -> ThreadDetail:
     """Drop the steps a resume would delete from a read of the thread.
 
-    Filtering only — nothing is deleted here. This endpoint also serves the
-    F5 of a live session, and a thread with a running task is not dead at
-    all: its flagged messages are legitimately live, and a second tab reading
-    the thread must not make them disappear from the first.
+    The one implementation of the rule, applied by every reader: the two
+    thread routes here and the runner's resume of a reopened socket. It is
+    filtering only — nothing is deleted here. The thread routes also serve
+    the F5 of a live session, and a thread with a running task is not dead
+    at all: its flagged messages are legitimately live, and a second tab
+    reading the thread must not make them disappear from the first.
     """
     if not thread.steps:
         return thread
@@ -300,7 +315,7 @@ async def authorize_element(
     elements: ElementService,
     threads: ThreadService,
     payload: Mapping[str, Any],
-    request: Request[Any, Any, Any],
+    request: AuthedRequest,
 ) -> Tuple[UUID, Optional[str]]:
     """The element being written, once the caller is allowed to write it.
 
@@ -361,7 +376,7 @@ class ProjectController(Controller):
         """
         return {"status": "ok"}
 
-    @get("/project/translations", opt={"exclude_from_auth": True})
+    @get("/project/translations", opt={"exclude_from_auth": True}, cache=True)
     async def translations(
         self,
         language: Language = "en-US",
@@ -371,6 +386,13 @@ class ProjectController(Controller):
         Public, because the login page is rendered in them: behind the
         authentication middleware the one screen that cannot have a cookie
         yet would be the one screen with no translations.
+
+        Cached, because the answer is a function of the query alone -- the
+        translation files are read off disk and do not change while the app
+        runs -- and every page load asks for it. The default key is method
+        + path + sorted query, so each ``?language=`` is its own entry.
+        ``settings`` below is deliberately *not* cached: it depends on who is
+        asking and on callbacks the app may answer differently each time.
         """
         config = chainlit.config.config
         effective = config.ui.language or language
@@ -379,7 +401,7 @@ class ProjectController(Controller):
     @get("/project/settings")
     async def settings(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         persistence_enabled: NamedDependency[bool],
         language: Language = "en-US",
         chat_profile: FromQuery[Optional[str]] = None,
@@ -388,7 +410,7 @@ class ProjectController(Controller):
         config = chainlit.config.config
         code = config.code
         effective = config.ui.language or language
-        user = request.scope.get("user")
+        user = caller(request)
 
         chat_profiles: List[Any] = []
         profiles: List[Dict[str, Any]] = []
@@ -438,7 +460,7 @@ class ProjectController(Controller):
     @put("/feedback")
     async def save_feedback(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[FeedbackUpdate],
         steps: NamedDependency[StepService],
         threads: NamedDependency[ThreadService],
@@ -472,7 +494,7 @@ class ProjectController(Controller):
     @delete("/feedback", status_code=200)
     async def delete_feedback(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[FeedbackDelete],
         threads: NamedDependency[ThreadService],
         feedbacks: NamedDependency[FeedbackService],
@@ -497,7 +519,7 @@ class ProjectController(Controller):
     @post("/project/threads", status_code=200)
     async def list_threads(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ThreadQuery],
         users: NamedDependency[UserService],
         threads: NamedDependency[ThreadService],
@@ -519,7 +541,7 @@ class ProjectController(Controller):
     @get("/project/thread/{thread_id:uuid}")
     async def get_thread(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         thread_id: FromPath[UUID],
         threads: NamedDependency[ThreadService],
         sessions: NamedDependency[SessionRegistry],
@@ -561,7 +583,7 @@ class ProjectController(Controller):
     @get("/project/thread/{thread_id:uuid}/element/{element_id:uuid}")
     async def get_thread_element(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         thread_id: FromPath[UUID],
         element_id: FromPath[UUID],
         threads: NamedDependency[ThreadService],
@@ -582,7 +604,7 @@ class ProjectController(Controller):
     @put("/project/element")
     async def update_element(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ElementPayload],
         sessions: NamedDependency[SessionRegistry],
         elements: NamedDependency[ElementService],
@@ -606,7 +628,7 @@ class ProjectController(Controller):
     @delete("/project/element", status_code=200)
     async def remove_element(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ElementPayload],
         sessions: NamedDependency[SessionRegistry],
         elements: NamedDependency[ElementService],
@@ -631,7 +653,7 @@ class ProjectController(Controller):
     @put("/project/thread")
     async def rename_thread(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ThreadRename],
         threads: NamedDependency[ThreadService],
     ) -> Ok:
@@ -643,7 +665,7 @@ class ProjectController(Controller):
     @put("/project/thread/share")
     async def share_thread(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ThreadShare],
         threads: NamedDependency[ThreadService],
     ) -> Ok:
@@ -665,7 +687,7 @@ class ProjectController(Controller):
     @delete("/project/thread", status_code=200)
     async def delete_thread(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ThreadDelete],
         threads: NamedDependency[ThreadService],
     ) -> Ok:
@@ -677,7 +699,7 @@ class ProjectController(Controller):
     @post("/project/action", status_code=200)
     async def call_action(
         self,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
         data: JSONBody[ActionCall],
         sessions: NamedDependency[SessionRegistry],
     ) -> ActionRan:
@@ -695,15 +717,11 @@ class ProjectController(Controller):
     def _session_of(
         sessions: SessionRegistry,
         session_id: str,
-        request: Request[Any, Any, Any],
+        request: AuthedRequest,
     ) -> LiveSession:
         """The live session with this id, if it is the caller's."""
         session = sessions.find(session_id)
         if session is None:
             raise NotFoundException("Session not found")
-        identifier = caller_identifier(request)
-        if identifier is not None:
-            owner = getattr(session.user, "identifier", None)
-            if owner != identifier:
-                raise NotAuthorizedException("This session belongs to another user")
+        assert_session_owner(session, request)
         return session

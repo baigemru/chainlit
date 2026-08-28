@@ -103,18 +103,6 @@ export interface IChainlitConfig {
     latex?: boolean;
     user_message_markdown?: boolean;
     hot_swap_chat_profile?: boolean;
-    mcp?: {
-      enabled?: boolean;
-      sse?: {
-        enabled?: boolean;
-      };
-      streamable_http?: {
-        enabled?: boolean;
-      };
-      stdio?: {
-        enabled?: boolean;
-      };
-    };
   };
   debugUrl?: string;
   userEnv: string[];

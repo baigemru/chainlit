@@ -242,12 +242,14 @@ class Session:
         #: Sequence number of the last heartbeat the client acknowledged.
         #: Zero means it has not answered one yet, which is also the state a
         #: session is in for its first interval -- so the probe compares
-        #: against the sequence it sent, never against zero.
+        #: against the sequence it sent, never against zero. Kept although
+        #: uvicorn pings the peer itself: a frozen tab answers protocol
+        #: pings from the browser and nothing from its JS, and the sweep
+        #: of abandoned questions has to be able to tell the two apart.
         self.last_ack: int = 0
 
         self.first_interaction: Optional[str] = None
         self.parent_thread_id: Optional[str] = None
-        self.profile_switch_lock = asyncio.Lock()
         self.pending_transit_id: Optional[str] = None
 
         #: The writer batching this session's rows, when there is a database.

@@ -57,6 +57,7 @@ from litestar.types import Empty, EmptyType
 
 import chainlit.config
 from chainlit.config import APP_ROOT, FILES_DIRECTORY
+from chainlit.controllers import FRONTEND_DIST
 from chainlit.controllers.auth import (
     AuthController,
     provide_user_service,
@@ -91,7 +92,6 @@ __all__ = (
 )
 
 # The built React app, copied here by ``pnpm build`` / the wheel build.
-FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 
 # The one file the SPA fallback serves.
 INDEX_HTML = "index.html"

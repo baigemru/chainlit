@@ -8,7 +8,6 @@ import { Descope } from 'components/icons/Descope';
 import { GitHub } from 'components/icons/Github';
 import { Gitlab } from 'components/icons/Gitlab';
 import { Google } from 'components/icons/Google';
-import { Microsoft } from 'components/icons/Microsoft';
 import { Okta } from 'components/icons/Okta';
 import { VK } from 'components/icons/VK';
 import { Yandex } from 'components/icons/Yandex';
@@ -21,9 +20,6 @@ function capitalizeFirstLetter(string: string) {
 
 function getProviderName(provider: string) {
   switch (provider) {
-    case 'azure-ad':
-    case 'azure-ad-hybrid':
-      return 'Microsoft';
     case 'github':
       return 'GitHub';
     case 'okta':
@@ -43,9 +39,6 @@ function renderProviderIcon(provider: string) {
       return <Google />;
     case 'github':
       return <GitHub />;
-    case 'azure-ad':
-    case 'azure-ad-hybrid':
-      return <Microsoft />;
     case 'okta':
       return <Okta />;
     case 'auth0':

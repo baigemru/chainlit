@@ -27,11 +27,14 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Callable, Dict, Literal, Optional, cast
 
+from litestar import Request
 from litestar.connection import ASGIConnection
+from litestar.datastructures import State
 from litestar.security.jwt import JWTCookieAuth, Token
 
 __all__ = (
     "AUTH_SECRET_ENV",
+    "AuthedRequest",
     "ChainlitAuth",
     "Identity",
     "chainlit_auth",
@@ -63,6 +66,21 @@ class Identity:
     identifier: str
     display_name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+#: The request every route handler receives, typed for what the middleware
+#: leaves on it: ``request.user`` is an :class:`Identity` and ``request.auth``
+#: the decoded :class:`~litestar.security.jwt.Token`. Both are only *there*
+#: when the middleware ran. On a route that opts out with
+#: ``opt={"exclude_from_auth": True}``, and in a deployment with no
+#: authentication at all, the properties raise ``ImproperlyConfiguredException``
+#: rather than return ``None`` (``litestar/connection/base.py:249``) — so a
+#: handler that may run in either world reads the scope through
+#: ``chainlit.controllers.caller`` instead of touching the properties.
+#: A ``type`` statement rather than ``TypeAlias``: Litestar unwraps
+#: ``TypeAliasType`` when it parses a handler signature (``litestar/typing.py``,
+#: ``is_type_alias_type``), so the handler still sees ``Request``.
+type AuthedRequest = Request[Identity, Token, State]
 
 
 async def identity_from_token(

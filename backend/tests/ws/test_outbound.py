@@ -1,4 +1,4 @@
-"""The outbound queue: order, the backlog bound, the fence, and the close.
+"""The outbound queue: order, the backlog bound, and the close.
 
 Three kinds of test live here and they are not interchangeable.
 
@@ -43,7 +43,7 @@ from litestar.testing import create_test_client
 
 from chainlit.protocol.codec import MAX_FRAME_BYTES, CloseCode
 from chainlit.protocol.server import StepStreamToken, Toast
-from chainlit.ws.outbound import DEFAULT_MAX_BACKLOG, Outbound, Overflow
+from chainlit.ws.outbound import DEFAULT_MAX_BACKLOG, Outbound
 
 # --------------------------------------------------------------------------
 # Helpers
@@ -88,6 +88,14 @@ def token(step_id: str, value: str) -> StepStreamToken:
     return StepStreamToken(id=step_id, token=value)
 
 
+async def settled(outbound: Outbound, *, timeout: float = 10.0) -> None:
+    """Wait for the writer to catch up with everything queued so far."""
+    deadline = time.monotonic() + timeout
+    while outbound.backlog and time.monotonic() < deadline:
+        await asyncio.sleep(0.005)
+    assert outbound.backlog == 0, f"{outbound.backlog} frame(s) still queued"
+
+
 def close_code_of(ws: Any, *, limit: int = 2000, timeout: float = 10.0) -> int:
     """Read frames until the socket closes and return the code it closed on."""
     for _ in range(limit):
@@ -127,7 +135,6 @@ def test_concurrent_producers_reach_the_wire_in_send_order() -> None:
                 await asyncio.sleep(0)
 
         await asyncio.gather(*(produce(which) for which in range(6)))
-        assert await outbound.drain(timeout=10)
         await outbound.close()
 
     with create_test_client([handler]) as client, client.websocket_connect("/ws") as ws:
@@ -150,37 +157,31 @@ def test_concurrent_producers_reach_the_wire_in_send_order() -> None:
 
 
 def test_overflow_refuses_the_frame_closes_and_is_observable() -> None:
-    """A full backlog is a closed connection, a counter and a callback.
+    """A full backlog is a refused frame and a closed connection.
 
     The frames go in without an ``await`` between them, so the writer never
     gets to run and the bound is reached deterministically -- no TCP needed
     to prove the policy, only to prove it is ever reached.
     """
-    seen: List[Overflow] = []
     state: Dict[str, Any] = {}
 
     @websocket("/ws")
     async def handler(socket: WebSocket) -> None:
         await socket.accept()
-        outbound = Outbound(max_backlog=4, on_overflow=seen.append, name="overflow")
+        outbound = Outbound(max_backlog=4, name="overflow")
         outbound.attach(socket)
         state["accepted"] = [outbound.send(token("s", str(i))) for i in range(6)]
         await asyncio.wait_for(outbound.wait_closed(), 10)
-        state["dropped"] = outbound.dropped
-        state["overflowed"] = outbound.overflowed
-        state["close_code"] = outbound.close_code
+        state["closed"] = outbound.closed
 
     with create_test_client([handler]) as client, client.websocket_connect("/ws") as ws:
         code = close_code_of(ws)
 
     assert code == CloseCode.BACKLOG_EXCEEDED
+    # The fifth frame is the overflow; the sixth is refused by a queue that
+    # is already closing.
     assert state["accepted"] == [True, True, True, True, False, False]
-    assert state["overflowed"] is True
-    assert state["dropped"] == 2
-    assert state["close_code"] == CloseCode.BACKLOG_EXCEEDED
-    # Observable, and observable once: the second refusal is a closing queue,
-    # not a second overflow.
-    assert seen == [Overflow(tag="step.stream.token", backlog=4, dropped=1)]
+    assert state["closed"] is True
 
 
 def test_send_never_blocks_a_producer_on_a_stalled_socket() -> None:
@@ -206,159 +207,9 @@ def test_send_never_blocks_a_producer_on_a_stalled_socket() -> None:
         assert time.perf_counter() - started < 2.0
         assert DEFAULT_MAX_BACKLOG == 1024
         assert outbound.backlog == 1024
-        assert outbound.sent == 0
+        assert socket.frames == []
         socket.release.set()
         await outbound.detach()
-
-    asyncio.run(scenario())
-
-
-def test_discard_drops_the_backlog_and_keeps_the_control_items() -> None:
-    """The seam for a snapshot replay: deltas against a feed being replaced."""
-
-    async def scenario() -> None:
-        socket = StubSocket(block=True)
-        outbound = Outbound(name="discard")
-        outbound.attach(socket)  # type: ignore[arg-type]
-        outbound.send(token("s", "held"))
-        await asyncio.wait_for(socket.entered.wait(), 10)
-        for index in range(9):
-            outbound.send(token("s", str(index)))
-        assert outbound.backlog == 10
-        assert outbound.discard() == 10
-        assert outbound.backlog == 0
-        assert outbound.dropped == 10
-        socket.release.set()
-        await outbound.detach()
-
-    asyncio.run(scenario())
-
-
-# --------------------------------------------------------------------------
-# The fence
-# --------------------------------------------------------------------------
-
-
-def test_drain_waits_for_everything_already_queued() -> None:
-    """``drain`` returning means the frames are on the socket, not near it."""
-    state: Dict[str, Any] = {}
-
-    @websocket("/ws")
-    async def handler(socket: WebSocket) -> None:
-        await socket.accept()
-        outbound = Outbound(name="drain")
-        outbound.attach(socket)
-        for index in range(50):
-            outbound.send(token("s", str(index)))
-        state["backlog_before"] = outbound.backlog
-        state["drained"] = await outbound.drain(timeout=10)
-        state["sent_after"] = outbound.sent
-        state["backlog_after"] = outbound.backlog
-        await outbound.close()
-
-    with create_test_client([handler]) as client, client.websocket_connect("/ws") as ws:
-        for index in range(50):
-            assert json.loads(ws.receive_text(timeout=10))["token"] == str(index)
-        assert close_code_of(ws) == 1000
-
-    assert state["backlog_before"] == 50
-    assert state["drained"] is True
-    assert state["sent_after"] == 50
-    assert state["backlog_after"] == 0
-
-
-def test_drain_does_not_wait_for_frames_queued_after_the_call() -> None:
-    """A fence, not ``queue.join()``.
-
-    A producer that keeps issuing faster than the socket drains is an
-    ordinary streaming session, and "the queue is empty" is a state it never
-    reaches. A drain built on quiescence would hang here for its whole
-    deadline; this one returns as soon as its own marker goes past.
-    """
-
-    async def scenario() -> None:
-        socket = StubSocket(yields=True)
-        outbound = Outbound(max_backlog=1_000_000, name="fence")
-        outbound.attach(socket)  # type: ignore[arg-type]
-        outbound.send(token("s", "before"))
-
-        stop = asyncio.Event()
-
-        async def flood() -> None:
-            while not stop.is_set():
-                for _ in range(4):
-                    outbound.send(token("s", "after"))
-                await asyncio.sleep(0)
-
-        flooding = asyncio.ensure_future(flood())
-        try:
-            assert await asyncio.wait_for(outbound.drain(timeout=5), 10) is True
-        finally:
-            stop.set()
-            await flooding
-        assert outbound.backlog > 0  # the session is still streaming
-        await outbound.detach()
-
-    asyncio.run(scenario())
-
-
-def test_drain_gives_up_on_its_deadline() -> None:
-    """A stalled socket costs the deadline and returns False, not forever."""
-
-    async def scenario() -> None:
-        socket = StubSocket(block=True)
-        outbound = Outbound(name="deadline")
-        outbound.attach(socket)  # type: ignore[arg-type]
-        outbound.send(token("s", "held"))
-        started = time.perf_counter()
-        assert await asyncio.wait_for(outbound.drain(timeout=0.1), 5) is False
-        assert time.perf_counter() - started < 2.0
-        socket.release.set()
-        await outbound.detach()
-
-    asyncio.run(scenario())
-
-
-def test_a_terminal_close_resolves_a_waiting_fence() -> None:
-    """The hang this class must not have.
-
-    A ``drain`` in flight when the connection dies would otherwise sit on its
-    own deadline -- ten seconds by default -- waiting for a writer that has
-    stopped. Every terminal transition sweeps the fences instead.
-    """
-
-    async def scenario() -> None:
-        socket = StubSocket(block=True)
-        outbound = Outbound(name="sweep")
-        outbound.attach(socket)  # type: ignore[arg-type]
-        for index in range(3):
-            outbound.send(token("s", str(index)))
-        pending = asyncio.ensure_future(outbound.drain(timeout=30))
-        await asyncio.sleep(0)
-        started = time.perf_counter()
-        await outbound.close(timeout=0.1)
-        assert await asyncio.wait_for(pending, 5) is False
-        assert time.perf_counter() - started < 5.0
-        assert outbound.closed is True
-        assert outbound.close_code == 1000
-        socket.release.set()
-
-    asyncio.run(scenario())
-
-
-def test_detach_resolves_a_waiting_fence() -> None:
-    """The same hazard on the blip path, where the queue is *not* closed."""
-
-    async def scenario() -> None:
-        socket = StubSocket(block=True)
-        outbound = Outbound(name="blip")
-        outbound.attach(socket)  # type: ignore[arg-type]
-        outbound.send(token("s", "0"))
-        pending = asyncio.ensure_future(outbound.drain(timeout=30))
-        await asyncio.sleep(0)
-        await outbound.detach()
-        assert await asyncio.wait_for(pending, 5) is False
-        assert outbound.closed is False
 
     asyncio.run(scenario())
 
@@ -386,18 +237,14 @@ def test_an_oversized_frame_closes_with_frame_too_large() -> None:
         outbound.send(Toast(message="x" * (MAX_FRAME_BYTES + 1)))
         outbound.send(Toast(message="never"))
         await asyncio.wait_for(outbound.wait_closed(), 30)
-        state["close_code"] = outbound.close_code
-        state["sent"] = outbound.sent
-        state["dropped"] = outbound.dropped
+        state["closed"] = outbound.closed
 
     with create_test_client([handler]) as client, client.websocket_connect("/ws") as ws:
         assert json.loads(ws.receive_text(timeout=30))["message"] == "hello"
         code = close_code_of(ws, timeout=30)
 
     assert code == CloseCode.FRAME_TOO_LARGE
-    assert state["close_code"] == CloseCode.FRAME_TOO_LARGE
-    assert state["sent"] == 1
-    assert state["dropped"] == 1
+    assert state["closed"] is True
 
 
 def test_close_flushes_the_backlog_before_the_close_frame() -> None:
@@ -433,7 +280,8 @@ def test_abort_drops_the_backlog_and_closes_now() -> None:
             outbound.send(token("s", str(index)))
         outbound.abort(CloseCode.SESSION_FORBIDDEN, "not yours")
         await asyncio.wait_for(outbound.wait_closed(), 5)
-        assert outbound.close_code == CloseCode.SESSION_FORBIDDEN
+        assert outbound.closed is True
+        assert outbound.backlog == 0
         assert socket.closed == (CloseCode.SESSION_FORBIDDEN, "not yours")
         assert socket.frames == []
         assert outbound.send(token("s", "late")) is False
@@ -470,12 +318,12 @@ def test_a_frame_lost_mid_write_is_held_for_the_next_writer() -> None:
 
         assert outbound.attached is False
         assert outbound.closed is False  # a dead socket is not a closed queue
-        assert outbound.close_code is None
+        assert first.closed is None
         assert outbound.backlog == 2
 
         second = StubSocket()
         outbound.attach(second)  # type: ignore[arg-type]
-        assert await outbound.drain(timeout=10) is True
+        await settled(outbound)
         assert [json.loads(frame)["token"] for frame in second.frames] == ["a", "b"]
         await outbound.detach()
 
@@ -507,7 +355,7 @@ def test_a_client_disconnect_mid_write_does_not_surface_as_4500() -> None:
             state["disconnected"] = True
         await outbound.detach()
         state["closed"] = outbound.closed
-        state["close_code"] = outbound.close_code
+        state["backlog"] = outbound.backlog
 
     with create_test_client([handler]) as client:
         with client.websocket_connect("/ws") as ws:
@@ -520,7 +368,7 @@ def test_a_client_disconnect_mid_write_does_not_surface_as_4500() -> None:
 
     assert state.get("disconnected") is True
     assert state["closed"] is False
-    assert state["close_code"] is None
+    assert state["backlog"] > 0  # held for the next socket, not eaten
 
 
 # --------------------------------------------------------------------------
@@ -596,7 +444,7 @@ def test_receiving_nothing_more_is_an_empty_queue() -> None:
         outbound = Outbound(name="quiet")
         outbound.attach(socket)
         outbound.send(Toast(message="only"))
-        assert await outbound.drain(timeout=10)
+        await settled(outbound)
         await socket.receive_text()
         await outbound.close()
 
@@ -693,24 +541,24 @@ async def test_live_slow_client_overflows_rather_than_blocking_producers() -> No
     state: Dict[str, Any] = {}
     payload = "y" * 200_000
 
-    def record(event: Overflow) -> None:
-        state["overflow"] = event
-
     @websocket("/slow")
     async def slow(socket: WebSocket) -> None:
         await socket.accept()
-        outbound = Outbound(max_backlog=8, on_overflow=record, name="slow")
+        outbound = Outbound(max_backlog=8, name="slow")
         outbound.attach(socket)
         started = time.perf_counter()
+        accepted = 0
         for _ in range(400):
             if not outbound.send(Toast(message=payload)):
                 break
+            accepted += 1
+            # Yield so the writer really runs, fills the peer's window and
+            # parks inside ``send_text``: the wedged writer is the case.
             await asyncio.sleep(0)
+        state["accepted"] = accepted
         state["push_seconds"] = time.perf_counter() - started
         await asyncio.wait_for(outbound.wait_closed(), 60)
-        state["overflowed"] = outbound.overflowed
-        state["dropped"] = outbound.dropped
-        state["close_code"] = outbound.close_code
+        state["closed"] = outbound.closed
         state["done"] = True
 
     async with live_server(Litestar([slow])) as port:
@@ -723,15 +571,13 @@ async def test_live_slow_client_overflows_rather_than_blocking_producers() -> No
             writer.close()
 
     assert state.get("done") is True, state
-    assert state["overflowed"] is True
-    assert state["dropped"] >= 1
-    assert state["close_code"] == CloseCode.BACKLOG_EXCEEDED
+    assert state["closed"] is True
     # The bound was reached because the socket stalled, and the producer paid
-    # nothing for it: 400 issues against a wedged connection in well under a
-    # second, where an unqueued producer would still be inside its first send.
+    # nothing for it: every frame the peer's window absorbed plus a full
+    # backlog on top, issued in well under a second, where an unqueued
+    # producer would still be inside the send that wedged.
+    assert 8 <= state["accepted"] < 400
     assert state["push_seconds"] < 10.0
-    assert isinstance(state["overflow"], Overflow)
-    assert state["overflow"].backlog == 8
 
 
 async def test_live_hangup_mid_frame_holds_the_frame_and_closes_nothing() -> None:
@@ -759,7 +605,6 @@ async def test_live_hangup_mid_frame_holds_the_frame_and_closes_nothing() -> Non
                 break
         state["attached"] = outbound.attached
         state["closed"] = outbound.closed
-        state["close_code"] = outbound.close_code
         state["backlog"] = outbound.backlog
         state["done"] = True
 
@@ -774,5 +619,4 @@ async def test_live_hangup_mid_frame_holds_the_frame_and_closes_nothing() -> Non
     assert state.get("send_error"), "the writer never saw the peer go away"
     assert state["attached"] is False
     assert state["closed"] is False
-    assert state["close_code"] is None
     assert state["backlog"] > 0

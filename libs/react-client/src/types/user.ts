@@ -1,10 +1,4 @@
-export type AuthProvider =
-  | 'credentials'
-  | 'header'
-  | 'github'
-  | 'google'
-  | 'azure-ad'
-  | 'azure-ad-hybrid';
+export type AuthProvider = 'credentials' | 'header' | 'github' | 'google';
 
 export interface IUserMetadata extends Record<string, any> {
   tags?: string[];

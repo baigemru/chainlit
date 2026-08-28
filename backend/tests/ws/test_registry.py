@@ -22,9 +22,7 @@ from chainlit.ws.registry import (
     SessionRegistry,
     has_live_work,
     is_abandoned_ask_session,
-    is_disconnected,
     is_owned_by,
-    is_parked_on_live_ask,
 )
 
 THREAD = "thread-1"
@@ -257,7 +255,7 @@ def test_a_session_starts_connected(registry: SessionRegistry):
     entry = _bystander(registry, session_id="s1")
 
     assert entry.connected is True
-    assert is_disconnected(entry) is False
+    assert entry.connected is True
 
 
 def test_a_session_whose_socket_went_away_is_disconnected(registry: SessionRegistry):
@@ -266,7 +264,7 @@ def test_a_session_whose_socket_went_away_is_disconnected(registry: SessionRegis
     assert registry.mark_disconnected("s1") is True
 
     assert entry.connected is False
-    assert is_disconnected(entry) is True
+    assert entry.connected is False
 
 
 def test_handing_the_socket_over_marks_a_session_connected_again(
@@ -277,29 +275,12 @@ def test_handing_the_socket_over_marks_a_session_connected_again(
     assert registry.mark_connected("s1") is True
 
     assert entry.connected is True
-    assert is_disconnected(entry) is False
+    assert entry.connected is True
 
 
 def test_marking_an_unknown_session_reports_failure(registry: SessionRegistry):
     assert registry.mark_disconnected("nobody") is False
     assert registry.mark_connected("nobody") is False
-
-
-# --- Filtering by user ----------------------------------------------------
-
-
-def test_sessions_are_filterable_by_user(registry: SessionRegistry):
-    mine = _bystander(registry, session_id="s1", user=USER)
-    _bystander(registry, session_id="s2", user=OTHER_USER)
-
-    assert registry.entries_of_user(USER) == (mine,)
-
-
-def test_the_anonymous_user_sees_only_anonymous_sessions(registry: SessionRegistry):
-    anonymous = _bystander(registry, session_id="s1", user=None)
-    _bystander(registry, session_id="s2", user=USER)
-
-    assert registry.entries_of_user(None) == (anonymous,)
 
 
 # --- Ownership ------------------------------------------------------------
@@ -528,8 +509,6 @@ def test_the_predicate_names_all_three_conditions(registry: SessionRegistry):
     assert is_abandoned_ask_session(connected, THREAD) is False
     assert is_abandoned_ask_session(between_asks, THREAD) is False
     assert is_abandoned_ask_session(abandoned, OTHER_THREAD) is False
-    assert is_parked_on_live_ask(abandoned) is True
-    assert is_parked_on_live_ask(between_asks) is False
 
 
 # --- The re-check before the awaiting delete ------------------------------

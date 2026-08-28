@@ -307,53 +307,6 @@ export class ChainlitAPI extends APIBase {
     return res.json();
   }
 
-  async connectStdioMCP(sessionId: string, name: string, fullCommand: string) {
-    const res = await this.post(`/mcp`, {
-      sessionId,
-      name,
-      fullCommand,
-      clientType: 'stdio'
-    });
-    return res.json();
-  }
-
-  async connectSseMCP(
-    sessionId: string,
-    name: string,
-    url: string,
-    headers?: Record<string, string>
-  ) {
-    const res = await this.post(`/mcp`, {
-      sessionId,
-      name,
-      url,
-      ...(headers ? { headers } : {}),
-      clientType: 'sse'
-    });
-    return res.json();
-  }
-
-  async connectStreamableHttpMCP(
-    sessionId: string,
-    name: string,
-    url: string,
-    headers?: Record<string, string>
-  ) {
-    const res = await this.post(`/mcp`, {
-      sessionId,
-      name,
-      url,
-      ...(headers ? { headers } : {}),
-      clientType: 'streamable-http'
-    });
-    return res.json();
-  }
-
-  async disconnectMcp(sessionId: string, name: string) {
-    const res = await this.delete(`/mcp`, { sessionId, name });
-    return res.json();
-  }
-
   getElementUrl(id: string, sessionId: string) {
     const queryParams = `?session_id=${sessionId}`;
     return this.buildEndpoint(`/project/file/${id}${queryParams}`);

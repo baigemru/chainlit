@@ -84,6 +84,14 @@ export const CloseCode = {
   SUPERSEDED: 4409,
   /** A frame exceeded the transport limit. */
   FRAME_TOO_LARGE: 4413,
+  /**
+   * We stopped reading and the server's outbound backlog filled.
+   *
+   * Retryable, and deliberately so: the session is intact, and every tag on
+   * this wire is a delta, so a missed frame leaves this client wrong with
+   * no way to notice. Reconnecting replays a correct view.
+   */
+  BACKLOG_EXCEEDED: 4429,
   /** Unexpected server-side failure. */
   INTERNAL: 4500
 } as const;

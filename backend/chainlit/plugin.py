@@ -398,13 +398,15 @@ class ChainlitPlugin(InitPlugin):
         code = self._code()
         if code is None:
             return
+        # `on_audio_chunk` used to count as an entry point. It no longer
+        # does: audio is retired, so an app whose only callback is that one
+        # now serves a window that can never say anything.
         if not any(
-            getattr(code, name, None)
-            for name in ("on_chat_start", "on_message", "on_audio_chunk")
+            getattr(code, name, None) for name in ("on_chat_start", "on_message")
         ):
             raise RuntimeError(
-                "You need to configure at least one of on_chat_start, "
-                "on_message or on_audio_chunk callback"
+                "You need to configure at least one of on_chat_start or "
+                "on_message callback"
             )
 
     def _assert_auth_secret(self) -> None:
@@ -423,13 +425,13 @@ class ChainlitPlugin(InitPlugin):
         if self._auth is not None:
             return
         code = self._code()
+        # `header_auth_callback` is deliberately absent: `POST /auth/header`
+        # is not ported, and `/auth/config` reports `headerAuth: false`, so
+        # counting it here would demand a login from an app that has no way
+        # to perform one.
         requires_login = bool(os.environ.get("CHAINLIT_CUSTOM_AUTH")) or any(
             getattr(code, name, None)
-            for name in (
-                "password_auth_callback",
-                "header_auth_callback",
-                "oauth_callback",
-            )
+            for name in ("password_auth_callback", "oauth_callback")
         )
         if requires_login:
             raise ValueError(

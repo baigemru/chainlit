@@ -55,6 +55,19 @@ class CloseCode(IntEnum):
     FRAME_TOO_LARGE = 4413
     """A frame exceeded the transport limit."""
 
+    BACKLOG_EXCEEDED = 4429
+    """The client stopped reading and the outbound backlog filled.
+
+    A policy close, not a failure, and deliberately not ``INTERNAL``: the
+    server is fine and the session is intact. Every tag on this wire is a
+    delta -- an update patches a bubble that must already exist, a token
+    appends to one -- so a client that misses a frame is wrong from then
+    on, and with no acks neither end can tell. Closing hands it the
+    recovery path it already has: reconnect, ``hello``, resume, and one
+    frame later the view is correct again. The client must therefore
+    retry this code.
+    """
+
     INTERNAL = 4500
     """Unexpected server-side failure."""
 

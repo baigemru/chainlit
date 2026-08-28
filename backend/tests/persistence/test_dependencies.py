@@ -22,6 +22,7 @@ from advanced_alchemy.extensions.litestar import SQLAlchemyInitPlugin
 from litestar import post
 from litestar.di import NamedDependency
 from litestar.params import FromPath
+from litestar.response import Redirect
 from litestar.testing import create_async_test_client
 
 from chainlit.persistence import Persistence, StepService, ThreadPatch, ThreadService
@@ -116,3 +117,43 @@ async def test_two_services_in_one_handler_are_one_transaction(
     assert response.status_code == 201
     assert shared["same_session"] is True
     assert await name_of(persistence, thread_id) == "two services"
+
+
+async def test_a_redirecting_handler_still_commits(
+    persistence: Persistence,
+) -> None:
+    """A 3xx is a success, and its writes have to survive it.
+
+    advanced_alchemy's plain ``autocommit`` handler commits only inside
+    ``range(200, 300)`` and rolls back everything else, so a handler that
+    writes and then redirects persists nothing. The login is exactly that
+    shape -- the OAuth callback writes the user row and answers 302 -- and
+    the loss is silent at every layer, which is why this is pinned here
+    rather than left to whoever writes the next redirecting route.
+
+    ``persistence/config.py`` therefore asks for
+    ``"autocommit_include_redirects"``. It has to be that *string*: the
+    config resolves it and binds its own ``session_scope_key``, whereas a
+    hand-built ``autocommit_handler_maker(commit_on_redirect=True)`` takes
+    the module default, finds no session under it, and commits nothing --
+    silently, which is the very failure this guards.
+    """
+
+    @post("/threads/{thread_id:uuid}")
+    async def write_then_redirect(
+        thread_id: FromPath[uuid.UUID],
+        threads: NamedDependency[ThreadService],
+    ) -> Redirect:
+        await threads.patch(str(thread_id), ThreadPatch(name="redirected"))
+        return Redirect("/somewhere-else", status_code=302)
+
+    thread_id = str(uuid.uuid4())
+    async with create_async_test_client(
+        route_handlers=[write_then_redirect],
+        plugins=[SQLAlchemyInitPlugin(config=persistence.config)],
+        dependencies=persistence.dependencies(),
+    ) as client:
+        response = await client.post(f"/threads/{thread_id}", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert await name_of(persistence, thread_id) == "redirected"

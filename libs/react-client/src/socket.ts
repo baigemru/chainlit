@@ -40,6 +40,10 @@ const MIN_WATCHDOG_MS = 10_000;
  * to another connection now — reconnecting would see-saw it between tabs.
  * `onClose` still fires, so the application can act (see the one-shot
  * session-id reset in `useChatSession`).
+ *
+ * `BACKLOG_EXCEEDED` is deliberately absent: it means the server gave up
+ * waiting for us to read, and reconnecting is the whole recovery — the
+ * resume rebuilds the view a dropped delta would have corrupted.
  */
 const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set<number>([
   CloseCode.BAD_HANDSHAKE,

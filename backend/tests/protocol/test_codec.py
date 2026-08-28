@@ -24,6 +24,7 @@ def test_close_codes_match_the_specified_values() -> None:
     assert CloseCode.HEARTBEAT_TIMEOUT == 4408
     assert CloseCode.SUPERSEDED == 4409
     assert CloseCode.FRAME_TOO_LARGE == 4413
+    assert CloseCode.BACKLOG_EXCEEDED == 4429
     assert CloseCode.INTERNAL == 4500
 
 

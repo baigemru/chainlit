@@ -97,7 +97,21 @@ def sqlalchemy_config(
         # against. Handlers are an HTTP-scope concern: the writer and the
         # socket own their own sessions through `Persistence.uow`, and this
         # does not reach them.
-        before_send_handler="autocommit",
+        #
+        # ...and `_include_redirects` because plain "autocommit" commits only
+        # inside range(200, 300). The OAuth callback answers 302, so the user
+        # row written a moment earlier -- the single most important write in
+        # the whole login -- was being rolled back on the way out. A 3xx here
+        # is a success, not a refusal.
+        #
+        # It has to be this *string*, not `autocommit_handler_maker(
+        # commit_on_redirect=True)`: the string form is resolved against the
+        # config and binds `session_scope_key=self.session_scope_key`
+        # (asyncio.py:193-199), while a hand-built maker gets the module
+        # default and then finds no session under it -- so it commits
+        # nothing, silently, which is the same failure this line exists to
+        # fix. Pinned by `test_a_redirecting_handler_still_commits`.
+        before_send_handler="autocommit_include_redirects",
         # advanced_alchemy registers this against its bind key; without it the
         # registry keeps its own empty MetaData and anything driving DDL or
         # autogenerate through the config sees no tables at all.

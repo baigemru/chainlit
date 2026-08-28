@@ -63,20 +63,17 @@ _RENAMES: Dict[str, str] = {
     "reload": "reload",
     "window_message": "window.message",
     "call_fn": "rpc.call",
+    "remove_element": "element.remove",
 }
 
 # The payload moves under a named key -- the old event shipped a bare value.
 _WRAPPED: Dict[str, Tuple[str, str]] = {
     "new_message": ("step.upsert", "step"),
-    "update_message": ("step.update", "patch"),
-    "delete_message": ("step.delete", "step"),
+    "update_message": ("step.update", "step"),
     "stream_start": ("step.stream.start", "step"),
     "stream_token": ("step.stream.token", "token"),
     "element": ("element.upsert", "element"),
-    "remove_element": ("element.remove", "element"),
     "action": ("action.add", "action"),
-    "remove_action": ("action.remove", "action"),
-    "ask": ("ask.start", "ask"),
     "chat_settings": ("settings.set", "inputs"),
     "set_commands": ("commands.set", "commands"),
     "set_modes": ("modes.set", "modes"),
@@ -84,6 +81,17 @@ _WRAPPED: Dict[str, Tuple[str, str]] = {
     "token_usage": ("token.usage", "count"),
     "audio_connection": ("audio.connection", "state"),
 }
+
+# Neither a rename nor a wrap: the old event shipped a whole object where the
+# protocol carries one field of it. Projecting here rather than letting a row
+# reach into the fat payload is the point -- a row that says `step.id` is
+# written against this driver, and can never match a real `step.delete`.
+_EXTRACTED: Dict[str, Tuple[str, Callable[[Any], Dict[str, Any]]]] = {
+    "delete_message": ("step.delete", lambda payload: {"stepId": payload["id"]}),
+    "remove_action": ("action.remove", lambda payload: {"id": payload["id"]}),
+    "ask": ("ask.start", lambda payload: dict(ask_start(payload)[1])),
+}
+
 
 # Collapsed pairs. The reason is only knowable for the timeout half: the
 # legacy `clear_ask` / `clear_call_fn` carry no reason at all, so the table
@@ -104,6 +112,9 @@ def translate(event: str, payload: Any = None) -> Tuple[str, Dict[str, Any]]:
     if event in _COLLAPSED:
         tag, extra = _COLLAPSED[event]
         return tag, dict(extra)
+    if event in _EXTRACTED:
+        tag, project = _EXTRACTED[event]
+        return tag, project(payload)
     if event in _RENAMES:
         return _RENAMES[event], _as_payload(payload)
     if event in _WRAPPED:
@@ -129,8 +140,8 @@ def ask_start(payload: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
 # emitter they would vanish, so each one is recorded as the frame it sends.
 _HELPER_FRAMES: Dict[str, Callable[..., Any]] = {
     "send_step": lambda step: ("step.upsert", {"step": step}),
-    "update_step": lambda step: ("step.update", {"patch": step}),
-    "delete_step": lambda step: ("step.delete", {"step": step}),
+    "update_step": lambda step: ("step.update", {"step": step}),
+    "delete_step": lambda step: ("step.delete", {"stepId": step["id"]}),
     "send_element": lambda element: ("element.upsert", {"element": element}),
     "resume_thread": lambda thread: ("thread.resume", {"thread": thread}),
     "send_resume_thread_error": lambda error: (
@@ -564,7 +575,14 @@ async def _clear_frame(_session: Mock, _payload: Mapping[str, Any]) -> None:
     await _clean_session(SID)
 
 
-OPEN = "session.open"
+# One `hello` in the protocol; two events on the socket.io wire -- the
+# `connect` handshake that decides whether to accept, and `connection_successful`
+# that restores. A row about the accept decision is the one that states
+# `pageLoad`, because that flag is the whole input to the gate; a row about the
+# restore omits it and says what the session already is through `Given`. The
+# split is transport detail, so it lives here and nowhere else.
+OPEN = "hello"
+OPEN_DECISION = "pageLoad"
 """The frame that opens a connection.
 
 Not in ``HANDLERS``: it is the one frame that arrives *before* there is a
@@ -583,7 +601,7 @@ async def _open(
         "clientType": "webapp",
         "chatProfile": given.chat_profile,
         "threadId": None,
-        "pageLoad": bool(payload.get("reload")),
+        "pageLoad": bool(payload[OPEN_DECISION]),
     }
     try:
         await _connect(SID, {}, auth)  # type: ignore[arg-type]
@@ -768,7 +786,7 @@ async def run(scenario: Scenario, session_factory: Callable[..., Mock]) -> Resul
             patch("chainlit.socket.get_data_layer", return_value=storage),
         ):
             for index, frame in enumerate(scenario.when):
-                if frame.tag == OPEN:
+                if frame.tag == OPEN and OPEN_DECISION in frame.payload:
                     await _open(scenario.given, frame.payload, outcome)
                     continue
                 handler = HANDLERS.get(frame.tag)
@@ -827,4 +845,4 @@ def build(request: Any) -> Driver:
     return drive
 
 
-__all__ = ["HANDLERS", "OPEN", "RecordingEmitter", "build", "run"]
+__all__ = ["HANDLERS", "OPEN", "OPEN_DECISION", "RecordingEmitter", "build", "run"]

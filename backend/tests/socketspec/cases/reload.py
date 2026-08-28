@@ -15,8 +15,8 @@ whether it is allowed near this conversation at all.
 
 from ..spec import AskState, Given, Incoming, Scenario, assert_that
 
-RELOAD = Incoming("session.open", {"reload": True})
-RECONNECT = Incoming("session.open", {"reload": False})
+RELOAD = Incoming("hello", {"pageLoad": True})
+RECONNECT = Incoming("hello", {"pageLoad": False})
 
 
 def _outcome(result, expected: str, message: str) -> bool:

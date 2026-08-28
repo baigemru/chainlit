@@ -79,7 +79,7 @@ RESUME_DELETE_SCENARIOS = (
         expect=(
             Expect("thread.first_interaction", {"interaction": "resume"}),
             Expect("thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1"]}),
-            Expect("step.delete", {"step.id": "m2"}),
+            Expect("step.delete", {"stepId": "m2"}),
         ),
         then=lambda result: (
             assert_that(

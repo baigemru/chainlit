@@ -93,4 +93,5 @@ class S3StorageClient(BaseStorageClient):
         return await sync_to_thread(self.sync_delete_file, object_key)
 
     async def close(self) -> None:
-        await self.client.close()
+        # boto3 is synchronous; its close() returns None, not an awaitable.
+        self.client.close()

@@ -1,0 +1,160 @@
+name: Build and Release (chainlit-litestar)
+
+# The Litestar rebuild ships as its own distribution, `chainlit-litestar`,
+# on its own version line (3.0.0a*), from its own tags (`litestar-v*`). It
+# never overlaps the `chainlit` releases build-release.yaml makes from `v*`:
+# different wheel name, different tag prefix, pre-release only. A consumer
+# opts in by depending on `chainlit-litestar` instead of `chainlit`.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/litestar-rebuild']
+    tags: ['litestar-v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-litestar-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build chainlit-litestar wheel
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: chainlit_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/chainlit_test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/litestar-v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF_NAME#litestar-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.3.0
+        with:
+          node-version: 'lts/*'
+          cache: 'pnpm'
+          cache-dependency-path: '**/pnpm-lock.yaml'
+
+      - name: Install JS dependencies
+        run: pnpm install
+
+      - name: Build frontend and copilot
+        run: pnpm build
+
+      - name: Copy frontend assets to backend
+        run: |
+          mkdir -p backend/chainlit/frontend/dist
+          cp -r frontend/dist/* backend/chainlit/frontend/dist/
+
+      - name: Copy copilot assets to backend
+        run: |
+          mkdir -p backend/chainlit/copilot/dist
+          cp -r libs/copilot/dist/* backend/chainlit/copilot/dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.0.0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.14'
+
+      - name: Set package version from tag
+        if: steps.tag.outputs.tag != ''
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          echo "__version__ = \"${VERSION}\"" > chainlit/version.py
+          echo "Package version set to ${VERSION}"
+        working-directory: ./backend
+
+      - name: Install Python dependencies
+        run: uv sync --group dev --all-extras
+        working-directory: ./backend
+
+      # The wheel is only worth publishing if the suite that describes it
+      # is green on the exact tree being packaged.
+      - name: Test
+        run: uv run --no-sync pytest tests -q -p no:cacheprovider
+        working-directory: ./backend
+
+      - name: Build Python distribution
+        run: uv build --no-build-isolation
+        working-directory: ./backend
+
+      - name: Get version and wheel filename
+        id: meta
+        run: |
+          VERSION=$(uv run --no-sync python -c "from chainlit.version import __version__; print(__version__)")
+          WHEEL=$(find ../dist/ -maxdepth 1 -name 'chainlit_litestar-*.whl' | head -1)
+          test -n "$WHEEL"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "wheel=${WHEEL}" >> "$GITHUB_OUTPUT"
+        working-directory: ./backend
+
+      - name: Publish pre-release to GitHub
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          WHEEL_NAME=$(basename '${{ steps.meta.outputs.wheel }}')
+          NOTES="Litestar line, pre-release. Automated build from tag $TAG (commit ${{ github.sha }}).
+
+          ## Install
+
+          \`\`\`bash
+          pip install https://github.com/${{ github.repository }}/releases/download/$TAG/$WHEEL_NAME
+          \`\`\`
+
+          In a \`pyproject.toml\`:
+
+          \`\`\`toml
+          chainlit-litestar = { url = \"https://github.com/${{ github.repository }}/releases/download/$TAG/$WHEEL_NAME\" }
+          \`\`\`
+
+          The import name is still \`chainlit\`. Do not install this next to the \`chainlit\` distribution: both own the \`chainlit\` package."
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+          else
+            gh release create "$TAG" dist/* \
+              --prerelease \
+              --title "chainlit-litestar v${{ steps.meta.outputs.version }}" \
+              --notes "$NOTES" \
+              --repo "${{ github.repository }}"
+          fi
+
+      - name: Upload build artifact (no release tag)
+        if: steps.tag.outputs.tag == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: chainlit-litestar-dist
+          path: dist/*

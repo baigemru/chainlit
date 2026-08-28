@@ -20,6 +20,10 @@ jobs:
   build-and-release:
     name: Build chainlit wheel and publish to GitHub Release
     runs-on: ubuntu-latest
+    # The Litestar line ships as `chainlit-litestar` from tags `litestar-v*`
+    # (build-litestar.yaml). Its pre-releases also fire `release: published`
+    # here, and this job must not touch them: the two lines share nothing.
+    if: ${{ !startsWith(github.ref_name, 'litestar-') && !startsWith(github.event.release.tag_name, 'litestar-') }}
     steps:
       - uses: actions/checkout@v6
 

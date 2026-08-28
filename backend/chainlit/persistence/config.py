@@ -18,10 +18,12 @@ command group on the CLI). ``litestar database current`` / ``downgrade`` /
 async engine with ``asyncio.run``.
 """
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Optional, Type
+from typing import Any, AsyncIterator, Awaitable, Dict, Optional, Type
 
 # Everything from the Litestar extension, not from advanced_alchemy.config:
 # EngineConfig and SQLAlchemyAsyncConfig exist as two distinct classes with
@@ -37,6 +39,7 @@ from advanced_alchemy.extensions.litestar import (
 from litestar.di import Provide
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from chainlit.logger import logger
 from chainlit.persistence.models import SCHEMA_NAME, Base
 from chainlit.persistence.services import (
     ElementService,
@@ -141,6 +144,27 @@ class UnitOfWork:
     steps: StepService
     elements: ElementService
     feedbacks: FeedbackService
+
+
+async def _shielded(cleanup: Awaitable[Any]) -> None:
+    """Run ``cleanup`` to completion even if the caller is being cancelled.
+
+    ``shield`` alone is not enough: the caller's cancellation surfaces at
+    the await regardless, and the cleanup keeps running unobserved. That is
+    the point -- the connection is returned either way -- but the second
+    cancel must not be swallowed twice, so it is re-raised after.
+    """
+    task = asyncio.ensure_future(cleanup)
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if not task.done():
+            # Let the cleanup finish before the cancellation propagates.
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(task)
+        raise
+    except Exception:
+        logger.exception("Database session cleanup failed")
 
 
 @dataclass
@@ -269,11 +293,16 @@ class Persistence:
         # The session maker directly rather than `config.get_session()`: that
         # wrapper is the maker plus a call to advanced_alchemy's own deprecated
         # `set_async_context`, and the suite treats deprecations as errors.
-        async with self.config.create_session_maker()() as owned:
-            uow = self.bind(owned)
-            try:
-                yield uow
-            except Exception:
-                await owned.rollback()
-                raise
+        owned = self.config.create_session_maker()()
+        try:
+            yield self.bind(owned)
             await owned.commit()
+        except BaseException:
+            # Cancellation included: a task torn down mid-query -- the user
+            # left the chat while the agent was writing -- must still hand
+            # its connection back, or the pool bleeds one per switch and
+            # the garbage collector reports it minutes later.
+            await _shielded(owned.rollback())
+            raise
+        finally:
+            await _shielded(owned.close())

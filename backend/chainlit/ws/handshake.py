@@ -241,8 +241,10 @@ async def restore(
     built, and the same filter serves the HTTP read path.
     """
     entries: Sequence[TranscriptEntry] = list(session.transcript)
+    snapshot = session.state.get("__resumed_thread")
     if (
         not entries
+        and snapshot is None
         and thread_store is not None
         and session.thread_id
         and session.resumed_thread_id == session.thread_id
@@ -267,7 +269,6 @@ async def restore(
         # the thread's own frame: a parent is said of a thread that exists.
         session.send(ThreadParent(parent_thread_id=session.parent_thread_id))
 
-    snapshot = session.state.get("__resumed_thread")
     if snapshot is not None:
         # The session has just resumed a stored thread and the client's feed
         # is whatever it had before: a snapshot *replaces* it, the way the

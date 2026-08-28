@@ -110,3 +110,52 @@ def test_the_unit_of_work_is_five_services_and_a_session() -> None:
     assert not any(
         callable(getattr(UnitOfWork, name, None)) for name in ("commit", "rollback")
     )
+
+
+async def test_a_cancelled_unit_of_work_returns_its_connection(
+    database_url: str,
+) -> None:
+    """A task torn down mid-query must hand its connection back.
+
+    The user leaving a chat cancels whatever the agent was doing, and what
+    it was doing may be a write. The cancellation comes from an anyio
+    cancel scope -- the websocket's task group -- which re-delivers it at
+    *every* await until the scope exits: a plain ``await close()`` in a
+    ``finally`` is cancelled too, the connection is never returned, and
+    the garbage collector reports it minutes later. That log line is what
+    this test is. Locally the plain close survives too -- the re-delivery
+    only bites when asyncpg's own cancel of the running query is what gets
+    cancelled -- so this pins the property, not the mechanism.
+    """
+    import asyncio
+    from typing import cast
+
+    import anyio
+    from sqlalchemy import text
+    from sqlalchemy.pool import QueuePool
+
+    persistence = Persistence.from_url(database_url, pool_size=2, max_overflow=0)
+    engine = persistence.config.get_engine()
+    pool = cast(QueuePool, engine.pool)
+    started = asyncio.Event()
+
+    async def work() -> None:
+        async with persistence.uow() as unit:
+            started.set()
+            await unit.session.execute(text("SELECT pg_sleep(5)"))
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(work)
+        await started.wait()
+        await asyncio.sleep(0.05)
+        group.cancel_scope.cancel()
+
+    # The cleanup ran on despite the scope; give it a moment to land.
+    for _ in range(50):
+        if pool.checkedout() == 0:
+            break
+        await asyncio.sleep(0.02)
+    try:
+        assert pool.checkedout() == 0
+    finally:
+        await engine.dispose()

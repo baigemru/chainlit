@@ -742,9 +742,9 @@ def test_data_layer_config(
 def test_chat_profile_with_config_overrides():
     """Test that ChatProfile can be created with config_overrides."""
     from chainlit.config import (
+        AudioFeature,
         ChainlitConfigOverrides,
         FeaturesSettings,
-        McpFeature,
         UISettings,
     )
     from chainlit.types import ChatProfile
@@ -757,7 +757,7 @@ def test_chat_profile_with_config_overrides():
 
     # Test creating a profile with config_overrides
     config_overrides = ChainlitConfigOverrides(
-        features=FeaturesSettings(mcp=McpFeature(enabled=True)),
+        features=FeaturesSettings(audio=AudioFeature(enabled=True)),
         ui=UISettings(
             name="Custom App Name",
             description="Custom description",
@@ -766,15 +766,15 @@ def test_chat_profile_with_config_overrides():
     )
 
     profile_with_overrides = ChatProfile(
-        name="MCP Profile",
+        name="Audio Profile",
         markdown_description="A profile with MCP enabled",
         config_overrides=config_overrides,
     )
 
     # Verify the profile was created successfully
-    assert profile_with_overrides.name == "MCP Profile"
+    assert profile_with_overrides.name == "Audio Profile"
     assert profile_with_overrides.config_overrides is not None
-    assert profile_with_overrides.config_overrides.features.mcp.enabled is True
+    assert profile_with_overrides.config_overrides.features.audio.enabled is True
     assert profile_with_overrides.config_overrides.ui.name == "Custom App Name"
     assert profile_with_overrides.config_overrides.ui.default_theme == "light"
 
@@ -785,9 +785,9 @@ async def test_set_chat_profiles_with_config_overrides(
     """Test that set_chat_profiles callback works with profiles that have config_overrides."""
     from chainlit.callbacks import set_chat_profiles
     from chainlit.config import (
+        AudioFeature,
         ChainlitConfigOverrides,
         FeaturesSettings,
-        McpFeature,
         UISettings,
     )
     from chainlit.types import ChatProfile
@@ -802,11 +802,11 @@ async def test_set_chat_profiles_with_config_overrides(
                     markdown_description="A basic profile without overrides",
                 ),
                 ChatProfile(
-                    name="MCP Profile",
+                    name="Audio Profile",
                     markdown_description="A profile with MCP enabled",
                     config_overrides=ChainlitConfigOverrides(
-                        features=FeaturesSettings(mcp=McpFeature(enabled=True)),
-                        ui=UISettings(name="MCP Assistant", default_theme="dark"),
+                        features=FeaturesSettings(audio=AudioFeature(enabled=True)),
+                        ui=UISettings(name="Audio Assistant", default_theme="dark"),
                     ),
                 ),
                 ChatProfile(
@@ -835,12 +835,12 @@ async def test_set_chat_profiles_with_config_overrides(
         assert basic_profile.config_overrides is None
 
         # Test MCP profile
-        mcp_profile = result[1]
-        assert mcp_profile.name == "MCP Profile"
-        assert mcp_profile.config_overrides is not None
-        assert mcp_profile.config_overrides.features.mcp.enabled is True
-        assert mcp_profile.config_overrides.ui.name == "MCP Assistant"
-        assert mcp_profile.config_overrides.ui.default_theme == "dark"
+        audio_profile = result[1]
+        assert audio_profile.name == "Audio Profile"
+        assert audio_profile.config_overrides is not None
+        assert audio_profile.config_overrides.features.audio.enabled is True
+        assert audio_profile.config_overrides.ui.name == "Audio Assistant"
+        assert audio_profile.config_overrides.ui.default_theme == "dark"
 
         # Test light theme profile
         light_profile = result[2]

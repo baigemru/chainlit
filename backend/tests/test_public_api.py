@@ -12,7 +12,6 @@ import chainlit
 # Frozen 2026-08-27, before the Litestar rebuild. Names scheduled for removal
 # carry a comment; remove them from this list in the commit that removes them.
 EXPECTED_EXPORTS = {
-    "AsyncLangchainCallbackHandler",
     "Action",
     "AskActionMessage",
     "AskElementMessage",
@@ -33,8 +32,6 @@ EXPECTED_EXPORTS = {
     "GenerationMessage",
     "Image",
     "InputAudioChunk",
-    "LangchainCallbackHandler",
-    "LlamaIndexCallbackHandler",
     "Message",
     "Mode",
     "ModeOption",
@@ -43,7 +40,6 @@ EXPECTED_EXPORTS = {
     "PersistedUser",
     "Plotly",
     "Pyplot",
-    "SemanticKernelFilter",
     "Starter",
     "StarterCategory",
     "Step",
@@ -63,8 +59,6 @@ EXPECTED_EXPORTS = {
     "data_layer",  # rebuild: renamed to `persistence`
     "header_auth_callback",
     "input_widget",
-    "instrument_mistralai",
-    "instrument_openai",
     "make_async",  # rebuild: delete (one line of anyio.to_thread.run_sync)
     "oauth_callback",
     "on_app_shutdown",
@@ -77,14 +71,11 @@ EXPECTED_EXPORTS = {
     "on_chat_start",
     "on_feedback",
     "on_logout",  # rebuild: delete (FastAPI-typed signature)
-    "on_mcp_connect",
-    "on_mcp_disconnect",
     "on_message",
     "on_profile_start",
     "on_settings_edit",
     "on_settings_update",
     "on_shared_thread_view",
-    "on_slack_reaction_added",
     "on_stop",
     "on_thread_ready",
     "on_window_message",

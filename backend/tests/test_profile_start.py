@@ -472,7 +472,6 @@ class TestDeleteCancelsHook:
         session.socket_id = "sid-del"
         session.id = "sess-del"
         session.deferred_ask_reply_tasks = []
-        session.mcp_sessions = {}
         session.parked_conversions = []
         task = Mock()
         task.done.return_value = False

@@ -20,16 +20,9 @@ Pre-resolved library IDs for [Context7 MCP](https://context7.com). Use these whe
 
 ## LLM integrations
 
-| Library/Framework    | Context7 Library ID                             | Notes                              |
-| -------------------- | ----------------------------------------------- | ---------------------------------- |
-| MCP Python SDK       | /modelcontextprotocol/python-sdk                | Official MCP SDK (core dependency) |
-| OpenAI Python        | /openai/openai-python                           | OpenAI API client                  |
-| Anthropic Python     | /anthropics/anthropic-sdk-python                | Anthropic API client               |
-| LangChain            | /websites/langchain_oss_python_langchain        | LLM orchestration, chains, agents  |
-| LlamaIndex           | /websites/developers_llamaindex_ai_python       | RAG / LLM data framework           |
-| Semantic Kernel      | /microsoft/semantic-kernel                      | Microsoft AI orchestration SDK     |
-| Semantic Kernel docs | /websites/learn_microsoft_en-us_semantic-kernel | Official Microsoft docs            |
-| MistralAI            | /mistralai/client-python                        | MistralAI API client               |
+| Library/Framework | Context7 Library ID              | Notes                |
+| ----------------- | -------------------------------- | -------------------- |
+| Anthropic Python  | /anthropics/anthropic-sdk-python | Anthropic API client |
 
 ## Persistence
 
@@ -37,18 +30,16 @@ Pre-resolved library IDs for [Context7 MCP](https://context7.com). Use these whe
 | -------------------- | ---------------------------------------------- | ------------------------------ |
 | SQLAlchemy           | /websites/sqlalchemy_en_20                     | ORM for PostgreSQL/SQLite      |
 | asyncpg              | /websites/magicstack_github_io_asyncpg_current | Async PostgreSQL driver        |
-| boto3                | /boto/boto3                                    | AWS SDK — DynamoDB + S3        |
+| boto3                | /boto/boto3                                    | AWS SDK — S3 storage client    |
 | Azure SDK            | /azure/azure-sdk-for-python                    | Azure SDK for Python           |
 | Azure Storage        | /websites/learn_microsoft_en-us_azure_storage  | Azure Blob Storage + Data Lake |
 | Google Cloud Storage | /googleapis/python-storage                     | GCS persistence                |
 
 ## Platform integrations
 
-| Library/Framework | Context7 Library ID       | Notes                               |
-| ----------------- | ------------------------- | ----------------------------------- |
-| Slack Bolt        | /slackapi/bolt-python     | Slack app framework                 |
-| Discord           | /llmstxt/discord_llms_txt | Discord bot API                     |
-| pandas            | /websites/pandas_pydata   | Data analysis (optional dependency) |
+| Library/Framework | Context7 Library ID     | Notes                               |
+| ----------------- | ----------------------- | ----------------------------------- |
+| pandas            | /websites/pandas_pydata | Data analysis (optional dependency) |
 
 ## Frontend — core
 

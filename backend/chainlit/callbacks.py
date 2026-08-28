@@ -3,14 +3,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overlo
 
 from fastapi import Request, Response
 from fastapi.routing import iter_route_contexts
-from mcp import ClientSession
 from starlette.datastructures import Headers
 
 from chainlit.action import Action
 from chainlit.config import config
 from chainlit.context import context
 from chainlit.data.base import BaseDataLayer
-from chainlit.mcp import McpConnection
 from chainlit.message import Message
 from chainlit.oauth_providers import get_configured_oauth_providers
 from chainlit.step import Step, step
@@ -533,28 +531,6 @@ def author_rename(
     return func
 
 
-def on_mcp_connect(
-    func: Callable[[McpConnection, ClientSession], Awaitable[None]],
-) -> Callable[[McpConnection, ClientSession], Awaitable[None]]:
-    """
-    Called everytime an MCP is connected
-    """
-
-    config.code.on_mcp_connect = wrap_user_function(func)
-    return func
-
-
-def on_mcp_disconnect(
-    func: Callable[[str, ClientSession], Awaitable[None]],
-) -> Callable[[str, ClientSession], Awaitable[None]]:
-    """
-    Called everytime an MCP is disconnected
-    """
-
-    config.code.on_mcp_disconnect = wrap_user_function(func)
-    return func
-
-
 def on_stop(func: Callable) -> Callable:
     """
     Hook to react to the user stopping a thread.
@@ -651,33 +627,6 @@ def on_feedback(func: Callable) -> Callable:
         Callable[[Feedback], Any]: The decorated on_feedback function.
     """
     config.code.on_feedback = wrap_user_function(func)
-    return func
-
-
-def on_slack_reaction_added(func: Callable[[Dict[str, Any]], Any]) -> Callable:
-    """
-    Hook to react to Slack reaction_added events.
-    The decorated function is called every time a user adds a reaction to a message in Slack.
-
-    Args:
-        func (Callable[[Dict[str, Any]], Any]): The function to be called when a reaction is added.
-            Takes a Slack event dictionary containing:
-            - reaction: The emoji reaction name (e.g., "thumbsup")
-            - user: The user ID who added the reaction
-            - item: Dictionary with type, ts, and channel of the reacted item
-
-    Example:
-        @cl.on_slack_reaction_added
-        async def handle_reaction(event: Dict[str, Any]):
-            reaction = event.get("reaction")
-            user_id = event.get("user")
-            print(f"User {user_id} added reaction {reaction}")
-            # Handle reaction here
-
-    Returns:
-        Callable[[Dict[str, Any]], Any]: The decorated on_slack_reaction_added function.
-    """
-    config.code.on_slack_reaction_added = wrap_user_function(func)
     return func
 
 

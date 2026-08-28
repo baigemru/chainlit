@@ -263,41 +263,6 @@ class CallActionRequest(BaseModel):
     sessionId: str
 
 
-class ConnectStdioMCPRequest(BaseModel):
-    sessionId: str
-    clientType: Literal["stdio"]
-    name: str
-    fullCommand: str
-
-
-class ConnectSseMCPRequest(BaseModel):
-    sessionId: str
-    clientType: Literal["sse"]
-    name: str
-    url: str
-    # Optional HTTP headers to forward to the MCP transport (e.g. Authorization)
-    headers: Optional[Dict[str, str]] = None
-
-
-class ConnectStreamableHttpMCPRequest(BaseModel):
-    sessionId: str
-    clientType: Literal["streamable-http"]
-    name: str
-    url: str
-    # Optional HTTP headers to forward to the MCP transport (e.g. Authorization)
-    headers: Dict[str, str] | None = None
-
-
-ConnectMCPRequest = Union[
-    ConnectStdioMCPRequest, ConnectSseMCPRequest, ConnectStreamableHttpMCPRequest
-]
-
-
-class DisconnectMCPRequest(BaseModel):
-    sessionId: str
-    name: str
-
-
 class ElementRequest(BaseModel):
     element: Dict
     sessionId: str

@@ -8,7 +8,7 @@ import re
 import shutil
 import urllib.parse
 import webbrowser
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Dict, List, Optional, Union, cast
 
@@ -64,10 +64,8 @@ from chainlit.secret import random_secret
 from chainlit.types import (
     AskFileSpec,
     CallActionRequest,
-    ConnectMCPRequest,
     DeleteFeedbackRequest,
     DeleteThreadRequest,
-    DisconnectMCPRequest,
     ElementRequest,
     GetThreadsRequest,
     ShareThreadRequest,
@@ -149,21 +147,6 @@ async def lifespan(app: FastAPI):
 
         watch_task = asyncio.create_task(watch_files_for_changes())
 
-    discord_task = None
-
-    if discord_bot_token := os.environ.get("DISCORD_BOT_TOKEN"):
-        from chainlit.discord.app import client
-
-        discord_task = asyncio.create_task(client.start(discord_bot_token))
-
-    slack_task = None
-
-    # Slack Socket Handler if env variable SLACK_WEBSOCKET_TOKEN is set
-    if os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("SLACK_WEBSOCKET_TOKEN"):
-        from chainlit.slack.app import start_socket_mode
-
-        slack_task = asyncio.create_task(start_socket_mode())
-
     try:
         yield
     finally:
@@ -175,14 +158,6 @@ async def lifespan(app: FastAPI):
                 stop_event.set()
                 watch_task.cancel()
                 await watch_task
-
-            if discord_task:
-                discord_task.cancel()
-                await discord_task
-
-            if slack_task:
-                slack_task.cancel()
-                await slack_task
 
             if data_layer := get_data_layer():
                 await data_layer.close()
@@ -319,40 +294,6 @@ async def serve_copilot_file(
         return FileResponse(file_path)
     else:
         raise HTTPException(status_code=404, detail="File not found")
-
-
-# -------------------------------------------------------------------------------
-#                               SLACK HTTP HANDLER
-# -------------------------------------------------------------------------------
-
-if (
-    os.environ.get("SLACK_BOT_TOKEN")
-    and os.environ.get("SLACK_SIGNING_SECRET")
-    and not os.environ.get("SLACK_WEBSOCKET_TOKEN")
-):
-    from chainlit.slack.app import slack_app_handler
-
-    @router.post("/slack/events")
-    async def slack_endpoint(req: Request):
-        return await slack_app_handler.handle(req)
-
-
-# -------------------------------------------------------------------------------
-#                               TEAMS HANDLER
-# -------------------------------------------------------------------------------
-
-if os.environ.get("TEAMS_APP_ID") and os.environ.get("TEAMS_APP_PASSWORD"):
-    from botbuilder.schema import Activity
-
-    from chainlit.teams.app import adapter, bot
-
-    @router.post("/teams/events")
-    async def teams_endpoint(req: Request):
-        body = await req.json()
-        activity = Activity().deserialize(body)
-        auth_header = req.headers.get("Authorization", "")
-        response = await adapter.process_activity(activity, auth_header, bot.on_turn)
-        return response
 
 
 # -------------------------------------------------------------------------------
@@ -1451,303 +1392,6 @@ async def call_action(
         )
 
     return JSONResponse(content={"success": True, "response": response})
-
-
-@router.post("/mcp")
-async def connect_mcp(
-    payload: ConnectMCPRequest,
-    current_user: UserParam,
-):
-    import asyncio
-
-    from mcp import ClientSession
-    from mcp.client.sse import sse_client
-    from mcp.client.stdio import (
-        StdioServerParameters,
-        get_default_environment,
-        stdio_client,
-    )
-    from mcp.client.streamable_http import streamablehttp_client
-
-    from chainlit.context import init_ws_context
-    from chainlit.mcp import (
-        HttpMcpConnection,
-        McpConnection,
-        SseMcpConnection,
-        StdioMcpConnection,
-        validate_mcp_command,
-    )
-    from chainlit.session import McpSession, WebsocketSession
-
-    session = WebsocketSession.get_by_id(payload.sessionId)
-    context = init_ws_context(session)
-    config: ChainlitConfig = session.get_config()
-
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-            )
-
-    mcp_enabled = config.features.mcp.enabled
-    if not mcp_enabled:
-        raise HTTPException(
-            status_code=400,
-            detail="This app does not support MCP.",
-        )
-
-    # Disconnect previous session for this name (reconnection)
-    if payload.name in session.mcp_sessions:
-        old_mcp = session.mcp_sessions.pop(payload.name)
-        if on_mcp_disconnect := config.code.on_mcp_disconnect:
-            try:
-                await on_mcp_disconnect(payload.name, old_mcp.client)
-            except Exception:
-                logger.debug(
-                    "Error in on_mcp_disconnect callback for %s",
-                    payload.name,
-                    exc_info=True,
-                )
-        try:
-            await old_mcp.close()
-        except Exception:
-            logger.debug(
-                "Error closing old MCP session %s", payload.name, exc_info=True
-            )
-
-    # ── Validate config before launching the background task ──
-    mcp_connection: McpConnection
-
-    if payload.clientType == "sse":
-        if not config.features.mcp.sse.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="SSE MCP is not enabled",
-            )
-        mcp_connection = SseMcpConnection(
-            url=payload.url,
-            name=payload.name,
-            headers=getattr(payload, "headers", None),
-        )
-    elif payload.clientType == "stdio":
-        if not config.features.mcp.stdio.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="Stdio MCP is not enabled",
-            )
-        env_from_cmd, command, args = validate_mcp_command(payload.fullCommand)
-        mcp_connection = StdioMcpConnection(
-            command=command, args=args, name=payload.name
-        )
-    elif payload.clientType == "streamable-http":
-        if not config.features.mcp.streamable_http.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="HTTP MCP is not enabled",
-            )
-        mcp_connection = HttpMcpConnection(
-            url=payload.url,
-            name=payload.name,
-            headers=getattr(payload, "headers", None),
-        )
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown MCP client type: {payload.clientType}",
-        )
-
-    # ── Launch the MCP connection in its own background task ──
-    #
-    # The background task owns the AsyncExitStack: it enters all context
-    # managers, calls initialize(), signals ``ready_event``, and then
-    # blocks on ``stop_event.wait()``.  When the stop event fires the
-    # task wakes up and closes the exit stack *in the same task* that
-    # opened it — avoiding the cross-task cancel-scope corruption from
-    # https://github.com/Chainlit/chainlit/issues/2182.
-
-    ready_event: asyncio.Event = asyncio.Event()
-    stop_event: asyncio.Event = asyncio.Event()
-    # Mutable container to pass the ClientSession back from the bg task.
-    result_holder: dict[str, object] = {}
-
-    async def _mcp_session_runner() -> None:
-        exit_stack = AsyncExitStack()
-        try:
-            try:
-                if isinstance(mcp_connection, SseMcpConnection):
-                    transport = await exit_stack.enter_async_context(
-                        sse_client(
-                            url=mcp_connection.url,
-                            headers=mcp_connection.headers,
-                        )
-                    )
-                elif isinstance(mcp_connection, StdioMcpConnection):
-                    env = get_default_environment()
-                    env.update(env_from_cmd)
-                    server_params = StdioServerParameters(
-                        command=command, args=args, env=env
-                    )
-                    transport = await exit_stack.enter_async_context(
-                        stdio_client(server_params)
-                    )
-                elif isinstance(mcp_connection, HttpMcpConnection):
-                    transport = await exit_stack.enter_async_context(
-                        streamablehttp_client(
-                            url=mcp_connection.url,
-                            headers=mcp_connection.headers,
-                        )
-                    )
-                else:
-                    raise ValueError(f"Unknown client type: {payload.clientType}")
-
-                read, write = transport[:2]
-
-                mcp_client: ClientSession = await exit_stack.enter_async_context(
-                    ClientSession(
-                        read_stream=read,
-                        write_stream=write,
-                        sampling_callback=None,
-                    )
-                )
-
-                await mcp_client.initialize()
-                result_holder["client"] = mcp_client
-
-            except BaseException as exc:
-                result_holder["error"] = exc
-                return  # outer finally closes exit_stack
-            finally:
-                # Always signal the caller so it doesn't wait forever.
-                ready_event.set()
-
-            # ── Keep the task (and the exit stack) alive ──
-            try:
-                await stop_event.wait()
-            except asyncio.CancelledError:
-                logger.debug("MCP background task for %r cancelled", payload.name)
-        finally:
-            # Close exit_stack in ALL paths (error, normal shutdown,
-            # cancellation) — always in the same task that opened it.
-            logger.debug("Closing MCP exit stack for %r (same-task)", payload.name)
-            try:
-                await exit_stack.aclose()
-            except BaseException:
-                logger.debug(
-                    "Error closing MCP exit stack for %r",
-                    payload.name,
-                    exc_info=True,
-                )
-
-    task = asyncio.create_task(
-        _mcp_session_runner(), name=f"mcp-session-{payload.name}"
-    )
-
-    # Wait for the background task to finish initialisation.
-    await ready_event.wait()
-
-    if "error" in result_holder:
-        # The task already exited and cleaned up its exit stack.
-        # Make sure the task itself is fully done.
-        try:
-            await task
-        except BaseException:
-            pass
-        return JSONResponse(
-            status_code=400,
-            content={
-                "detail": f"Could not connect to the MCP: {result_holder['error']!s}"
-            },
-        )
-
-    mcp_client_session = cast("ClientSession", result_holder["client"])
-
-    # Call the user callback
-    if config.code.on_mcp_connect:
-        try:
-            await config.code.on_mcp_connect(mcp_connection, mcp_client_session)
-        except Exception as e:
-            # Callback failed — tear down the connection.
-            stop_event.set()
-            try:
-                await task
-            except BaseException:
-                pass
-            return JSONResponse(
-                status_code=400,
-                content={"detail": f"Could not connect to the MCP: {e!s}"},
-            )
-
-    # Store the session
-    mcp_session_obj = McpSession(
-        name=mcp_connection.name,
-        client=mcp_client_session,
-        task=task,
-        stop_event=stop_event,
-    )
-    session.mcp_sessions[mcp_connection.name] = mcp_session_obj
-
-    tool_list = await mcp_client_session.list_tools()
-
-    return JSONResponse(
-        content={
-            "success": True,
-            "mcp": {
-                "name": payload.name,
-                "tools": [{"name": t.name} for t in tool_list.tools],
-                "clientType": payload.clientType,
-                "command": payload.fullCommand
-                if payload.clientType == "stdio"
-                else None,
-                "url": getattr(payload, "url", None)
-                if payload.clientType in ["sse", "streamable-http"]
-                else None,
-                # Include optional headers for SSE and streamable-http connections
-                "headers": getattr(payload, "headers", None)
-                if payload.clientType in ["sse", "streamable-http"]
-                else None,
-            },
-        }
-    )
-
-
-@router.delete("/mcp")
-async def disconnect_mcp(
-    payload: DisconnectMCPRequest,
-    current_user: UserParam,
-):
-    from chainlit.context import init_ws_context
-    from chainlit.session import WebsocketSession
-
-    session = WebsocketSession.get_by_id(payload.sessionId)
-    context = init_ws_context(session)
-
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-            )
-
-    callback = config.code.on_mcp_disconnect
-    if payload.name in session.mcp_sessions:
-        mcp_session_obj = session.mcp_sessions.pop(payload.name)
-        try:
-            if callback:
-                await callback(payload.name, mcp_session_obj.client)
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not disconnect from the MCP: {e!s}",
-            )
-        finally:
-            await mcp_session_obj.close()
-
-    return JSONResponse(content={"success": True})
 
 
 @router.post("/project/file")

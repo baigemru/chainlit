@@ -13,7 +13,7 @@ if env_found:
     logger.info(f"Loaded {env_file} file")
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict
+from typing import Any, Dict
 
 from literalai import ChatGeneration, CompletionGeneration, GenerationMessage
 from pydantic.dataclasses import dataclass
@@ -81,14 +81,11 @@ from .callbacks import (
     on_chat_start,
     on_feedback,
     on_logout,
-    on_mcp_connect,
-    on_mcp_disconnect,
     on_message,
     on_profile_start,
     on_settings_edit,
     on_settings_update,
     on_shared_thread_view,
-    on_slack_reaction_added,
     on_stop,
     on_thread_ready,
     on_window_message,
@@ -99,16 +96,6 @@ from .callbacks import (
     set_starter_categories,
     set_starters,
 )
-
-if TYPE_CHECKING:
-    from chainlit.langchain.callbacks import (
-        AsyncLangchainCallbackHandler,
-        LangchainCallbackHandler,
-    )
-    from chainlit.llama_index.callbacks import LlamaIndexCallbackHandler
-    from chainlit.mistralai import instrument_mistralai
-    from chainlit.openai import instrument_openai
-    from chainlit.semantic_kernel import SemanticKernelFilter
 
 
 def sleep(duration: int):
@@ -131,12 +118,6 @@ class CopilotFunction:
 
 __getattr__ = make_module_getattr(
     {
-        "LangchainCallbackHandler": "chainlit.langchain.callbacks",
-        "AsyncLangchainCallbackHandler": "chainlit.langchain.callbacks",
-        "LlamaIndexCallbackHandler": "chainlit.llama_index.callbacks",
-        "instrument_openai": "chainlit.openai",
-        "instrument_mistralai": "chainlit.mistralai",
-        "SemanticKernelFilter": "chainlit.semantic_kernel",
         "server": "chainlit.server",
     }
 )
@@ -148,7 +129,6 @@ __all__ = [
     "AskFileMessage",
     "AskSlotBusyError",
     "AskUserMessage",
-    "AsyncLangchainCallbackHandler",
     "Audio",
     "ChatGeneration",
     "ChatProfile",
@@ -163,8 +143,6 @@ __all__ = [
     "GenerationMessage",
     "Image",
     "InputAudioChunk",
-    "LangchainCallbackHandler",
-    "LlamaIndexCallbackHandler",
     "Message",
     "Mode",
     "ModeOption",
@@ -173,7 +151,6 @@ __all__ = [
     "PersistedUser",
     "Plotly",
     "Pyplot",
-    "SemanticKernelFilter",
     "Starter",
     "StarterCategory",
     "Step",
@@ -193,8 +170,6 @@ __all__ = [
     "data_layer",
     "header_auth_callback",
     "input_widget",
-    "instrument_mistralai",
-    "instrument_openai",
     "make_async",
     "oauth_callback",
     "on_app_shutdown",
@@ -207,14 +182,11 @@ __all__ = [
     "on_chat_start",
     "on_feedback",
     "on_logout",
-    "on_mcp_connect",
-    "on_mcp_disconnect",
     "on_message",
     "on_profile_start",
     "on_settings_edit",
     "on_settings_update",
     "on_shared_thread_view",
-    "on_slack_reaction_added",
     "on_stop",
     "on_thread_ready",
     "on_window_message",

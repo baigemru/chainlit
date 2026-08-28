@@ -649,7 +649,7 @@ async def cleanup_resume_delete_steps(
         step_id = step.get("id")
         if data_layer:
             # Elements first and explicitly: not every data layer cascades
-            # element deletion from delete_step (DynamoDB does not); where
+            # element deletion from delete_step; where
             # it does, the second delete is idempotent. If any element
             # deletion fails, the step is kept — once the step is gone its
             # elements would be orphaned forever (their forId never enters

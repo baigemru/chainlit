@@ -7,17 +7,11 @@ python_version = "3.14"
 
 [[tool.mypy.overrides]]
 module = [
-    "boto3.dynamodb.types",
-    "botbuilder.*",
     "filetype",
-    "langflow",
     "lazify",
     "plotly",
     "socketio.*",
     "syncer",
-    # No release installable on 3.14: the ones allowing pydantic >=2.12
-    # pull a pre-release azure-ai-agents, so it is absent from the tests extra.
-    "semantic_kernel.*",
     "azure.storage.filedatalake",
     "google-cloud-storage",
     "azure.storage.blob",

@@ -5,7 +5,7 @@ import chainlit as cl
 from chainlit.config import (
     ChainlitConfigOverrides,
     FeaturesSettings,
-    McpFeature,
+    SpontaneousFileUploadFeature,
     UISettings,
 )
 
@@ -18,8 +18,8 @@ starters = [
         icon="https://picsum.photos/300",
     ),
     cl.Starter(
-        label="MCP Test",
-        message="Test MCP functionality",
+        label="Upload Test",
+        message="Test upload functionality",
         icon="https://picsum.photos/350",
     ),
 ]
@@ -34,33 +34,30 @@ async def chat_profile(current_user: cl.User):
         cl.ChatProfile(
             name="Default Profile",
             icon="https://picsum.photos/250",
-            markdown_description="Standard profile without MCP features. This profile uses **default settings** without any special configurations.",
+            markdown_description="Standard profile with default features. This profile uses **default settings** without any special configurations.",
             starters=starters,
         ),
         cl.ChatProfile(
-            name="MCP Enabled",
-            markdown_description="Profile with **MCP features enabled**. This profile has *Model Context Protocol* support activated. [Learn more](https://example.com/mcp)",
+            name="Upload Enabled",
+            markdown_description="Profile with **file upload enabled**. This profile has *spontaneous file upload* activated. [Learn more](https://example.com/upload)",
             icon="https://picsum.photos/250",
             starters=starters,
             config_overrides=ChainlitConfigOverrides(
-                ui=UISettings(name="MCP UI"),
+                ui=UISettings(name="Upload UI"),
                 features=FeaturesSettings(
-                    mcp=McpFeature(
-                        enabled=True,
-                        stdio={"enabled": True},
-                        sse={"enabled": True},
-                        streamable_http={"enabled": True},
-                    )
+                    spontaneous_file_upload=SpontaneousFileUploadFeature(enabled=True)
                 ),
             ),
         ),
         cl.ChatProfile(
-            name="MCP Disabled",
-            markdown_description="Profile with **MCP explicitly disabled**. This ensures no MCP functionality is available.",
+            name="Upload Disabled",
+            markdown_description="Profile with **file upload explicitly disabled**. This ensures no upload button is available.",
             icon="https://picsum.photos/200",
             starters=starters,
             config_overrides=ChainlitConfigOverrides(
-                features=FeaturesSettings(mcp=McpFeature(enabled=False))
+                features=FeaturesSettings(
+                    spontaneous_file_upload=SpontaneousFileUploadFeature(enabled=False)
+                )
             ),
         ),
     ]

@@ -123,10 +123,6 @@ favorites = false
 # The app's @cl.on_profile_start hook runs instead of on_chat_start.
 hot_swap_chat_profile = false
 
-[features.slack]
-# Add emoji reaction when message is received (requires reactions:write OAuth scope)
-reaction_on_message_received = false
-
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
     enabled = true
@@ -148,23 +144,6 @@ reaction_on_message_received = false
     enabled = false
     # Sample rate of the audio
     sample_rate = 24000
-
-[features.mcp]
-    # Enable Model Context Protocol (MCP) features
-    enabled = false
-
-[features.mcp.sse]
-    enabled = true
-
-[features.mcp.streamable-http]
-    enabled = true
-
-[features.mcp.stdio]
-    enabled = true
-    # Only the executables in the allow list can be used for MCP stdio server.
-    # Only need the base name of the executable, e.g. "npx", not "/usr/bin/npx".
-    # Please don't comment this line for now, we need it to parse the executable name.
-    allowed_executables = [ "npx", "uvx" ]
 
 [UI]
 # Name of the assistant.
@@ -331,37 +310,9 @@ class AudioFeature(BaseModel):
     enabled: bool = False
 
 
-class McpSseFeature(BaseModel):
-    enabled: bool = True
-
-
-class McpStreamableHttpFeature(BaseModel):
-    enabled: bool = True
-
-
-class McpStdioFeature(BaseModel):
-    enabled: bool = True
-    allowed_executables: Optional[list[str]] = None
-
-
-class SlackFeature(BaseModel):
-    reaction_on_message_received: bool = False
-
-
-class McpFeature(BaseModel):
-    enabled: bool = False
-    sse: McpSseFeature = Field(default_factory=McpSseFeature)
-    streamable_http: McpStreamableHttpFeature = Field(
-        default_factory=McpStreamableHttpFeature
-    )
-    stdio: McpStdioFeature = Field(default_factory=McpStdioFeature)
-
-
 class FeaturesSettings(BaseModel):
     spontaneous_file_upload: Optional[SpontaneousFileUploadFeature] = None
     audio: Optional[AudioFeature] = Field(default_factory=AudioFeature)
-    mcp: McpFeature = Field(default_factory=McpFeature)
-    slack: SlackFeature = Field(default_factory=SlackFeature)
     latex: bool = False
     user_message_markdown: bool = True
     user_message_autoscroll: bool = True
@@ -472,12 +423,9 @@ class CodeSettings(BaseModel):
     on_profile_start: Optional[Callable[["ProfileStartInfo"], Any]] = None
     on_message: Optional[Callable[["Message"], Any]] = None
     on_feedback: Optional[Callable[["Feedback"], Any]] = None
-    on_slack_reaction_added: Optional[Callable[[Dict[str, Any]], Any]] = None
     on_audio_start: Optional[Callable[[], Any]] = None
     on_audio_chunk: Optional[Callable[["InputAudioChunk"], Any]] = None
     on_audio_end: Optional[Callable[[], Any]] = None
-    on_mcp_connect: Optional[Callable] = None
-    on_mcp_disconnect: Optional[Callable] = None
     on_settings_edit: Optional[Callable[[Dict[str, Any]], Any]] = None
     on_settings_update: Optional[Callable[[Dict[str, Any]], Any]] = None
     set_chat_profiles: Optional[

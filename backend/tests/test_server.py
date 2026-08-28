@@ -775,9 +775,9 @@ def test_project_settings_with_chat_profile_config_overrides(
 ):
     """Test that /project/settings endpoint returns merged configuration when chat_profile is specified."""
     from chainlit.config import (
+        AudioFeature,
         ChainlitConfigOverrides,
         FeaturesSettings,
-        McpFeature,
         UISettings,
     )
     from chainlit.types import ChatProfile
@@ -790,11 +790,11 @@ def test_project_settings_with_chat_profile_config_overrides(
             default=True,
         ),
         ChatProfile(
-            name="mcp-enabled",
+            name="audio-enabled",
             markdown_description="Profile with MCP enabled",
             config_overrides=ChainlitConfigOverrides(
-                features=FeaturesSettings(mcp=McpFeature(enabled=True)),
-                ui=UISettings(name="MCP Assistant", default_theme="dark"),
+                features=FeaturesSettings(audio=AudioFeature(enabled=True)),
+                ui=UISettings(name="Audio Assistant", default_theme="dark"),
             ),
         ),
         ChatProfile(
@@ -828,19 +828,20 @@ def test_project_settings_with_chat_profile_config_overrides(
     # Should return base configuration without overrides
     assert config_data["ui"]["name"] == test_config.ui.name  # Original name
     assert (
-        config_data["features"]["mcp"]["enabled"] == test_config.features.mcp.enabled
-    )  # Original MCP setting
+        config_data["features"]["audio"]["enabled"]
+        == test_config.features.audio.enabled  # type: ignore[union-attr]
+    )  # Original setting
 
     # Test 2: MCP-enabled profile
     response = test_client.get(
-        "/project/settings", params={"chat_profile": "mcp-enabled"}
+        "/project/settings", params={"chat_profile": "audio-enabled"}
     )
     assert response.status_code == 200
     config_data = response.json()
 
     # Should return merged configuration with MCP enabled and custom UI
-    assert config_data["features"]["mcp"]["enabled"] is True  # Overridden
-    assert config_data["ui"]["name"] == "MCP Assistant"  # Overridden
+    assert config_data["features"]["audio"]["enabled"] is True  # Overridden
+    assert config_data["ui"]["name"] == "Audio Assistant"  # Overridden
     assert config_data["ui"]["default_theme"] == "dark"  # Overridden
 
     # Test 3: Light theme profile
@@ -854,7 +855,8 @@ def test_project_settings_with_chat_profile_config_overrides(
     assert config_data["ui"]["default_theme"] == "light"  # Overridden
     assert config_data["ui"]["description"] == "Light theme app"  # Overridden
     assert (
-        config_data["features"]["mcp"]["enabled"] == test_config.features.mcp.enabled
+        config_data["features"]["audio"]["enabled"]
+        == test_config.features.audio.enabled  # type: ignore[union-attr]
     )  # Not overridden
 
     # Test 4: Non-existent profile (should return base config)
@@ -866,7 +868,10 @@ def test_project_settings_with_chat_profile_config_overrides(
 
     # Should return base configuration
     assert config_data["ui"]["name"] == test_config.ui.name
-    assert config_data["features"]["mcp"]["enabled"] == test_config.features.mcp.enabled
+    assert (
+        config_data["features"]["audio"]["enabled"]
+        == test_config.features.audio.enabled  # type: ignore[union-attr]
+    )
 
     # Test 5: No profile specified (should return base config)
     response = test_client.get("/project/settings")
@@ -875,7 +880,10 @@ def test_project_settings_with_chat_profile_config_overrides(
 
     # Should return base configuration
     assert config_data["ui"]["name"] == test_config.ui.name
-    assert config_data["features"]["mcp"]["enabled"] == test_config.features.mcp.enabled
+    assert (
+        config_data["features"]["audio"]["enabled"]
+        == test_config.features.audio.enabled  # type: ignore[union-attr]
+    )
 
 
 def test_project_settings_config_overrides_serialization(
@@ -884,7 +892,7 @@ def test_project_settings_config_overrides_serialization(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test that config_overrides field is not included in serialized chat profiles."""
-    from chainlit.config import ChainlitConfigOverrides, FeaturesSettings, McpFeature
+    from chainlit.config import AudioFeature, ChainlitConfigOverrides, FeaturesSettings
     from chainlit.types import ChatProfile
 
     # Mock chat profile with config overrides
@@ -892,7 +900,7 @@ def test_project_settings_config_overrides_serialization(
         name="test-profile",
         markdown_description="Test profile",
         config_overrides=ChainlitConfigOverrides(
-            features=FeaturesSettings(mcp=McpFeature(enabled=True))
+            features=FeaturesSettings(audio=AudioFeature(enabled=True))
         ),
     )
 
@@ -929,7 +937,7 @@ def test_project_settings_config_overrides_language(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test that localized chat profiles use the right config overrides."""
-    from chainlit.config import ChainlitConfigOverrides, FeaturesSettings, McpFeature
+    from chainlit.config import AudioFeature, ChainlitConfigOverrides, FeaturesSettings
     from chainlit.types import ChatProfile
 
     # Mock chat profile with config overrides
@@ -937,7 +945,7 @@ def test_project_settings_config_overrides_language(
         name="test-profile-fr",
         markdown_description="Test profil",
         config_overrides=ChainlitConfigOverrides(
-            features=FeaturesSettings(mcp=McpFeature(enabled=True))
+            features=FeaturesSettings(audio=AudioFeature(enabled=True))
         ),
     )
 
@@ -945,7 +953,7 @@ def test_project_settings_config_overrides_language(
         name="test-profile",
         markdown_description="Test profile",
         config_overrides=ChainlitConfigOverrides(
-            features=FeaturesSettings(mcp=McpFeature(enabled=False))
+            features=FeaturesSettings(audio=AudioFeature(enabled=False))
         ),
     )
 
@@ -974,7 +982,7 @@ def test_project_settings_config_overrides_language(
     assert len(config_data["chatProfiles"]) == 1
 
     # Check that config_overrides is NOT included in the serialized profile
-    assert config_data["features"]["mcp"]["enabled"] is True  # Overridden
+    assert config_data["features"]["audio"]["enabled"] is True  # Overridden
 
     # Check that the profile_data matches the selected profile.
     profile_data = config_data["chatProfiles"][0]
@@ -995,7 +1003,7 @@ def test_project_settings_config_overrides_language(
     assert len(config_data["chatProfiles"]) == 1
 
     # Check that config_overrides is NOT included in the serialized profile
-    assert config_data["features"]["mcp"]["enabled"] is False  # Overridden
+    assert config_data["features"]["audio"]["enabled"] is False  # Overridden
 
     # Check that the profile_data matches the selected profile.
     profile_data = config_data["chatProfiles"][0]

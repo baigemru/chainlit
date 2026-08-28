@@ -30,10 +30,6 @@ auto_tag_thread = true
 # Allow users to edit their own messages
 edit_message = true
 
-[features.slack]
-# Add emoji reaction when message is received (requires reactions:write OAuth scope)
-reaction_on_message_received = false
-
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
     enabled = true

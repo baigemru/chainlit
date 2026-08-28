@@ -7,7 +7,7 @@ from moto import mock_aws
 from chainlit.data.storage_clients.s3 import S3StorageClient
 
 
-# Fixtures for setting up the DynamoDB table
+# Fixtures for the mocked S3 bucket
 @pytest.fixture
 def aws_credentials():
     """Mocked AWS Credentials for moto."""

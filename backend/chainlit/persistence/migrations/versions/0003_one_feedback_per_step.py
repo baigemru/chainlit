@@ -13,8 +13,10 @@ and 0002 gave ``forId`` only a plain index.
 The dedupe runs first and unconditionally: a deployed database may already
 hold duplicates, and creating the unique index on one would fail the
 migration halfway. Which row survives is arbitrary by construction -- the
-table has no timestamp, so there is no "latest" to keep -- and ``MAX(id)`` is
-chosen because it is deterministic and identical on both dialects.
+table has no timestamp, so there is no "latest" to keep -- and the greatest
+id *as text* is chosen because it is deterministic. Text, because PostgreSQL
+has no ``MAX(uuid)``: the aggregate exists for text and this migration only
+ever ran on SQLite before, where the column is already text.
 
 Revision ID: 0003_one_feedback_per_step
 Revises: 0002_indexes_and_updated_at
@@ -46,12 +48,11 @@ def _table() -> sa.TableClause:
 
 def upgrade() -> None:
     table = _table()
+    id_text = sa.cast(table.c["id"], sa.Text)
     survivors = (
-        sa.select(sa.func.max(table.c["id"]))
-        .select_from(table)
-        .group_by(table.c["forId"])
+        sa.select(sa.func.max(id_text)).select_from(table).group_by(table.c["forId"])
     )
-    op.execute(sa.delete(table).where(table.c["id"].not_in(survivors)))
+    op.execute(sa.delete(table).where(id_text.not_in(survivors)))
 
     op.drop_index("feedbacks_for_id_idx", "feedbacks", schema=schema())
     op.create_index(

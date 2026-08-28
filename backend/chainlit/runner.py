@@ -28,6 +28,7 @@ from chainlit.context import init_context
 from chainlit.controllers.project import hide_resume_deleted
 from chainlit.emitter import Emitter
 from chainlit.logger import logger
+from chainlit.persistence.config import isolated
 from chainlit.persistence.records import ThreadDetail, ThreadPatch
 from chainlit.persistence.writer import PatchThread, SessionWriter, WriterRegistry
 from chainlit.protocol.payloads import (
@@ -573,6 +574,11 @@ class ThreadStoreAdapter:
         self.persistence = persistence
 
     async def transcript_of(self, thread_id: str) -> Sequence[TranscriptEntry]:
-        async with self.persistence.uow() as unit:
-            detail = await unit.threads.get_detail(thread_id)
+        # Called from inside the socket's task group, the one place a
+        # cancellation is re-delivered at every await -- see ``isolated``.
+        detail = await isolated(self._detail(thread_id))
         return _transcript_of(detail) if detail is not None else []
+
+    async def _detail(self, thread_id: str) -> Optional[ThreadDetail]:
+        async with self.persistence.uow() as unit:
+            return await unit.threads.get_detail(thread_id)

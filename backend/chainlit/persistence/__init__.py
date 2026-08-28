@@ -23,6 +23,7 @@ from chainlit.persistence.config import (
     MIGRATIONS_PATH,
     Persistence,
     UnitOfWork,
+    isolated,
     sqlalchemy_config,
 )
 from chainlit.persistence.models import (
@@ -116,5 +117,6 @@ __all__ = [
     "UserRepository",
     "UserService",
     "WriterRegistry",
+    "isolated",
     "sqlalchemy_config",
 ]

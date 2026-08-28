@@ -23,7 +23,7 @@ import contextlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Dict, Optional, Type
+from typing import Any, AsyncIterator, Awaitable, Dict, Optional, Type, TypeVar
 
 # Everything from the Litestar extension, not from advanced_alchemy.config:
 # EngineConfig and SQLAlchemyAsyncConfig exist as two distinct classes with
@@ -165,6 +165,31 @@ async def _shielded(cleanup: Awaitable[Any]) -> None:
         raise
     except Exception:
         logger.exception("Database session cleanup failed")
+
+
+T = TypeVar("T")
+
+
+async def isolated(coro: Awaitable[T]) -> T:
+    """Run database work as a task that is cancelled exactly once.
+
+    An anyio cancel scope -- the websocket's task group -- re-delivers its
+    cancellation at every await until the scope exits. SQLAlchemy over
+    asyncpg cannot survive that: cancelled mid-query it cancels the query
+    and invalidates the connection, and when *that* close is cancelled too
+    the connection is never returned to the pool. A separate task receives
+    one ordinary asyncio cancellation, which the driver handles cleanly;
+    the caller gets its own cancellation as it should.
+    """
+    task = asyncio.ensure_future(coro)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(task)
+        raise
 
 
 @dataclass

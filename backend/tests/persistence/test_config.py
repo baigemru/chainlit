@@ -159,3 +159,46 @@ async def test_a_cancelled_unit_of_work_returns_its_connection(
         assert pool.checkedout() == 0
     finally:
         await engine.dispose()
+
+
+async def test_isolated_work_survives_a_repeating_cancel_scope(
+    database_url: str,
+) -> None:
+    """The exact production failure: a query cancelled by an anyio scope.
+
+    Without isolation asyncpg's own cancel of the query is cancelled too,
+    the invalidated connection is never checked in, and the pool logs
+    "Exception terminating connection". With it, the pool is whole.
+    """
+    import asyncio
+    from typing import cast
+
+    import anyio
+    from sqlalchemy import text
+    from sqlalchemy.pool import QueuePool
+
+    from chainlit.persistence.config import isolated
+
+    persistence = Persistence.from_url(database_url, pool_size=2, max_overflow=0)
+    pool = cast(QueuePool, persistence.config.get_engine().pool)
+
+    async def query() -> None:
+        async with persistence.uow() as unit:
+            await unit.session.execute(text("SELECT pg_sleep(5)"))
+
+    async def work() -> None:
+        await isolated(query())
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(work)
+        await asyncio.sleep(0.3)
+        group.cancel_scope.cancel()
+
+    for _ in range(60):
+        if pool.checkedout() == 0:
+            break
+        await asyncio.sleep(0.05)
+    try:
+        assert pool.checkedout() == 0
+    finally:
+        await persistence.config.get_engine().dispose()

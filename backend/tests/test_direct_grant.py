@@ -1,8 +1,9 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException as FastAPIHTTPException
 from fastapi.testclient import TestClient
+from litestar.exceptions import HTTPException
 
 from chainlit.auth import get_configuration, require_login
 from chainlit.config import config
@@ -85,7 +86,8 @@ class TestDirectGrantLogin:
         monkeypatch: pytest.MonkeyPatch,
     ):
         async def fail(username, password):
-            raise HTTPException(status_code=401, detail="credentialssignin")
+            # The old FastAPI server under test maps only its own exception.
+            raise FastAPIHTTPException(status_code=401, detail="credentialssignin")
 
         monkeypatch.setattr(direct_grant_provider, "get_token_with_password", fail)
 

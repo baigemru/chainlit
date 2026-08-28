@@ -54,10 +54,11 @@ from litestar.static_files import create_static_files_router
 from litestar.stores.registry import StoreRegistry
 from litestar.types import Empty, EmptyType
 
+from chainlit.config import APP_ROOT
 from chainlit.controllers.auth import (
     AuthController,
-    provide_security,
     provide_user_service,
+    security_provider,
 )
 from chainlit.controllers.files import FilesController
 from chainlit.controllers.project import ProjectController
@@ -203,6 +204,8 @@ class ChainlitPlugin(InitPlugin):
             must not touch it. Left unset, authentication is on exactly when
             ``CHAINLIT_AUTH_SECRET`` is in the environment.
         frontend_dir: Override the built frontend location.
+        public_dir: The app's own ``public/`` directory -- avatars, logos,
+            custom element sources. Defaults to ``APP_ROOT/public``.
         transit: The profile-switch handover store.
         transit_sweep_interval: How often unclaimed transit records are
             reaped. Nothing else reaps them -- see ``chainlit.transit_store``.
@@ -219,6 +222,7 @@ class ChainlitPlugin(InitPlugin):
         "_configure_logging",
         "_frontend_dir",
         "_persistence",
+        "_public_dir",
         "_request_max_body_size",
         "_sessions",
         "_transit",
@@ -232,6 +236,7 @@ class ChainlitPlugin(InitPlugin):
         persistence: Optional["Persistence"] = None,
         auth: Union[ChainlitAuth, EmptyType, None] = Empty,
         frontend_dir: Optional[Path] = None,
+        public_dir: Optional[Path] = None,
         transit: Optional[TransitStore] = None,
         transit_sweep_interval: float = SWEEP_INTERVAL_SECONDS,
         request_max_body_size: Union[int, EmptyType, None] = Empty,
@@ -241,6 +246,9 @@ class ChainlitPlugin(InitPlugin):
         self._persistence = persistence
         self._auth = self._resolve_auth(auth, config)
         self._frontend_dir = frontend_dir if frontend_dir is not None else FRONTEND_DIST
+        self._public_dir = (
+            public_dir if public_dir is not None else Path(APP_ROOT) / "public"
+        )
         self._transit = transit if transit is not None else TransitStore()
         #: One registry per plugin instance, never a module global. A
         #: process-wide one would be the old ``ws_sessions_id`` again, and
@@ -303,6 +311,19 @@ class ChainlitPlugin(InitPlugin):
             FilesController,
             self._websocket(),
         ]
+        # The app's own static files. Public by definition -- the login page
+        # shows the logo, and custom element sources are fetched before any
+        # user exists. The directory need not exist: the router resolves it
+        # and answers 404, which is what an app with no ``public/`` wants.
+        handlers.append(
+            create_static_files_router(
+                path="/public",
+                directories=[self._public_dir],
+                name="chainlit_public",
+                html_mode=False,
+                opt={"exclude_from_auth": True},
+            )
+        )
         assets = self._frontend_dir / "assets"
         if assets.is_dir():
             handlers.append(
@@ -394,9 +415,7 @@ class ChainlitPlugin(InitPlugin):
             "persistence_enabled",
             Provide(lambda: self._persistence is not None, sync_to_thread=False),
         )
-        app_config.dependencies.setdefault(
-            "security", Provide(provide_security, sync_to_thread=False)
-        )
+        app_config.dependencies.setdefault("security", security_provider(self._auth))
         app_config.dependencies.setdefault(
             "user_service", Provide(provide_user_service)
         )

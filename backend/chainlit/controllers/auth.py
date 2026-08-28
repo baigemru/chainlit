@@ -11,13 +11,14 @@ Everything here used to live in ``chainlit/server.py`` behind FastAPI's
   the middleware never runs and ``connection.user`` *raises*
   (``litestar/connection/base.py:249``), which is why none of them touch it.
 
-* **The cookie writer lives with the routes that write it.**
-  ``chainlit/auth/cookie.py`` mutated an injected ``Response``; a Litestar
-  handler returns one. The chunking scheme is unchanged -- a token longer
-  than ``COOKIE_CHUNK_SIZE`` is split across ``access_token_0``,
-  ``access_token_1``, ... -- and the chunk size is imported from
-  ``chainlit.security`` rather than restated, because the reader there and
-  the writer here have to agree or a large token silently fails to load.
+* **The auth cookie is written by the auth object, not by this module.**
+  ``chainlit/auth/cookie.py`` mutated an injected ``Response`` and chunked
+  long tokens across numbered cookies. Here ``JWTCookieAuth.login`` mints
+  the token and builds the one cookie from its own ``key``/``path``/
+  ``samesite``/``secure``/``domain`` -- the same fields its middleware reads
+  -- so the writer and the reader cannot disagree. The routes only ever
+  lift that cookie onto a redirect, or build its deletion from the same
+  fields.
 
 * **The user row is written through the persistence services**, not through
   ``BaseDataLayer``, and is committed by the before-send handler like any
@@ -35,6 +36,10 @@ password-auth route, it is also the direct-grant entry point -- the login
 form posts to it (``frontend/src/pages/Login.tsx:75-80``) and the branch
 below hands the resulting token to the same ``@cl.oauth_callback`` the
 redirect flow uses.
+
+The Azure AD hybrid callback (``POST .../azure-ad-hybrid/callback``,
+``response_mode=form_post``) is not ported either: no deployment of this
+fork uses Azure, and it was the only reason the cookie had to be chunked.
 """
 
 from __future__ import annotations
@@ -43,7 +48,7 @@ import os
 import urllib.parse
 from dataclasses import dataclass
 from secrets import compare_digest, token_urlsafe
-from typing import Annotated, Any, Dict, List, Optional, Sequence
+from typing import Annotated, Any, Dict, Optional
 
 from litestar import Controller, Request, Response, get, post
 from litestar.datastructures import Cookie
@@ -61,10 +66,10 @@ from litestar.params import (
     MultipartBody,
     QueryParameter,
     SkipValidation,
-    URLEncodedBody,
 )
 from litestar.response import Redirect
 from litestar.response.redirect import RedirectStatusType
+from litestar.security.jwt import Token
 from litestar.status_codes import HTTP_200_OK
 from msgspec import Struct
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,17 +84,16 @@ from chainlit.oauth_providers import (
     get_oauth_provider_details,
 )
 from chainlit.persistence.services import UserService
-from chainlit.security import COOKIE_CHUNK_SIZE, ChainlitAuth, cookie_settings
+from chainlit.security import ChainlitAuth, Identity
 
 __all__ = (
     "PUBLIC",
     "STATE_COOKIE_NAME",
     "AuthController",
     "AuthenticatedUser",
-    "auth_cookies",
-    "clear_auth_cookies",
-    "provide_security",
+    "cleared_auth_cookie",
     "provide_user_service",
+    "security_provider",
     "state_cookie",
 )
 
@@ -125,15 +129,6 @@ class PasswordLoginForm:
 
     username: str
     password: str
-
-
-@dataclass
-class AzureHybridCallbackForm:
-    """``response_mode=form_post``: the provider POSTs a urlencoded form."""
-
-    error: Optional[str] = None
-    code: Optional[str] = None
-    id_token: Optional[str] = None
 
 
 @dataclass
@@ -221,86 +216,25 @@ def auth_configuration() -> Dict[str, Any]:
 # --- cookies ----------------------------------------------------------------
 
 
-def _cookie(key: str, value: str, max_age: Optional[int]) -> Cookie:
-    settings = cookie_settings()
+def cleared_auth_cookie(security: ChainlitAuth) -> Cookie:
+    """A ``Set-Cookie`` that deletes the auth cookie ``security`` writes.
+
+    Every attribute comes from the auth instance because a deletion only
+    takes if it matches the cookie it deletes: a different ``Path`` (or
+    ``Domain``) leaves the old one in the jar alongside it. The old writer
+    got exactly this wrong -- it wrote at ``/`` and deleted at
+    ``CHAINLIT_AUTH_COOKIE_PATH``.
+    """
     return Cookie(
-        key=key,
-        value=value,
-        path=settings.path,
-        max_age=max_age,
+        key=security.key,
+        value="",
+        path=security.path,
+        max_age=0,
         httponly=True,
-        secure=settings.secure,
-        samesite=settings.samesite,
+        secure=security.secure,
+        samesite=security.samesite,
+        domain=security.domain,
     )
-
-
-def _expired(key: str) -> Cookie:
-    """A ``Set-Cookie`` that deletes ``key``.
-
-    Path has to match the one it was written at or the browser keeps the old
-    one alongside the deletion. The old writer got this wrong in one
-    direction: it wrote chunks at the framework default ``/`` and deleted
-    them at ``CHAINLIT_AUTH_COOKIE_PATH``, so a deployment that set the path
-    accumulated undeletable chunks.
-    """
-    return _cookie(key, "", max_age=0)
-
-
-def _held_auth_cookies(request: Request[Any, Any, Any]) -> set[str]:
-    """The auth cookies the browser is currently holding.
-
-    Exact name or ``<name>_<digits>``. The old writer matched on
-    ``startswith(name)``, which also swept up any unrelated cookie whose name
-    merely began with it.
-    """
-    name = cookie_settings().name
-    held = set()
-    for key in request.cookies:
-        if key == name:
-            held.add(key)
-        elif key.startswith(f"{name}_") and key[len(name) + 1 :].isdigit():
-            held.add(key)
-    return held
-
-
-def auth_cookies(request: Request[Any, Any, Any], token: str) -> List[Cookie]:
-    """Install ``token``, chunking it, and delete whatever it replaces.
-
-    A token that was chunked and is now short leaves ``access_token_0``
-    behind; the reader prefers the unchunked cookie, but the stale chunks
-    stay in the jar forever and count against the per-domain cookie limit.
-    """
-    settings = cookie_settings()
-    stale = _held_auth_cookies(request)
-    max_age = config.project.user_session_timeout
-    cookies: List[Cookie] = []
-
-    if len(token) > COOKIE_CHUNK_SIZE:
-        chunks = [
-            token[i : i + COOKIE_CHUNK_SIZE]
-            for i in range(0, len(token), COOKIE_CHUNK_SIZE)
-        ]
-        for index, chunk in enumerate(chunks):
-            key = f"{settings.name}_{index}"
-            cookies.append(_cookie(key, chunk, max_age))
-            stale.discard(key)
-    else:
-        cookies.append(_cookie(settings.name, token, max_age))
-        stale.discard(settings.name)
-
-    cookies.extend(_expired(key) for key in sorted(stale))
-    return cookies
-
-
-def clear_auth_cookies(request: Request[Any, Any, Any]) -> List[Cookie]:
-    """Delete every auth cookie the browser is holding.
-
-    Also the unchunked name when nothing is held: a logout whose request
-    arrived without the cookie (an expired session, a second tab) should
-    still tell the browser to drop it.
-    """
-    held = _held_auth_cookies(request) or {cookie_settings().name}
-    return [_expired(key) for key in sorted(held)]
 
 
 def state_cookie_lifetime() -> int:
@@ -308,12 +242,33 @@ def state_cookie_lifetime() -> int:
     return int(raw) if raw else DEFAULT_STATE_COOKIE_LIFETIME
 
 
+def _state_cookie(value: str, max_age: int) -> Cookie:
+    """The CSRF state, with fixed attributes rather than the auth cookie's.
+
+    It is not a session: it lives for one redirect round trip and is read
+    once, by ``oauth_callback``, on the top-level GET the provider sends the
+    browser back on. ``SameSite=Lax`` is sent on exactly that navigation, so
+    it needs neither the ``None``/``Secure`` pair a cross-origin copilot
+    deployment gives the auth cookie nor that cookie's ``Path``. Tying it to
+    the auth instance would only make the entry routes -- which do not
+    otherwise need one -- depend on it.
+    """
+    return Cookie(
+        key=STATE_COOKIE_NAME,
+        value=value,
+        path="/",
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+    )
+
+
 def state_cookie(state: str) -> Cookie:
-    return _cookie(STATE_COOKIE_NAME, state, state_cookie_lifetime())
+    return _state_cookie(state, state_cookie_lifetime())
 
 
 def cleared_state_cookie() -> Cookie:
-    return _expired(STATE_COOKIE_NAME)
+    return _state_cookie("", 0)
 
 
 def state_is_valid(request: Request[Any, Any, Any], state: Optional[str]) -> bool:
@@ -371,24 +326,16 @@ def login_page_redirect(error: str, status_code: RedirectStatusType = 302) -> Re
 # --- dependencies -----------------------------------------------------------
 
 
-def provide_security(request: Request[Any, Any, Any]) -> Optional[ChainlitAuth]:
-    """The app's own ``ChainlitAuth``, so tokens are minted with its secret.
+def security_provider(auth: Optional[ChainlitAuth]) -> Provide:
+    """The ``security`` dependency: the one auth instance, bound once.
 
-    Read off the registered plugin rather than rebuilt from the environment:
-    a host that passed ``ChainlitPlugin(auth=...)`` its own instance -- with
-    its own secret, expiry or ``retrieve_user_handler`` -- must have that one
-    used here, or the cookie this route writes is not the cookie the
-    middleware will accept.
-
-    The import is deliberately inside the function: ``chainlit.plugin`` is
-    what registers this controller, so a module-level import is a cycle.
+    A closure over the instance the plugin was built with, so tokens are
+    minted with its secret and cookies with its name. A host that passed
+    ``ChainlitPlugin(auth=...)`` its own -- with its own secret, expiry or
+    ``retrieve_user_handler`` -- gets that one here, or the cookie the login
+    route writes is not the cookie the middleware accepts.
     """
-    from chainlit.plugin import ChainlitPlugin
-
-    for plugin in request.app.plugins:
-        if isinstance(plugin, ChainlitPlugin):
-            return plugin.auth
-    return None
+    return Provide(lambda: auth, sync_to_thread=False)
 
 
 async def provide_user_service(
@@ -416,7 +363,7 @@ async def _save_user(
 
 
 async def _persist_login(
-    user_service: Optional[UserService], principal: Any
+    user_service: Optional[UserService], identity: Identity
 ) -> Optional[Any]:
     """Write the user row, and never let that failure block the login.
 
@@ -426,31 +373,50 @@ async def _persist_login(
     if user_service is None:
         return None
     try:
-        return await _save_user(
-            user_service,
-            getattr(principal, "identifier", ""),
-            getattr(principal, "metadata", None),
-        )
+        return await _save_user(user_service, identity.identifier, identity.metadata)
     except Exception:
         logger.exception("Error creating user")
         return None
+
+
+def _identity(principal: Any) -> Identity:
+    """One shape for what the callbacks return and what a bearer token says.
+
+    ``@cl.password_auth_callback``/``@cl.oauth_callback`` answer with a
+    ``chainlit.user.User`` (identifier at the top level); ``/auth/jwt``
+    decodes a stock ``Token`` (identifier in ``sub``, the rest in
+    ``extras``). Both are normalised here so the minting below has one
+    caller shape and the token claims are written from one place.
+    """
+    if isinstance(principal, Token):
+        return Identity(
+            identifier=principal.sub,
+            display_name=principal.extras.get("display_name"),
+            metadata=principal.extras.get("metadata") or {},
+        )
+    return Identity(
+        identifier=getattr(principal, "identifier", ""),
+        display_name=getattr(principal, "display_name", None),
+        metadata=getattr(principal, "metadata", None) or {},
+    )
 
 
 # --- the controller ---------------------------------------------------------
 
 
 class AuthController(Controller):
-    """Register this on the app to get Chainlit's authentication routes."""
+    """Register this on the app to get Chainlit's authentication routes.
+
+    Declares no dependencies on purpose. Both ``security`` and
+    ``user_service`` are bound by ``ChainlitPlugin`` at the *application*
+    layer, with ``setdefault``, so a host that wants its own keeps it.
+    Declaring them here instead would make them unoverridable: Litestar
+    resolves a dependency at the closest layer that declares it, and nothing
+    is closer than the controller a handler lives on.
+    """
 
     path = "/"
     tags = ["auth"]
-    # Deliberately empty. Both `security` and `user_service` are bound by
-    # `ChainlitPlugin` at the *application* layer, with `setdefault`, so a
-    # host that wants its own keeps it. Declaring them here instead would
-    # make them unoverridable: Litestar resolves a dependency at the
-    # closest layer that declares it, and nothing is closer than the
-    # controller a handler lives on.
-    dependencies: Dict[str, Provide] = {}
 
     # --- config ---
 
@@ -463,14 +429,19 @@ class AuthController(Controller):
 
     async def _authenticate(
         self,
-        request: Request[Any, Any, Any],
         security: Optional[ChainlitAuth],
         user_service: Optional[UserService],
         principal: Any,
         *,
         redirect_to_callback: bool = False,
     ) -> Response[Any]:
-        """Persist, mint, and hand the browser its cookie."""
+        """Persist, mint, and hand the browser its cookie.
+
+        ``JWTCookieAuth.login`` does the minting and builds the cookie from
+        the instance's own fields -- the same ones its middleware reads.
+        The redirect branch lifts that cookie onto a ``Redirect`` rather
+        than building a second one, for the same reason.
+        """
         if not principal:
             raise NotAuthorizedException(detail="credentialssignin")
         if security is None:
@@ -479,28 +450,30 @@ class AuthController(Controller):
                 "can be issued. Run `chainlit create-secret`."
             )
 
-        await _persist_login(user_service, principal)
+        identity = _identity(principal)
+        await _persist_login(user_service, identity)
 
-        token = security.mint(
-            identifier=getattr(principal, "identifier", ""),
-            display_name=getattr(principal, "display_name", None),
-            metadata=getattr(principal, "metadata", None) or {},
+        issued = security.login(
+            identifier=identity.identifier,
+            token_extras={
+                "display_name": identity.display_name,
+                "metadata": identity.metadata,
+            },
+            response_body={"success": True},
+            response_status_code=HTTP_200_OK,
         )
-        cookies = auth_cookies(request, token)
-
         if redirect_to_callback:
             return Redirect(
                 path=f"{root_path()}/login/callback",
                 query_params={"success": "True"},
                 status_code=302,
-                cookies=[*cookies, cleared_state_cookie()],
+                cookies=[*issued.cookies, cleared_state_cookie()],
             )
-        return Response(content={"success": True}, cookies=cookies)
+        return issued
 
     @post("/login", status_code=HTTP_200_OK, opt=PUBLIC)
     async def login(
         self,
-        request: Request[Any, Any, Any],
         data: MultipartBody[PasswordLoginForm],
         security: SkipValidation[NamedDependency[Optional[ChainlitAuth]]] = None,
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
@@ -510,7 +483,10 @@ class AuthController(Controller):
         The second branch is the direct grant: the credentials go to the
         OAuth provider's token endpoint and the resulting token goes through
         the *same* ``@cl.oauth_callback`` as the redirect flow, so an app
-        that denies a login in that callback denies it here too.
+        that denies a login in that callback denies it here too. A refusal
+        the provider raises (``accountnotsetup``, ``credentialssignin``) is
+        deliberately not caught: the login page reads the ``detail`` off the
+        error response to decide what to do next.
         """
         if config.code.password_auth_callback:
             user = await config.code.password_auth_callback(
@@ -525,7 +501,7 @@ class AuthController(Controller):
         else:
             raise ClientException(detail="No auth_callback defined")
 
-        return await self._authenticate(request, security, user_service, user)
+        return await self._authenticate(security, user_service, user)
 
     @post("/auth/jwt", status_code=HTTP_200_OK, opt=PUBLIC)
     async def jwt_auth(
@@ -561,23 +537,29 @@ class AuthController(Controller):
             secret=security.token_secret,
             algorithm=security.algorithm,
         )
-        return await self._authenticate(request, security, user_service, token)
+        return await self._authenticate(security, user_service, token)
 
     @post("/logout", status_code=HTTP_200_OK, opt=PUBLIC)
-    async def logout(self, request: Request[Any, Any, Any]) -> Any:
+    async def logout(
+        self,
+        request: Request[Any, Any, Any],
+        security: SkipValidation[NamedDependency[Optional[ChainlitAuth]]] = None,
+    ) -> Any:
         """Drop the cookie, then let the app have its say.
 
         Public: a browser holding an expired or malformed cookie is exactly
-        the one that most needs to be able to clear it.
+        the one that most needs to be able to clear it. With no auth
+        configured there is no cookie to clear, and nothing is written.
         """
         response: Response[Any] = Response(
-            content={"success": True}, cookies=clear_auth_cookies(request)
+            content={"success": True},
+            cookies=[cleared_auth_cookie(security)] if security is not None else [],
         )
         if config.code.on_logout:
             # A callback used as a notification hook returns nothing. FastAPI
             # merged the injected response's headers in regardless; here the
             # return value *is* the response, so a ``None`` would throw the
-            # cookie deletions away and leave the browser logged in.
+            # cookie deletion away and leave the browser logged in.
             result = await config.code.on_logout(request, response)
             if result is not None:
                 return result
@@ -745,54 +727,7 @@ class AuthController(Controller):
             return login_page_redirect(OAUTH_SIGNIN_ERROR)
 
         return await self._authenticate(
-            request, security, user_service, user, redirect_to_callback=True
-        )
-
-    @post("/auth/oauth/azure-ad-hybrid/callback", opt=PUBLIC)
-    async def azure_hybrid_callback(
-        self,
-        request: Request[Any, Any, Any],
-        data: URLEncodedBody[AzureHybridCallbackForm],
-        security: SkipValidation[NamedDependency[Optional[ChainlitAuth]]] = None,
-        user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
-        error: FromQuery[Optional[str]] = None,
-    ) -> Response[Any]:
-        """The hybrid flow's own callback: a POST, so its own route.
-
-        Litestar prefers the static path over ``{provider_id}``, so a GET to
-        this exact URL is a 405 rather than falling through to the shared
-        callback the way it did on the old stack. The provider only ever
-        POSTs here.
-        """
-        provider_id = "azure-ad-hybrid"
-        error = error or data.error
-
-        if config.code.oauth_callback is None:
-            raise ClientException(detail="No oauth_callback defined")
-        if (provider := get_oauth_provider(provider_id)) is None:
-            raise NotFoundException(detail=f"Provider {provider_id} not found")
-
-        if error:
-            logger.warning("OAuth provider %s returned error: %s", provider_id, error)
-            return login_page_redirect(OAUTH_SIGNIN_ERROR, 303)
-        if not data.code:
-            return login_page_redirect(OAUTH_SIGNIN_ERROR, 303)
-
-        try:
-            token = await provider.get_token(data.code, user_facing_url(request))
-            raw_user_data, default_user = await provider.get_user_info(token)
-            user = await config.code.oauth_callback(
-                provider_id, token, raw_user_data, default_user, data.id_token
-            )
-        except Exception:
-            logger.exception("OAuth callback error")
-            return login_page_redirect(OAUTH_SIGNIN_ERROR, 303)
-
-        if not user:
-            return login_page_redirect(OAUTH_SIGNIN_ERROR, 303)
-
-        return await self._authenticate(
-            request, security, user_service, user, redirect_to_callback=True
+            security, user_service, user, redirect_to_callback=True
         )
 
     # --- who am i ---
@@ -874,8 +809,3 @@ class AuthController(Controller):
                 )
             ],
         )
-
-
-def route_handlers() -> Sequence[Any]:
-    """What the plugin registers for authentication."""
-    return (AuthController,)

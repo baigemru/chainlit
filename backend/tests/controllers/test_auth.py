@@ -26,7 +26,7 @@ from chainlit.config import config
 from chainlit.oauth_providers import OAuthProvider
 from chainlit.persistence.records import UserRecord
 from chainlit.plugin import ChainlitPlugin
-from chainlit.security import chainlit_auth
+from chainlit.security import ChainlitAuth, chainlit_auth
 from chainlit.user import User
 
 SECRET = "test-secret-not-a-real-one-but-long-enough-for-hs256"
@@ -182,7 +182,7 @@ def use_oauth_callback(monkeypatch: pytest.MonkeyPatch, callback) -> None:
     monkeypatch.setattr(config.code, "oauth_callback", callback, raising=False)
 
 
-def client(user_service: Optional[FakeUserService] = None, **kwargs):
+def client(user_service: Optional[FakeUserService] = None, auth=None, **kwargs):
     """A test client for the controller alone, on the real auth middleware."""
 
     async def provide_fake() -> Any:
@@ -193,7 +193,7 @@ def client(user_service: Optional[FakeUserService] = None, **kwargs):
     # with `setdefault`, so one passed here simply wins.
     return create_test_client(
         route_handlers=[],
-        plugins=[ChainlitPlugin(auth=chainlit_auth(token_secret=SECRET))],
+        plugins=[ChainlitPlugin(auth=auth or chainlit_auth(token_secret=SECRET))],
         dependencies={"user_service": Provide(provide_fake)},
         debug=False,
         **kwargs,
@@ -633,61 +633,86 @@ def test_a_failing_data_layer_does_not_block_the_login(
 # --- the cookie -------------------------------------------------------------
 
 
-def _fat_metadata() -> Dict[str, Any]:
-    """Enough claims to push the JWT past the 3000-character chunk size."""
-    return {"groups": [f"group-{i:04d}" for i in range(400)]}
-
-
-def test_a_large_token_is_chunked_and_reads_back(monkeypatch: pytest.MonkeyPatch):
-    """The chunking is not an edge case: real IdP metadata blows past 4KB."""
-    use_provider(monkeypatch, FakeProvider())
-
-    async def callback(provider_id, token, raw, default_user):
-        return User(identifier="ada@example.com", metadata=_fat_metadata())
-
-    use_oauth_callback(monkeypatch, callback)
-
-    with client() as c:
-        c.cookies.set(STATE_COOKIE, "the-state")
-        response = c.get(_callback_url("the-state"), follow_redirects=False)
-
-        assert issued(response, f"{COOKIE}_0"), "the token was not chunked"
-        assert issued(response, f"{COOKIE}_1"), "one chunk is not chunking"
-        assert issued(response, COOKIE) is None, (
-            "an unchunked cookie alongside the chunks would win and be truncated"
-        )
-
-        # The client keeps the cookies the response set; the reader in
-        # chainlit.security has to put them back together.
-        me = c.get("/user")
-
-    assert me.status_code == 200
-    assert me.json()["identifier"] == "ada@example.com"
-
-
-def test_a_short_token_deletes_the_chunks_it_replaces(
+def test_the_cookie_is_written_under_the_name_the_auth_instance_carries(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Stale chunks are undeletable garbage that count against the jar limit."""
+    """The bug this pins: the writer used to read ``CHAINLIT_AUTH_COOKIE_NAME``
+    off the environment while the middleware read ``key`` off the instance,
+    so a host passing ``ChainlitAuth(key="foo")`` wrote ``access_token`` and
+    never got a session. Built directly, not via the environment -- the
+    environment route passes even with the bug present.
+    """
     use_provider(monkeypatch, FakeProvider())
 
     async def callback(provider_id, token, raw, default_user):
         return default_user
 
     use_oauth_callback(monkeypatch, callback)
+    auth = ChainlitAuth(token_secret=SECRET, key="foo")
+
+    with client(auth=auth) as c:
+        c.cookies.set(STATE_COOKIE, "the-state")
+        response = c.get(_callback_url("the-state"), follow_redirects=False)
+
+        assert issued(response, "foo"), "the cookie was written under another name"
+        assert issued(response, COOKIE) is None
+
+        # And the middleware reads it back: the writer and the reader agree.
+        me = c.get("/user")
+
+    assert me.status_code == 200
+    assert me.json()["identifier"] == "ada@example.com"
+
+
+def test_the_token_carries_the_display_name_and_metadata_back(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Minted through ``login(token_extras=...)``, read through the
+    ``retrieve_user_handler``: what the callback returned is what ``/user``
+    answers with, with no data layer in between."""
+    use_provider(monkeypatch, FakeProvider())
+
+    async def callback(provider_id, token, raw, default_user):
+        return User(
+            identifier="ada@example.com",
+            display_name="Ada",
+            metadata={"role": "admin"},
+        )
+
+    use_oauth_callback(monkeypatch, callback)
 
     with client() as c:
         c.cookies.set(STATE_COOKIE, "the-state")
-        c.cookies.set(f"{COOKIE}_0", "left-over-from-a-bigger-token")
-        c.cookies.set(f"{COOKIE}_1", "and-its-second-half")
+        c.get(_callback_url("the-state"), follow_redirects=False)
+        body = c.get("/user").json()
+
+    assert body["display_name"] == "Ada"
+    assert body["metadata"] == {"role": "admin"}
+
+
+def test_the_cookie_is_one_cookie(monkeypatch: pytest.MonkeyPatch):
+    """No chunking. Even a token past the old 3000-character split lands in
+    one ``Set-Cookie``: the reader is stock Litestar and knows nothing of
+    ``access_token_0``."""
+    use_provider(monkeypatch, FakeProvider())
+
+    async def callback(provider_id, token, raw, default_user):
+        return User(
+            identifier="ada@example.com",
+            metadata={"groups": [f"group-{i:04d}" for i in range(400)]},
+        )
+
+    use_oauth_callback(monkeypatch, callback)
+
+    with client() as c:
+        c.cookies.set(STATE_COOKIE, "the-state")
         response = c.get(_callback_url("the-state"), follow_redirects=False)
 
-    assert issued(response), "the short token was not written"
-    for stale in (f"{COOKIE}_0", f"{COOKIE}_1"):
-        assert any(
-            header.startswith(f"{stale}=") and "Max-Age=0" in header
-            for header in set_cookies(response)
-        ), f"{stale} was left behind"
+        token = issued(response)
+        assert token
+        assert len(token) > 3000
+        assert issued(response, f"{COOKIE}_0") is None
+        assert c.get("/user").json()["identifier"] == "ada@example.com"
 
 
 def test_the_session_cookie_is_not_readable_from_javascript(
@@ -759,6 +784,44 @@ def test_login_denied_by_the_oauth_callback_is_a_401(
 
     assert response.status_code == 401
     assert response.json()["detail"] == "credentialssignin"
+    assert issued(response) is None
+
+
+def test_a_provider_refusal_reaches_the_login_page_with_its_detail(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """``Login.tsx`` switches on ``detail === "accountnotsetup"`` under a
+    403 to send the user through the browser flow. The provider raises a
+    Litestar exception now, and the body has to keep the same key -- so
+    this runs the real Keycloak provider against a faked token endpoint,
+    not a double that raises."""
+    from unittest.mock import AsyncMock, Mock, patch
+
+    from chainlit.oauth_providers import KeycloakOAuthProvider
+
+    for name, value in {
+        "OAUTH_KEYCLOAK_CLIENT_ID": "client-id",
+        "OAUTH_KEYCLOAK_CLIENT_SECRET": "client-secret",
+        "OAUTH_KEYCLOAK_REALM": "realm",
+        "OAUTH_KEYCLOAK_BASE_URL": "https://idp.example.com",
+        "OAUTH_KEYCLOAK_DIRECT_GRANT": "true",
+    }.items():
+        monkeypatch.setenv(name, value)
+    use_provider(monkeypatch, KeycloakOAuthProvider())
+    use_oauth_callback(monkeypatch, lambda *a: None)
+
+    refused = Mock(status_code=400)
+    refused.json.return_value = {
+        "error": "invalid_grant",
+        "error_description": "Account is not fully set up",
+    }
+
+    with patch("httpx.AsyncClient") as http, client() as c:
+        http.return_value.__aenter__.return_value.post = AsyncMock(return_value=refused)
+        response = c.post("/login", files=_form())
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "accountnotsetup"
     assert issued(response) is None
 
 
@@ -886,18 +949,19 @@ def test_user_creates_the_row_when_it_is_missing():
 # --- /logout ----------------------------------------------------------------
 
 
-def test_logout_clears_every_chunk():
-    with client() as c:
-        c.cookies.set(f"{COOKIE}_0", "first")
-        c.cookies.set(f"{COOKIE}_1", "second")
+def test_logout_deletes_the_cookie_where_it_was_written():
+    """A deletion only takes if its ``Path`` matches the cookie's: the
+    attributes come from the auth instance, not from a second reading."""
+    auth = ChainlitAuth(token_secret=SECRET, key="foo", path="/chat")
+
+    with client(auth=auth) as c:
+        c.cookies.set("foo", "whatever")
         response = c.post("/logout")
 
     assert response.status_code == 200
-    for name in (f"{COOKIE}_0", f"{COOKIE}_1"):
-        assert any(
-            header.startswith(f"{name}=") and "Max-Age=0" in header
-            for header in set_cookies(response)
-        ), f"{name} survived the logout"
+    header = next(h for h in set_cookies(response) if h.startswith("foo="))
+    assert "Max-Age=0" in header
+    assert "Path=/chat" in header
 
 
 def test_logout_works_without_a_credential():
@@ -983,18 +1047,15 @@ def test_set_session_cookie_needs_a_session_id():
 # --- routing ----------------------------------------------------------------
 
 
-def test_the_azure_hybrid_callback_is_post_only(monkeypatch: pytest.MonkeyPatch):
-    """Its literal path shadows ``{provider_id}`` for every method it declares.
-
-    The provider posts (``response_mode=form_post``), so this is only a
-    change for a GET that never happens -- but it is a change, and it is
-    asserted rather than discovered.
-    """
+def test_the_azure_hybrid_callback_is_gone(monkeypatch: pytest.MonkeyPatch):
+    """Its literal path no longer shadows ``{provider_id}``: the POST is a
+    405 on the shared GET route and the provider id is unknown."""
     use_provider(monkeypatch, FakeProvider())
     use_oauth_callback(monkeypatch, lambda *a: None)
 
     with client() as c:
-        assert c.get("/auth/oauth/azure-ad-hybrid/callback").status_code == 405
+        assert c.post("/auth/oauth/azure-ad-hybrid/callback").status_code == 405
+        assert c.get("/auth/oauth/azure-ad-hybrid/callback").status_code == 404
 
 
 def test_the_root_path_prefixes_the_redirects(monkeypatch: pytest.MonkeyPatch):
@@ -1039,5 +1100,5 @@ def test_the_public_routes_do_not_need_a_credential(monkeypatch: pytest.MonkeyPa
 
 
 def test_os_environ_is_not_read_at_import_time():
-    """The cookie settings are read per call, so a test can change them."""
+    """The cookie settings are read when the auth is built, not at import."""
     assert "CHAINLIT_AUTH_COOKIE_NAME" not in os.environ

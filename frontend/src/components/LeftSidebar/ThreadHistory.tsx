@@ -99,18 +99,15 @@ export function ThreadHistory() {
     setShouldLoadMore(atBottom);
   };
 
-  const fetchThreads = async (
-    cursor?: string | number,
-    isLoadingMore = false
-  ) => {
+  const fetchThreads = async (cursor?: string, isLoadingMore = false) => {
     try {
       setIsLoadingMore(!!cursor || isLoadingMore);
       setIsFetching(!cursor && !isLoadingMore);
 
-      const { pageInfo, data } = await apiClient.listThreads(
-        { first: BATCH_SIZE, cursor },
-        {}
-      );
+      const { pageInfo, data } = await apiClient.listThreads({
+        first: BATCH_SIZE,
+        cursor
+      });
 
       setError(undefined);
 

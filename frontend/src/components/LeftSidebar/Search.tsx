@@ -44,10 +44,10 @@ export default function SearchChats() {
       _.debounce(async (query: string) => {
         setLoading(true);
         try {
-          const { data } = await apiClient.listThreads(
-            { first: 20, cursor: undefined },
-            { search: query || undefined }
-          );
+          const { data } = await apiClient.listThreads({
+            first: 20,
+            search: query || undefined
+          });
           setThreads(data || []);
         } catch (error) {
           toast.error('Error fetching threads: ' + error);

@@ -1,12 +1,14 @@
-import base64
 import os
 import urllib.parse
 from typing import Dict, List, Optional, Tuple
 
 import httpx
-from fastapi import HTTPException
+from litestar.exceptions import (
+    ClientException,
+    NotAuthorizedException,
+    PermissionDeniedException,
+)
 
-from chainlit.secret import random_secret
 from chainlit.user import User
 
 ACCESS_TOKEN_MISSING = "Access token missing in the response"
@@ -163,7 +165,7 @@ class GithubOAuthProvider(OAuthProvider):
         content = await self.get_raw_token_response(code, url)
         token = content.get("access_token", [""])[0]
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -227,7 +229,7 @@ class GoogleOAuthProvider(OAuthProvider):
         json = await self.get_raw_token_response(code, url)
         token = json.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -243,198 +245,6 @@ class GoogleOAuthProvider(OAuthProvider):
                 metadata={"image": google_user["picture"], "provider": "google"},
             )
             return (google_user, user)
-
-
-class AzureADOAuthProvider(OAuthProvider):
-    id = "azure-ad"
-    env = [
-        "OAUTH_AZURE_AD_CLIENT_ID",
-        "OAUTH_AZURE_AD_CLIENT_SECRET",
-        "OAUTH_AZURE_AD_TENANT_ID",
-    ]
-    authorize_url = (
-        f"https://login.microsoftonline.com/{os.environ.get('OAUTH_AZURE_AD_TENANT_ID', '')}/oauth2/v2.0/authorize"
-        if os.environ.get("OAUTH_AZURE_AD_ENABLE_SINGLE_TENANT")
-        else "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-    )
-    token_url = (
-        f"https://login.microsoftonline.com/{os.environ.get('OAUTH_AZURE_AD_TENANT_ID', '')}/oauth2/v2.0/token"
-        if os.environ.get("OAUTH_AZURE_AD_ENABLE_SINGLE_TENANT")
-        else "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-    )
-
-    def __init__(self):
-        self.client_id = os.environ.get("OAUTH_AZURE_AD_CLIENT_ID")
-        self.client_secret = os.environ.get("OAUTH_AZURE_AD_CLIENT_SECRET")
-        self.authorize_params = {
-            "tenant": os.environ.get("OAUTH_AZURE_AD_TENANT_ID"),
-            "response_type": "code",
-            "scope": os.environ.get(
-                "OAUTH_AZURE_AD_SCOPES",
-                "https://graph.microsoft.com/User.Read offline_access",
-            ),
-            "response_mode": "query",
-        }
-
-        if prompt := self.get_prompt():
-            self.authorize_params["prompt"] = prompt
-
-    async def get_raw_token_response(self, code: str, url: str) -> dict:
-        payload = {
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": url,
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.token_url,
-                data=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_token(self, code: str, url: str):
-        json = await self.get_raw_token_response(code, url)
-
-        token = json["access_token"]
-        refresh_token = json.get("refresh_token")
-        if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
-        self._refresh_token = refresh_token
-        return token
-
-    async def get_user_info(self, token: str):
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://graph.microsoft.com/v1.0/me",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            response.raise_for_status()
-
-            azure_user = response.json()
-
-            try:
-                photo_response = await client.get(
-                    "https://graph.microsoft.com/v1.0/me/photos/48x48/$value",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                photo_data = await photo_response.aread()
-                base64_image = base64.b64encode(photo_data)
-                azure_user["image"] = (
-                    f"data:{photo_response.headers['Content-Type']};base64,{base64_image.decode('utf-8')}"
-                )
-            except Exception:
-                # Ignore errors getting the photo
-                pass
-
-            user = User(
-                identifier=azure_user["userPrincipalName"],
-                metadata={
-                    "image": azure_user.get("image"),
-                    "provider": "azure-ad",
-                    "refresh_token": getattr(self, "_refresh_token", None),
-                },
-            )
-            return (azure_user, user)
-
-
-class AzureADHybridOAuthProvider(OAuthProvider):
-    id = "azure-ad-hybrid"
-    env = [
-        "OAUTH_AZURE_AD_HYBRID_CLIENT_ID",
-        "OAUTH_AZURE_AD_HYBRID_CLIENT_SECRET",
-        "OAUTH_AZURE_AD_HYBRID_TENANT_ID",
-    ]
-    authorize_url = (
-        f"https://login.microsoftonline.com/{os.environ.get('OAUTH_AZURE_AD_HYBRID_TENANT_ID', '')}/oauth2/v2.0/authorize"
-        if os.environ.get("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT")
-        else "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-    )
-    token_url = (
-        f"https://login.microsoftonline.com/{os.environ.get('OAUTH_AZURE_AD_HYBRID_TENANT_ID', '')}/oauth2/v2.0/token"
-        if os.environ.get("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT")
-        else "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-    )
-
-    def __init__(self):
-        self.client_id = os.environ.get("OAUTH_AZURE_AD_HYBRID_CLIENT_ID")
-        self.client_secret = os.environ.get("OAUTH_AZURE_AD_HYBRID_CLIENT_SECRET")
-        nonce = random_secret(16)
-        self.authorize_params = {
-            "tenant": os.environ.get("OAUTH_AZURE_AD_HYBRID_TENANT_ID"),
-            "response_type": "code id_token",
-            "scope": os.environ.get(
-                "OAUTH_AZURE_AD_HYBRID_SCOPES",
-                "https://graph.microsoft.com/User.Read https://graph.microsoft.com/openid offline_access",
-            ),
-            "response_mode": "form_post",
-            "nonce": nonce,
-        }
-
-        if prompt := self.get_prompt():
-            self.authorize_params["prompt"] = prompt
-
-    async def get_raw_token_response(self, code: str, url: str) -> dict:
-        payload = {
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": url,
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.token_url,
-                data=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    async def get_token(self, code: str, url: str):
-        json = await self.get_raw_token_response(code, url)
-
-        token = json["access_token"]
-        refresh_token = json.get("refresh_token")
-        if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
-        self._refresh_token = refresh_token
-        return token
-
-    async def get_user_info(self, token: str):
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://graph.microsoft.com/v1.0/me",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            response.raise_for_status()
-
-            azure_user = response.json()
-
-            try:
-                photo_response = await client.get(
-                    "https://graph.microsoft.com/v1.0/me/photos/48x48/$value",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                photo_data = await photo_response.aread()
-                base64_image = base64.b64encode(photo_data)
-                azure_user["image"] = (
-                    f"data:{photo_response.headers['Content-Type']};base64,{base64_image.decode('utf-8')}"
-                )
-            except Exception:
-                # Ignore errors getting the photo
-                pass
-
-            user = User(
-                identifier=azure_user["userPrincipalName"],
-                metadata={
-                    "image": azure_user.get("image"),
-                    "provider": "azure-ad",
-                    "refresh_token": getattr(self, "_refresh_token", None),
-                },
-            )
-            return (azure_user, user)
 
 
 class OktaOAuthProvider(OAuthProvider):
@@ -492,7 +302,7 @@ class OktaOAuthProvider(OAuthProvider):
         json_data = await self.get_raw_token_response(code, url)
         token = json_data.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -557,7 +367,7 @@ class Auth0OAuthProvider(OAuthProvider):
         json_content = await self.get_raw_token_response(code, url)
         token = json_content.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -618,7 +428,7 @@ class DescopeOAuthProvider(OAuthProvider):
         json_content = await self.get_raw_token_response(code, url)
         token = json_content.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -679,7 +489,7 @@ class AWSCognitoOAuthProvider(OAuthProvider):
         json = await self.get_raw_token_response(code, url)
         token = json.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -750,7 +560,7 @@ class GitlabOAuthProvider(OAuthProvider):
         json_content = await self.get_raw_token_response(code, url)
         token = json_content.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -838,7 +648,7 @@ class KeycloakOAuthProvider(OAuthProvider):
         token = json.get("access_token")
         refresh_token = json.get("refresh_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         self.refresh_token = refresh_token
         return token
 
@@ -866,13 +676,13 @@ class KeycloakOAuthProvider(OAuthProvider):
                 # required actions (unverified email, terms, ...). Direct
                 # grant cannot complete them - the frontend should send the
                 # user through the browser flow instead.
-                raise HTTPException(status_code=403, detail="accountnotsetup")
+                raise PermissionDeniedException(detail="accountnotsetup")
             # invalid_grant: do not disclose whether the user exists.
-            raise HTTPException(status_code=401, detail="credentialssignin")
+            raise NotAuthorizedException(detail="credentialssignin")
         response.raise_for_status()
         token = response.json().get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -936,7 +746,7 @@ class GenericOAuthProvider(OAuthProvider):
         json = await self.get_raw_token_response(code, url)
         token = json.get("access_token")
         if not token:
-            raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
+            raise ClientException(detail=ACCESS_TOKEN_MISSING)
         return token
 
     async def get_user_info(self, token: str):
@@ -959,8 +769,6 @@ class GenericOAuthProvider(OAuthProvider):
 providers = [
     GithubOAuthProvider(),
     GoogleOAuthProvider(),
-    AzureADOAuthProvider(),
-    AzureADHybridOAuthProvider(),
     OktaOAuthProvider(),
     Auth0OAuthProvider(),
     DescopeOAuthProvider(),

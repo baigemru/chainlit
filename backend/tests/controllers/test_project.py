@@ -24,7 +24,6 @@ the same choice for the same reason.
 """
 
 import uuid
-from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Set
 
 import pytest
@@ -32,6 +31,7 @@ import pytest_asyncio
 from advanced_alchemy.extensions.litestar import SQLAlchemyInitPlugin
 from litestar.di import Provide
 from litestar.testing import create_async_test_client
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from chainlit.controllers.project import ProjectController
 from chainlit.persistence import Persistence
@@ -42,7 +42,10 @@ from chainlit.persistence.records import (
     ThreadPatch,
 )
 from chainlit.security import chainlit_auth
-from tests.persistence.conftest import create_sqlite_engine, migrate
+from tests.persistence.conftest import database_url, engine
+
+# Re-exported so pytest finds the persistence fixtures from this module.
+__all__ = ["database_url", "engine"]
 
 # Long enough that PyJWT does not warn, which this repo's -W settings would
 # turn into an error.
@@ -94,12 +97,13 @@ class StubRegistry:
 
 
 @pytest_asyncio.fixture
-async def persistence(tmp_path: Path) -> AsyncIterator[Persistence]:
-    """A migrated, empty SQLite database, one per test."""
-    engine = create_sqlite_engine(tmp_path)
-    await migrate(engine)
-    yield Persistence.from_engine(engine)
-    await engine.dispose()
+async def persistence(engine: AsyncEngine) -> Persistence:
+    """A migrated, empty PostgreSQL database, one per test.
+
+    The ``engine`` fixture is the persistence suite's own -- there is one
+    dialect now, and the controllers are exercised on it.
+    """
+    return Persistence.from_engine(engine)
 
 
 @pytest.fixture
@@ -135,7 +139,7 @@ async def client(
 
 
 def login(client: Any, auth: Any, identifier: str) -> None:
-    client.cookies.set(auth.key, auth.mint(identifier))
+    client.cookies.set(auth.key, auth.create_token(identifier))
 
 
 # --------------------------------------------------------------------------

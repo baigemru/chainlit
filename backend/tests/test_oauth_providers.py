@@ -3,14 +3,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from litestar.exceptions import ClientException
 
 from chainlit.oauth_providers import (
     ACCESS_TOKEN_MISSING,
     Auth0OAuthProvider,
     AWSCognitoOAuthProvider,
-    AzureADHybridOAuthProvider,
-    AzureADOAuthProvider,
     DescopeOAuthProvider,
     GenericOAuthProvider,
     GithubOAuthProvider,
@@ -58,9 +56,9 @@ class TestOAuthProviderBase:
     def test_oauth_provider_get_env_prefix(self):
         """Test get_env_prefix converts id to uppercase with underscores."""
         provider = OAuthProvider()
-        provider.id = "azure-ad"
+        provider.id = "aws-cognito"
 
-        assert provider.get_env_prefix() == "AZURE_AD"
+        assert provider.get_env_prefix() == "AWS_COGNITO"
 
     def test_oauth_provider_get_prompt_returns_provider_specific(self):
         """Test get_prompt returns provider-specific prompt."""
@@ -224,7 +222,7 @@ class TestGithubOAuthProvider:
                     return_value=mock_response
                 )
 
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(ClientException) as exc_info:
                     await provider.get_token("test_code", "http://localhost")
 
                 assert exc_info.value.status_code == 400
@@ -357,124 +355,6 @@ class TestGoogleOAuthProvider:
                 assert user.identifier == "user@gmail.com"
                 assert user.metadata["provider"] == "google"
                 assert user.metadata["image"] == "https://google.com/photo.jpg"
-
-
-class TestAzureADOAuthProvider:
-    """Test suite for AzureADOAuthProvider."""
-
-    def test_azure_ad_provider_initialization(self):
-        """Test AzureADOAuthProvider initialization."""
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_CLIENT_ID": "azure_client_id",
-                "OAUTH_AZURE_AD_CLIENT_SECRET": "azure_secret",
-                "OAUTH_AZURE_AD_TENANT_ID": "tenant_123",
-            },
-        ):
-            provider = AzureADOAuthProvider()
-
-            assert provider.id == "azure-ad"
-            assert provider.client_id == "azure_client_id"
-            assert provider.client_secret == "azure_secret"
-            assert "tenant" in provider.authorize_params
-            assert provider.authorize_params["tenant"] == "tenant_123"
-
-    def test_azure_ad_single_tenant_urls(self):
-        """Test Azure AD uses tenant-specific URLs when single tenant enabled."""
-        # Azure AD URLs are set at class definition time, need to reload module
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_CLIENT_ID": "azure_id",
-                "OAUTH_AZURE_AD_CLIENT_SECRET": "azure_secret",
-                "OAUTH_AZURE_AD_TENANT_ID": "tenant_abc",
-                "OAUTH_AZURE_AD_ENABLE_SINGLE_TENANT": "true",
-            },
-            clear=False,
-        ):
-            from importlib import reload
-
-            import chainlit.oauth_providers as oauth_module
-
-            reload(oauth_module)
-
-            provider = oauth_module.AzureADOAuthProvider()
-
-            assert "tenant_abc" in provider.authorize_url
-            assert "tenant_abc" in provider.token_url
-
-    @pytest.mark.asyncio
-    async def test_azure_ad_get_token_with_refresh_token(self):
-        """Test Azure AD get_token stores refresh token."""
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_CLIENT_ID": "azure_id",
-                "OAUTH_AZURE_AD_CLIENT_SECRET": "azure_secret",
-                "OAUTH_AZURE_AD_TENANT_ID": "tenant_123",
-            },
-        ):
-            provider = AzureADOAuthProvider()
-
-            mock_response = Mock()
-            mock_response.json.return_value = {
-                "access_token": "azure_access_token",
-                "refresh_token": "azure_refresh_token",
-            }
-            mock_response.raise_for_status = Mock()
-
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
-                    return_value=mock_response
-                )
-
-                token = await provider.get_token(
-                    "auth_code", "http://localhost/callback"
-                )
-
-                assert token == "azure_access_token"
-                assert provider._refresh_token == "azure_refresh_token"
-
-    @pytest.mark.asyncio
-    async def test_azure_ad_get_user_info_with_photo(self):
-        """Test Azure AD get_user_info includes photo when available."""
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_CLIENT_ID": "azure_id",
-                "OAUTH_AZURE_AD_CLIENT_SECRET": "azure_secret",
-                "OAUTH_AZURE_AD_TENANT_ID": "tenant_123",
-            },
-        ):
-            provider = AzureADOAuthProvider()
-            provider._refresh_token = "refresh_token_123"
-
-            mock_user_response = Mock()
-            mock_user_response.json.return_value = {
-                "userPrincipalName": "user@company.com",
-                "displayName": "Test User",
-            }
-            mock_user_response.raise_for_status = Mock()
-
-            mock_photo_response = Mock()
-            mock_photo_response.aread = AsyncMock(return_value=b"photo_data")
-            mock_photo_response.headers = {"Content-Type": "image/jpeg"}
-
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_get = AsyncMock(
-                    side_effect=[mock_user_response, mock_photo_response]
-                )
-                mock_client.return_value.__aenter__.return_value.get = mock_get
-
-                azure_user, user = await provider.get_user_info("test_token")
-
-                assert azure_user["userPrincipalName"] == "user@company.com"
-                assert "image" in azure_user
-                assert isinstance(user, User)
-                assert user.identifier == "user@company.com"
-                assert user.metadata["provider"] == "azure-ad"
-                assert user.metadata["refresh_token"] == "refresh_token_123"
 
 
 class TestOktaOAuthProvider:
@@ -651,102 +531,6 @@ class TestGenericOAuthProvider:
             provider = GenericOAuthProvider()
 
             assert provider.user_identifier == "username"
-
-
-class TestAzureADHybridOAuthProvider:
-    """Test suite for AzureADHybridOAuthProvider."""
-
-    def test_azure_ad_hybrid_provider_initialization(self):
-        """Test AzureADHybridOAuthProvider initialization."""
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_HYBRID_CLIENT_ID": "hybrid_client_id",
-                "OAUTH_AZURE_AD_HYBRID_CLIENT_SECRET": "hybrid_secret",
-                "OAUTH_AZURE_AD_HYBRID_TENANT_ID": "tenant_456",
-            },
-        ):
-            provider = AzureADHybridOAuthProvider()
-
-            assert provider.id == "azure-ad-hybrid"
-            assert provider.client_id == "hybrid_client_id"
-            assert provider.client_secret == "hybrid_secret"
-            assert "tenant" in provider.authorize_params
-            assert provider.authorize_params["tenant"] == "tenant_456"
-            assert provider.authorize_params["response_type"] == "code id_token"
-            assert provider.authorize_params["response_mode"] == "form_post"
-            assert "nonce" in provider.authorize_params
-
-    @pytest.mark.asyncio
-    async def test_azure_ad_hybrid_get_token_success(self):
-        """Test AzureADHybrid get_token with successful response."""
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_HYBRID_CLIENT_ID": "hybrid_id",
-                "OAUTH_AZURE_AD_HYBRID_CLIENT_SECRET": "hybrid_secret",
-                "OAUTH_AZURE_AD_HYBRID_TENANT_ID": "tenant_789",
-            },
-        ):
-            provider = AzureADHybridOAuthProvider()
-
-            mock_response = Mock()
-            mock_response.json.return_value = {
-                "access_token": "hybrid_access_token",
-                "refresh_token": "hybrid_refresh_token",
-            }
-            mock_response.raise_for_status = Mock()
-
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
-                    return_value=mock_response
-                )
-
-                token = await provider.get_token(
-                    "auth_code", "http://localhost/callback"
-                )
-
-                assert token == "hybrid_access_token"
-                assert provider._refresh_token == "hybrid_refresh_token"
-
-    @pytest.mark.asyncio
-    async def test_azure_ad_hybrid_get_user_info_success(self):
-        """Test AzureADHybrid get_user_info with successful response."""
-        with patch.dict(
-            os.environ,
-            {
-                "OAUTH_AZURE_AD_HYBRID_CLIENT_ID": "hybrid_id",
-                "OAUTH_AZURE_AD_HYBRID_CLIENT_SECRET": "hybrid_secret",
-                "OAUTH_AZURE_AD_HYBRID_TENANT_ID": "tenant_789",
-            },
-        ):
-            provider = AzureADHybridOAuthProvider()
-            provider._refresh_token = "refresh_token_hybrid"
-
-            mock_user_response = Mock()
-            mock_user_response.json.return_value = {
-                "userPrincipalName": "hybrid@company.com",
-                "displayName": "Hybrid User",
-            }
-            mock_user_response.raise_for_status = Mock()
-
-            mock_photo_response = Mock()
-            mock_photo_response.aread = AsyncMock(return_value=b"photo_bytes")
-            mock_photo_response.headers = {"Content-Type": "image/png"}
-
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_get = AsyncMock(
-                    side_effect=[mock_user_response, mock_photo_response]
-                )
-                mock_client.return_value.__aenter__.return_value.get = mock_get
-
-                azure_user, user = await provider.get_user_info("test_token")
-
-                assert azure_user["userPrincipalName"] == "hybrid@company.com"
-                assert isinstance(user, User)
-                assert user.identifier == "hybrid@company.com"
-                assert user.metadata["provider"] == "azure-ad"
-                assert user.metadata["refresh_token"] == "refresh_token_hybrid"
 
 
 class TestDescopeOAuthProvider:

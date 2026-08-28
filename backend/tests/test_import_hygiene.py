@@ -8,8 +8,8 @@ departing library anywhere fails here, and removing the last one from a module
 requires deleting its line.
 
 ``starlette`` is deliberately absent from the banned list. It cannot leave the
-install -- ``mcp`` pins it -- so banning it would be a rule the project has
-already decided not to follow.
+install while the old FastAPI stack is still running -- so banning it would be
+a rule the project has already decided not to follow.
 """
 
 import ast
@@ -46,11 +46,7 @@ REMAINING: dict[str, frozenset[str]] = {
     "data/acl.py": frozenset({"fastapi"}),
     "element.py": frozenset({"pydantic"}),
     "input_widget.py": frozenset({"pydantic"}),
-    "langchain/callbacks.py": frozenset({"pydantic"}),
-    "mcp.py": frozenset({"pydantic"}),
     "mode.py": frozenset({"dataclasses_json"}),
-    "oauth_providers.py": frozenset({"fastapi"}),
-    "semantic_kernel/__init__.py": frozenset({"pydantic"}),
     "server.py": frozenset({"fastapi"}),
     "sync.py": frozenset({"asyncer", "syncer"}),
     "types.py": frozenset({"dataclasses_json", "pydantic"}),

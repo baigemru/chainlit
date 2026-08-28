@@ -1,26 +1,22 @@
-"""JWT authentication, on the cookie the browsers already hold.
+"""JWT authentication, on a cookie.
 
 The hand-rolled ``SecurityBase`` subclass and the two FastAPI dependencies
-are replaced by ``JWTCookieAuth``. Two things make that more than a
+are replaced by stock ``JWTCookieAuth``. Two things make that more than a
 translation: it is middleware, so it also runs in the **websocket** scope --
 which is the only place a Chainlit session actually lives, and where the
-browser cannot set an ``Authorization`` header -- and it is strict about a
-``sub`` claim the old token never had.
+browser cannot set an ``Authorization`` header -- and the token is a stock
+``Token``, so what the old stack minted (no ``sub``, claims at the top
+level) is refused and every browser logs in once more at cutover.
 """
 
 import jwt as pyjwt
 import pytest
 from litestar import Request, WebSocket, get, websocket_listener
+from litestar.security.jwt import Token
 from litestar.testing import create_test_client
 
 from chainlit.plugin import ChainlitPlugin
-from chainlit.security import (
-    ChainlitToken,
-    Identity,
-    chainlit_auth,
-    cookie_settings,
-    token_from_cookies,
-)
+from chainlit.security import ChainlitAuth, Identity, chainlit_auth
 
 SECRET = "test-secret-not-a-real-one-but-long-enough-for-hs256"
 COOKIE = "access_token"
@@ -69,8 +65,12 @@ def _client(**kwargs):
     )
 
 
+def _token(auth=None, identifier="ada", **extras) -> str:
+    return (auth or _auth()).create_token(identifier=identifier, token_extras=extras)
+
+
 def _legacy_token(**claims) -> str:
-    """A token in exactly the shape ``chainlit/auth/jwt.py`` mints."""
+    """A token in exactly the shape ``chainlit/auth/jwt.py`` minted."""
     from datetime import UTC, datetime, timedelta
 
     payload = {
@@ -89,7 +89,7 @@ def _legacy_token(**claims) -> str:
 
 def test_a_valid_cookie_populates_the_user():
     with _client() as client:
-        client.cookies.set(COOKIE, _auth().mint("ada", display_name="Ada"))
+        client.cookies.set(COOKIE, _token(display_name="Ada"))
         response = client.get("/whoami")
 
     assert response.status_code == 200
@@ -146,81 +146,104 @@ def test_a_public_handler_must_not_touch_the_user():
         assert client.get("/public/touching-user").status_code == 500
 
 
-# --- the wire shape the old stack left behind --------------------------------
+# --- the token ---------------------------------------------------------------
 
 
-def test_a_token_minted_by_the_old_stack_is_accepted():
-    """Live browsers hold cookies with no ``sub`` claim. ``Token.decode``
-    requires one and 401s without it."""
+def test_a_token_minted_by_the_old_stack_is_refused():
+    """No ``sub`` claim: ``Token.decode`` requires one. The cost is one
+    re-login per browser at cutover, which the owner accepted over keeping
+    a backfill for a payload nothing mints any more."""
     with _client() as client:
         client.cookies.set(COOKIE, _legacy_token())
-        response = client.get("/whoami")
-
-    assert response.status_code == 200
-    assert response.json() == {"identifier": "ada", "display_name": "Ada"}
-
-
-def test_a_token_with_neither_sub_nor_identifier_is_a_401():
-    with _client() as client:
-        client.cookies.set(COOKIE, _legacy_token(identifier=""))
         assert client.get("/whoami").status_code == 401
 
 
-def test_a_minted_token_keeps_the_old_claims_at_the_top_level():
-    """``extras`` nests unknown claims. The old payload put identifier,
-    display_name and metadata at the top, and anything still reading those
-    cookies -- including a rollback to the old stack -- expects them there."""
-    encoded = _auth().mint("ada", display_name="Ada", metadata={"role": "admin"})
-    payload = pyjwt.decode(encoded, SECRET, algorithms=["HS256"])
+def test_the_extras_round_trip_through_the_middleware():
+    """``display_name`` and ``metadata`` ride in ``extras``, and the
+    ``retrieve_user_handler`` has to put them back on ``connection.user``:
+    ``/user`` and the session both read them from there."""
 
-    assert payload["identifier"] == "ada"
-    assert payload["display_name"] == "Ada"
-    assert payload["metadata"] == {"role": "admin"}
-    assert payload["sub"] == "ada"
+    @get("/me")
+    async def me(request: Request) -> dict:
+        user: Identity = request.user
+        return {
+            "identifier": user.identifier,
+            "display_name": user.display_name,
+            "metadata": user.metadata,
+        }
+
+    with create_test_client(
+        route_handlers=[me], plugins=[ChainlitPlugin(auth=_auth())], debug=False
+    ) as client:
+        client.cookies.set(
+            COOKIE, _token(display_name="Ada", metadata={"role": "admin"})
+        )
+        assert client.get("/me").json() == {
+            "identifier": "ada",
+            "display_name": "Ada",
+            "metadata": {"role": "admin"},
+        }
 
 
-def test_the_chunked_cookie_is_reassembled():
-    """Tokens over 3000 characters are split across ``access_token_0``,
-    ``access_token_1``... Litestar's own middleware reads one cookie, so
-    exactly the users with large OAuth metadata would get a 401."""
-    token = _auth().mint("ada", display_name="Ada", metadata={"blob": "x" * 4000})
-    assert len(token) > 3000
-    chunks = [token[i : i + 3000] for i in range(0, len(token), 3000)]
-    assert len(chunks) > 1
-
+def test_claims_at_the_top_level_are_read_as_extras():
+    """Stock ``Token.decode`` sweeps unknown claims into ``extras``; a token
+    a host minted by hand with ``sub`` plus top-level claims still works."""
     with _client() as client:
-        for index, chunk in enumerate(chunks):
-            client.cookies.set(f"{COOKIE}_{index}", chunk)
-        response = client.get("/whoami")
+        client.cookies.set(COOKIE, _legacy_token(sub="ada"))
+        assert client.get("/whoami").json() == {
+            "identifier": "ada",
+            "display_name": "Ada",
+        }
 
-    assert response.status_code == 200
-    assert response.json()["identifier"] == "ada"
+
+# --- the cookie ---------------------------------------------------------------
 
 
-def test_reassembly_stops_at_the_first_gap():
-    """A leftover ``_2`` from a previous, longer token must not be glued onto
-    a shorter one."""
-    assert token_from_cookies({"t_0": "a", "t_1": "b", "t_3": "z"}, "t") == "ab"
-    assert token_from_cookies({}, "t") is None
+def test_the_middleware_reads_the_cookie_the_instance_names():
+    """One auth instance, one cookie name. A host that passes
+    ``ChainlitAuth(key="foo")`` is read at ``foo`` -- not at whatever the
+    environment says."""
+    auth = ChainlitAuth(token_secret=SECRET, key="foo")
+    with _client(auth=auth) as client:
+        client.cookies.set("access_token", _token(auth))
+        assert client.get("/whoami").status_code == 401
+        client.cookies.clear()
+        client.cookies.set("foo", _token(auth))
+        assert client.get("/whoami").status_code == 200
 
 
 def test_the_cookie_name_comes_from_the_environment(monkeypatch):
     monkeypatch.setenv("CHAINLIT_AUTH_COOKIE_NAME", "chainlit_token")
-    assert cookie_settings().name == "chainlit_token"
     assert _auth().key == "chainlit_token"
+
+
+def test_the_cookie_path_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("CHAINLIT_AUTH_COOKIE_PATH", "/chat")
+    assert _auth().path == "/chat"
 
 
 def test_samesite_none_forces_a_secure_cookie(monkeypatch):
     monkeypatch.setenv("CHAINLIT_COOKIE_SAMESITE", "none")
-    settings = cookie_settings()
-    assert settings.samesite == "none"
-    assert settings.secure is True
+    auth = _auth()
+    assert auth.samesite == "none"
+    assert auth.secure is True
 
 
 def test_a_nonsense_samesite_is_refused(monkeypatch):
     monkeypatch.setenv("CHAINLIT_COOKIE_SAMESITE", "sometimes")
     with pytest.raises(ValueError, match="CHAINLIT_COOKIE_SAMESITE"):
-        cookie_settings()
+        _auth()
+
+
+def test_a_chunked_cookie_is_not_reassembled():
+    """The old writer split long tokens across ``<name>_0``, ``<name>_1``.
+    Nothing writes those any more and nothing reads them: a browser still
+    holding them is logged out, not half logged in."""
+    token = _token(metadata={"blob": "x" * 4000})
+    with _client() as client:
+        for index in range(0, len(token), 3000):
+            client.cookies.set(f"{COOKIE}_{index // 3000}", token[index : index + 3000])
+        assert client.get("/whoami").status_code == 401
 
 
 # --- the websocket scope -----------------------------------------------------
@@ -232,7 +255,7 @@ def test_the_cookie_authenticates_the_websocket():
     websocket scope because ``AbstractAuthenticationMiddleware.scopes``
     defaults to ``{http, websocket}``."""
     with _client() as client:
-        client.cookies.set(COOKIE, _auth().mint("ada"))
+        client.cookies.set(COOKIE, _token())
         with client.websocket_connect("/probe-ws") as socket:
             socket.send_text("ping")
             assert socket.receive_json() == {"identifier": "ada"}
@@ -264,7 +287,7 @@ def test_a_secret_in_the_environment_turns_authentication_on(monkeypatch):
     monkeypatch.setenv("CHAINLIT_AUTH_SECRET", SECRET)
     plugin = ChainlitPlugin()
     assert plugin.auth is not None
-    assert plugin.auth.token_cls is ChainlitToken
+    assert plugin.auth.token_cls is Token
 
 
 def test_authentication_can_be_switched_off_explicitly(monkeypatch):
@@ -286,7 +309,7 @@ def test_litestar_is_the_one_deciding_the_token_expiry():
     from datetime import UTC, datetime, timedelta
 
     with pytest.raises(Exception):  # noqa: PT011
-        ChainlitToken(sub="ada", exp=datetime.now(UTC) - timedelta(hours=1))
+        Token(sub="ada", exp=datetime.now(UTC) - timedelta(hours=1))
 
 
 # --- auth on, and a browser that has not logged in yet -----------------------

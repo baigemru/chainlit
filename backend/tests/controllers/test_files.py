@@ -122,7 +122,7 @@ def client(auth, registry: StubRegistry, app_root: Path) -> Iterator[Any]:
 
 
 def login(client: Any, auth: Any, identifier: str) -> None:
-    client.cookies.set(auth.key, auth.mint(identifier))
+    client.cookies.set(auth.key, auth.create_token(identifier))
 
 
 def upload(client: Any, session_id: str, content: bytes = b"hello", **query: Any):

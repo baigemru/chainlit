@@ -1,4 +1,4 @@
-import { IElement, IThread, IUser } from 'src/types';
+import { IElement, IThread, IThreadQuery, IUser } from 'src/types';
 
 import { IAction } from 'src/types/action';
 import { IFeedback } from 'src/types/feedback';
@@ -6,19 +6,11 @@ import { IFeedback } from 'src/types/feedback';
 export * from './hooks/auth';
 export * from './hooks/api';
 
-export interface IThreadFilters {
-  search?: string;
-  feedback?: number;
-}
-
+/** Relay-style page info, as the backend's ``PageInfoRecord`` serializes it. */
 export interface IPageInfo {
   hasNextPage: boolean;
+  startCursor?: string;
   endCursor?: string;
-}
-
-export interface IPagination {
-  first: number;
-  cursor?: string | number;
 }
 
 export class ClientError extends Error {
@@ -219,16 +211,15 @@ export class ChainlitAPI extends APIBase {
     return res.json();
   }
 
-  async listThreads(
-    pagination: IPagination,
-    filter: IThreadFilters
-  ): Promise<{
+  async listThreads(query: IThreadQuery): Promise<{
     pageInfo: IPageInfo;
     data: IThread[];
   }> {
-    const res = await this.post(`/project/threads`, { pagination, filter });
+    const res = await this.post(`/project/threads`, query);
+    const page = await res.json();
 
-    return res.json();
+    // The backend omits defaults, so an empty page has no `data` key at all.
+    return { pageInfo: page.pageInfo, data: page.data ?? [] };
   }
 
   async renameThread(threadId: string, name: string) {

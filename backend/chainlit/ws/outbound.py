@@ -110,6 +110,31 @@ class _Close:
         self.reason = reason
 
 
+class _Stop:
+    """A close this socket is committed to, and how much it takes with it.
+
+    Two questions that used to be one, which is how a heartbeat timeout came
+    to close the *queue*: whether the backlog goes with the socket
+    (``discard``), and whether the queue itself is finished (``terminal``).
+    A session whose peer went silent wants neither -- it is still holding a
+    question, and what it queued is a continuation the next socket is owed.
+    """
+
+    __slots__ = ("code", "discard", "done", "reason", "terminal")
+
+    def __init__(
+        self, code: int, reason: str, *, discard: bool, terminal: bool
+    ) -> None:
+        self.code = code
+        self.reason = reason
+        self.discard = discard
+        self.terminal = terminal
+        #: Set once nothing can write to this socket again -- after the close
+        #: frame has been attempted, not before, so that a writer wedged
+        #: inside ``socket.close`` is forced like any other.
+        self.done = asyncio.Event()
+
+
 _Item = Union["ServerMsg", _Close]
 
 
@@ -135,7 +160,16 @@ class Outbound:
     issued is on the wire before the close frame is. ``abort`` is not: it
     drops the backlog and closes now, which is what a policy failure wants.
     Either way the *writer* performs it, so a close cannot interleave with a
-    frame, and both are idempotent.
+    frame, and both are idempotent, and both are terminal for the queue.
+
+    ``drop`` is the third, and the one the socket's own failures use: it
+    ends the *connection* and leaves the queue exactly as it was. The
+    distinction is not decoration. A probe that goes unanswered says nothing
+    about the conversation -- the session may be parked on a question and
+    the client's recovery is to reconnect -- so a heartbeat timeout that
+    aborted left a session that could never take another writer, and the
+    handshake had to hand it a whole new queue to get around that, throwing
+    the backlog away and giving "which queue is this session's" two answers.
 
     With one deliberate exception, and it is the important one: a writer that
     has stopped draining cannot perform anything. An abort it has not
@@ -173,7 +207,7 @@ class Outbound:
 
         self._closed = False
         self._closed_event = asyncio.Event()
-        self._fatal: Optional[tuple[int, str]] = None
+        self._stop: Optional[_Stop] = None
 
     # ------------------------------------------------------------ observation
 
@@ -200,16 +234,6 @@ class Outbound:
     def attached(self) -> bool:
         return self._writer is not None
 
-    @property
-    def socket(self) -> Optional["WebSocket[Any, Any, Any]"]:
-        """The socket the writer is draining onto, if one is attached.
-
-        Identity is the point: a route handler about to tear a connection
-        down asks whether the session's writer is still *its* socket, or a
-        newer one has taken the session over in the meantime.
-        """
-        return self._socket
-
     # -------------------------------------------------------------- producers
 
     def send(self, msg: "ServerMsg", *, first: bool = False) -> bool:
@@ -227,7 +251,7 @@ class Outbound:
         -- and the client is meant to come straight back, which a catch-all
         "internal server error" tells it nothing about.
         """
-        if self._closed or self._fatal is not None:
+        if self._closed or self._stop is not None:
             logger.debug(
                 "Outbound %s refused a %s frame: the connection is closing.",
                 self._name,
@@ -243,7 +267,17 @@ class Outbound:
                 self._pending,
                 _tag_of(msg),
             )
-            self.abort(CloseCode.BACKLOG_EXCEEDED, "outbound backlog exceeded")
+            # The backlog goes with the socket, and only the socket. Keeping
+            # the frames would hand the next writer a queue that is already
+            # over the bound -- it would overflow on its first send, and the
+            # reconnect the client is told to make could never succeed. The
+            # queue itself survives, because that reconnect has to.
+            self._begin_stop(
+                CloseCode.BACKLOG_EXCEEDED,
+                "outbound backlog exceeded",
+                discard=True,
+                terminal=False,
+            )
             return False
 
         if first:
@@ -277,12 +311,20 @@ class Outbound:
         )
         self._wake.set()
 
-    async def detach(self) -> None:
+    async def detach(self, socket: Optional["WebSocket[Any, Any, Any]"] = None) -> None:
         """Stop the writer, keeping whatever it had not sent.
 
         Not a close: the queue stays usable and a later ``attach`` picks the
         backlog up where this one left it.
+
+        Name the socket to detach only *your* writer. A handler unwinding
+        after its socket died has no way of knowing whether a newer one has
+        attached since -- it is one await away from finding out -- and a
+        detach that took the wrong writer away would leave the arriving
+        client's queue with nothing draining it.
         """
+        if socket is not None and self._socket is not socket:
+            return
         await self._reap_writer()
 
     async def _run(self, socket: "WebSocket[Any, Any, Any]") -> None:
@@ -294,6 +336,7 @@ class Outbound:
             # A defect in the writer must close the socket loudly rather than
             # leave a session with a queue nothing is draining.
             logger.exception("Outbound %s writer failed", self._name)
+            self._mark_closed()
             await self._shutdown(socket, CloseCode.INTERNAL, "outbound writer failed")
         finally:
             # However this writer ends -- close, socket loss, cancellation
@@ -305,16 +348,19 @@ class Outbound:
 
     async def _pump(self, socket: "WebSocket[Any, Any, Any]") -> None:
         while True:
-            if self._fatal is not None:
-                code, reason = self._fatal
-                self._items.clear()
-                self._pending = 0
-                await self._shutdown(socket, code, reason)
+            stop = self._stop
+            if stop is not None:
+                # The state change first, the I/O after: from here nothing
+                # can queue another frame onto a socket that is going away,
+                # whether or not the close frame itself gets out.
+                self._settle(stop)
+                await self._shutdown(socket, stop.code, stop.reason)
+                stop.done.set()
                 return
 
             if not self._items:
                 self._wake.clear()
-                if not self._items and self._fatal is None:
+                if not self._items and self._stop is None:
                     await self._wake.wait()
                 continue
 
@@ -325,6 +371,7 @@ class Outbound:
 
             if isinstance(item, _Close):
                 self._items.popleft()
+                self._mark_closed()
                 await self._shutdown(socket, item.code, item.reason)
                 return
 
@@ -353,6 +400,7 @@ class Outbound:
                     len(frame),
                     MAX_FRAME_BYTES,
                 )
+                self._mark_closed()
                 await self._shutdown(
                     socket,
                     CloseCode.FRAME_TOO_LARGE,
@@ -388,32 +436,87 @@ class Outbound:
     def abort(self, code: int = CloseCode.INTERNAL, reason: str = "") -> None:
         """Close now, dropping whatever is queued. Synchronous, idempotent.
 
-        For a failure that has already made the connection meaningless. The
-        writer performs the close when it can; with no writer attached there
-        is no socket to close, so the queue simply becomes closed.
+        Terminal: for a failure that has made the *session* meaningless, not
+        merely its socket. Nothing may be queued afterwards. A socket that
+        failed on its own is ``drop``'s business.
 
-        The writer often *cannot*, and the overflow case is the proof: a
-        backlog only fills because the peer stopped reading, which means the
-        writer is parked inside ``send_text`` waiting for a window that is
-        not coming. A flag it will read "next time round the loop" would
-        never be read. So an abort that is not answered within
+        The writer performs the close when it can; with no writer attached
+        there is no socket to close, so the queue simply becomes closed.
+        """
+        self._begin_stop(int(code), reason, discard=True, terminal=True)
+
+    async def drop(self, code: int = CloseCode.INTERNAL, reason: str = "") -> None:
+        """End the connection and keep the queue. Awaits the writer's exit.
+
+        The per-connection close. Everything queued stays queued, because
+        the reason this socket is going -- a probe unanswered, a frame the
+        client had no business sending -- says nothing about the
+        conversation, and the client's response to all of them is to come
+        straight back and be handed what it missed.
+
+        Returns only once the writer is gone, so the caller may attach the
+        next one immediately, whether or not the close frame reached a peer
+        that had stopped listening.
+        """
+        stop = self._begin_stop(int(code), reason, discard=False, terminal=False)
+        if stop is None:
+            return
+        await self._await_closer()
+        await self._reap_writer()
+
+    def _begin_stop(
+        self, code: int, reason: str, *, discard: bool, terminal: bool
+    ) -> Optional[_Stop]:
+        """Commit the socket to a close, and guarantee it happens.
+
+        The writer often *cannot* perform it, and the overflow case is the
+        proof: a backlog only fills because the peer stopped reading, which
+        means the writer is parked inside ``send_text`` waiting for a window
+        that is not coming. A flag it will read "next time round the loop"
+        would never be read. So a stop that is not answered within
         ``FORCE_CLOSE_GRACE`` cancels the writer and sends the close itself
         -- safe precisely because the writer is the only other thing that
         touches the send side, and it is gone by then.
         """
-        if self._closed or self._fatal is not None:
-            return
-        self._fatal = (int(code), reason)
+        if self._closed:
+            return None
+        if self._stop is not None:
+            # Already going. A terminal request upgrades one that is not: a
+            # session torn down while its socket is being dropped must still
+            # end with a queue nothing can write to.
+            self._stop.terminal = self._stop.terminal or terminal
+            self._stop.discard = self._stop.discard or discard
+            return self._stop
+
+        stop = _Stop(code, reason, discard=discard, terminal=terminal)
+        self._stop = stop
         self._wake.set()
         if self._writer is None or self._writer.done():
-            self._mark_closed()
-            return
-        self._closer = asyncio.ensure_future(self._force(int(code), reason))
+            # Nothing is draining the queue, so there is no socket of ours
+            # to close and nothing to wait for.
+            self._settle(stop)
+            stop.done.set()
+            return stop
+        self._closer = asyncio.ensure_future(self._force(stop))
+        return stop
 
-    async def _force(self, code: int, reason: str) -> None:
-        """Make an abort terminal even when the writer cannot answer it."""
-        if await self._wait_closed(FORCE_CLOSE_GRACE):
+    def _settle(self, stop: _Stop) -> None:
+        """Apply what the stop takes with it, once no writer can send again."""
+        if stop.discard:
+            self._items.clear()
+            self._pending = 0
+        if stop.terminal:
+            self._mark_closed()
+        elif self._stop is stop:
+            self._stop = None
+
+    async def _force(self, stop: _Stop) -> None:
+        """Make a stop happen even when the writer cannot answer it."""
+        try:
+            await asyncio.wait_for(stop.done.wait(), FORCE_CLOSE_GRACE)
             return
+        except TimeoutError:
+            pass
         logger.warning(
             "Outbound %s writer did not answer the close in %ss; cancelling it "
             "and closing the socket directly.",
@@ -425,7 +528,7 @@ class Outbound:
         if socket is not None:
             try:
                 await asyncio.wait_for(
-                    socket.close(code=code, reason=reason), FORCE_CLOSE_GRACE
+                    socket.close(code=stop.code, reason=stop.reason), FORCE_CLOSE_GRACE
                 )
             except asyncio.CancelledError:
                 raise
@@ -439,7 +542,8 @@ class Outbound:
                     self._name,
                     type(exc).__name__,
                 )
-        self._mark_closed()
+        self._settle(stop)
+        stop.done.set()
 
     async def close(
         self,
@@ -458,11 +562,13 @@ class Outbound:
         """
         if self._closed:
             return
-        if self._writer is None or self._writer.done():
-            # Nothing is draining the queue, so there is nothing to flush and
-            # no socket of ours to close politely.
+        if self._stop is not None or self._writer is None or self._writer.done():
+            # Nothing to flush: either no writer is draining the queue, or
+            # this socket is already committed to a close of its own and the
+            # only thing left to add is that the queue does not survive it.
+            self.abort(code, reason)
+            await self._await_closer()
             await self._reap_writer()
-            self._mark_closed()
             return
 
         self._items.append(_Close(int(code), reason))
@@ -484,7 +590,7 @@ class Outbound:
             self._mark_closed()
 
     async def wait_closed(self) -> None:
-        """Block until the socket has been closed by the writer."""
+        """Block until the queue is finished and its socket closed."""
         await self._closed_event.wait()
 
     async def _await_closer(self) -> None:
@@ -524,7 +630,6 @@ class Outbound:
         self, socket: "WebSocket[Any, Any, Any]", code: int, reason: str
     ) -> None:
         """Send the close frame. Only ever called from the writer."""
-        self._mark_closed()
         try:
             await socket.close(code=int(code), reason=reason)
         except asyncio.CancelledError:

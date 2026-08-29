@@ -533,6 +533,7 @@ class _Run:
             session,
             thread_store=self._store_during_restore(session),
             fresh_page_load=self.fresh_page_load,
+            resumed_thread=arrival.resumed_thread,
         )
         await self.runner.on_ready(arrival)
         await self._settle()

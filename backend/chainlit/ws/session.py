@@ -60,6 +60,7 @@ from chainlit.ws.outbound import Outbound
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from chainlit.protocol.server import ServerMsg
+    from chainlit.ws.connection import Connection
 
 __all__ = [
     "CallbackRunner",
@@ -238,14 +239,15 @@ class Session:
         #: connected one showing the same question is somebody's open tab.
         self.connected = True
 
-        #: Sequence number of the last heartbeat the client acknowledged.
-        #: Zero means it has not answered one yet, which is also the state a
-        #: session is in for its first interval -- so the probe compares
-        #: against the sequence it sent, never against zero. Kept although
-        #: uvicorn pings the peer itself: a frozen tab answers protocol
-        #: pings from the browser and nothing from its JS, and the sweep
-        #: of abandoned questions has to be able to tell the two apart.
-        self.last_ack: int = 0
+        #: The connection that speaks for this session, and the counter it
+        #: numbers itself from. One owner, named: everything a handler does
+        #: on its way out -- marking the session disconnected, stopping the
+        #: writer, running ``on_chat_end`` -- is conditional on still being
+        #: this one, and the question used to be answered by comparing
+        #: socket objects through the queue, which the takeover had already
+        #: cleared. A live session was reaped on that answer.
+        self.current: Optional["Connection"] = None
+        self.generation = 0
 
         self.first_interaction: Optional[str] = None
         self.parent_thread_id: Optional[str] = None
@@ -256,8 +258,10 @@ class Session:
         #: thread are two writers, and FIFO is a per-writer promise.
         self.writer: Optional[Any] = None
 
-        #: Whether ``on_chat_start`` has run for this session. A session
-        #: reconnecting keeps it -- the hook is a beginning, not a greeting.
+        #: Whether this session's chat has begun. Written and read in one
+        #: place -- the arrival, where start-or-resume-or-nothing is decided
+        #: -- and kept across reconnects, because the hook it stands for is
+        #: a beginning and not a greeting.
         self.chat_started = False
 
         #: The thread this session resumed, once the resume has happened.
@@ -308,17 +312,18 @@ class Session:
 
     # ---------------------------------------------------------------- sending
 
-    def renew_outbound(self) -> None:
-        """Replace a closed queue with a fresh one, for the next socket.
+    def adopt(self, connection: "Connection") -> Optional["Connection"]:
+        """Hand the session to a new connection, and name the one it replaces.
 
-        A queue closes for good when its writer aborts the socket -- a
-        heartbeat that went unanswered, a backlog the peer stopped reading.
-        The session survives that (it may be parked on a question), and the
-        client's recovery from both is to reconnect; a session whose queue
-        can never take another writer would refuse exactly that reconnect.
+        The single point where "which transport speaks for this session"
+        changes. It happens before anything is queued or closed, so that
+        every loop still running for the previous connection can tell, at
+        its next await, that it is no longer the one to act.
         """
-        if self.outbound.closed:
-            self.outbound = Outbound(name=self.id)
+        self.generation += 1
+        connection.generation = self.generation
+        previous, self.current = self.current, connection
+        return previous
 
     def send(self, msg: "ServerMsg") -> bool:
         """Queue one frame for this session's client."""

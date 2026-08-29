@@ -26,8 +26,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import (
+    Any,
     Callable,
     List,
+    Mapping,
     Optional,
     Protocol,
     Sequence,
@@ -86,7 +88,19 @@ class ThreadStore(Protocol):
 
 @dataclass
 class Arrival:
-    """The outcome of one ``hello``, and the session it landed in."""
+    """The outcome of one ``hello``, and everything decided about it.
+
+    Also the handshake's own scratchpad. ``on_arrival`` decides what this
+    connection *is* -- a resume, a chat that has not started, a client
+    asking for a thread that is not there -- and both the replay and
+    ``on_ready`` need that answer; the two run on either side of
+    ``session.ready``, so it has to be carried rather than recomputed. It
+    used to travel as ``session.state["__resumed_thread"]`` and
+    ``["__thread_not_found"]``: string keys in the dict the *application*
+    keeps its own state in, popped by whoever read them first, and
+    persisted into thread metadata unless something remembered to filter
+    them out.
+    """
 
     outcome: ClaimOutcome
     session: Optional[Session]
@@ -94,6 +108,16 @@ class Arrival:
     #: Sessions this arrival supersedes. Already out of the registry; the
     #: caller still has to tear each one down.
     superseded: List[SessionEntry] = field(default_factory=list)
+    #: The stored thread this arrival resumed, if it resumed one. Both the
+    #: snapshot the replay sends and the dict the hooks receive.
+    resumed_thread: Optional[Mapping[str, Any]] = None
+    #: The thread the client asked for and did not get, if it asked for one
+    #: that is not there or is not its own. Reported after ``session.ready``.
+    missing_thread: Optional[str] = None
+    #: Whether this arrival begins a chat, and so owes it an ``on_chat_start``
+    #: once the screen is ready. Decided with the rest; a reconnect is not a
+    #: beginning and never carries it.
+    start_chat: bool = False
 
     @property
     def refused(self) -> bool:
@@ -222,6 +246,7 @@ async def restore(
     *,
     thread_store: Optional[ThreadStore] = None,
     fresh_page_load: bool = True,
+    resumed_thread: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Rebuild the client's screen, in the order it has to be rebuilt in.
 
@@ -239,9 +264,13 @@ async def restore(
     Nothing here deletes. The steps a resume takes away are hidden by
     ``controllers.project.hide_resume_deleted`` before the snapshot is
     built, and the same filter serves the HTTP read path.
+
+    ``resumed_thread`` is handed in rather than read off the session: what a
+    hello means is the runner's decision, made once in ``on_arrival``, and
+    the order the answer is drawn in is this module's.
     """
     entries: Sequence[TranscriptEntry] = list(session.transcript)
-    snapshot = session.state.get("__resumed_thread")
+    snapshot = resumed_thread
     if (
         not entries
         and snapshot is None

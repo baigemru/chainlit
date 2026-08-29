@@ -183,7 +183,17 @@ class ApplicationRunner:
     # ------------------------------------------------------------- handshake
 
     async def on_arrival(self, arrival: Arrival) -> None:
-        """State only. Nothing here may send: ``session.ready`` has not gone."""
+        """Decide what this hello means. The one place that decides it.
+
+        State only -- nothing here may send, because ``session.ready`` has
+        not gone out yet -- and the decision is recorded on the ``Arrival``
+        for ``on_ready`` to act on. Including ``chat_started``, which is set
+        here and nowhere else: a reconnect of this session arrives as
+        ``kept`` and returns on the first line, so a chat marked as started
+        only when its hooks are launched would look unstarted to the next
+        socket, and ``on_chat_start`` would run a fresh wizard under a
+        conversation that was already restored.
+        """
         session = arrival.session
         assert session is not None
         if arrival.outcome.value == "kept":
@@ -194,9 +204,16 @@ class ApplicationRunner:
         for entry in sweep_superseded(self.registry, session.thread_id, session):
             await self.teardown(entry.session)  # type: ignore[arg-type]
 
-        if await self._resume(session):
+        if await self._resume(session, arrival):
             return
         await self._claim_transit(session)
+        if not session.chat_started and self.code.on_chat_start:
+            # The flag is read as well as written: a session can reach this
+            # branch already started -- one minted for a handover carries
+            # the chat it was handed -- and a second beginning would put a
+            # fresh greeting under a conversation already in progress.
+            session.chat_started = True
+            arrival.start_chat = True
 
     async def _claim_transit(self, session: Session) -> None:
         if self.transit is None or session.first_interaction:
@@ -215,7 +232,7 @@ class ApplicationRunner:
             session, name or session.chat_profile or "transit", announce=False
         )
 
-    async def _resume(self, session: Session) -> bool:
+    async def _resume(self, session: Session, arrival: Arrival) -> bool:
         """Load the thread this session was opened on, if it is the user's.
 
         Ownership is checked before anything else and regardless of which
@@ -239,12 +256,12 @@ class ApplicationRunner:
             # ``session.ready``. Without it the client sat on a loader for a
             # thread that would never become current, while the server
             # quietly opened a fresh chat under the id it had asked for.
-            session.state["__thread_not_found"] = thread_id
+            arrival.missing_thread = thread_id
             return False
         if identifier is None or detail.user_identifier != identifier:
             # Not found, not forbidden: whether somebody else's thread
             # exists is not this user's to learn.
-            session.state["__thread_not_found"] = thread_id
+            arrival.missing_thread = thread_id
             await self._disown_thread(session)
             return False
         if not (self.code.on_chat_resume or self.code.on_thread_ready):
@@ -269,19 +286,13 @@ class ApplicationRunner:
         session.transcript[:] = _transcript_of(detail)
         session.first_interaction = "resume"
         session.resumed_thread_id = thread_id
-        # A resume *is* the start of this chat. Set here, not when the hooks
-        # are launched: a reconnect of this session (the client rebuilds its
-        # transport on a profile change) arrives as ``kept`` and skips the
-        # resume branch, and ``on_ready`` must not read the empty slot as a
-        # chat that never started and run ``on_chat_start`` over a resumed
-        # thread -- which put a fresh wizard under a restored conversation.
+        # A resume *is* the start of this chat.
         session.chat_started = True
         if session.writer is not None:
             session.writer.open_gate()
-        # Handed to on_ready, which launches the hooks once the screen is
-        # rebuilt. Stored on the session rather than returned: the two hooks
-        # do not share a frame.
-        session.state["__resumed_thread"] = _thread_dict(detail)
+        # The replay sends it as a snapshot; ``on_ready`` hands the same dict
+        # to the hooks once the screen has been rebuilt from it.
+        arrival.resumed_thread = _thread_dict(detail)
         return True
 
     async def _disown_thread(self, session: Session) -> None:
@@ -301,25 +312,28 @@ class ApplicationRunner:
             ).start()
 
     async def on_ready(self, arrival: Arrival) -> None:
-        """The screen is rebuilt; now the application may speak."""
+        """The screen is rebuilt; now the application may speak.
+
+        Carries out what ``on_arrival`` decided and decides nothing itself.
+        Every branch is the same connection's arrival read back, so a
+        reconnect -- which never reaches ``on_arrival``'s decision at all --
+        lands here with an arrival that says: say nothing, start nothing.
+        """
         session = arrival.session
         assert session is not None
         emitter = self._bind(session)
 
-        missing = session.state.pop("__thread_not_found", None)
-        if missing is not None:
+        if arrival.missing_thread is not None:
             session.send(
                 Error(
                     code=ErrorCode.THREAD_NOT_FOUND.value,
-                    message=f"thread {missing} not found",
+                    message=f"thread {arrival.missing_thread} not found",
                 )
             )
 
-        resumed = session.state.pop("__resumed_thread", None)
-        if resumed is not None:
-            self._launch(session, self._resume_hooks(session, resumed))
-        elif not session.chat_started and self.code.on_chat_start:
-            session.chat_started = True
+        if arrival.resumed_thread is not None:
+            self._launch(session, self._resume_hooks(session, arrival.resumed_thread))
+        elif arrival.start_chat:
             self._launch(session, self.code.on_chat_start())
 
         emitter.resync_task_indicator()

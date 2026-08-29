@@ -8,13 +8,23 @@ every inbound frame.
 
 So the handler runs a reader and a writer concurrently in one task group,
 and everything below is about the ways that arrangement goes wrong.
+
+The thing that keeps it from going wrong is ``Connection``: one object per
+accepted socket, and ``session.current`` says which one speaks. A session
+outlives its sockets and can be handed from one to the next mid-sentence,
+so every loop here asks whether it is still the current connection before
+it touches anything the session owns. Without that owner the question was
+answered by inference -- comparing socket objects through the send queue,
+consulting a flag another coroutine had just cleared -- and each inference
+was right only if the two handlers happened to be scheduled in the right
+order.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Mapping, Optional
 
 import anyio
 import msgspec
@@ -33,6 +43,7 @@ from chainlit.protocol.client import (
 from chainlit.protocol.codec import MAX_FRAME_BYTES, CloseCode, ErrorCode, decode_client
 from chainlit.protocol.server import Error, Heartbeat
 from chainlit.ws.handshake import Arrival, ThreadStore, arrive, ready_frame, restore
+from chainlit.ws.outbound import FORCE_CLOSE_GRACE
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import Session
 
@@ -41,6 +52,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "HEARTBEAT_INTERVAL_MS",
     "HELLO_DEADLINE_SECONDS",
+    "Connection",
     "make_websocket_handler",
 ]
 
@@ -96,6 +108,74 @@ class _Refused(Exception):
         super().__init__(reason)
         self.code = code
         self.reason = reason
+
+
+class Connection:
+    """One accepted socket, and everything true only while it is speaking.
+
+    The session is the conversation; this is the transport under it, and the
+    two have different lifetimes. What lives here is what a *second* socket
+    on the same session must not share:
+
+    ``generation`` -- the number the session gave this connection when it
+    adopted it. Never reused, so a stale loop's own number is enough to say
+    it is stale even after the session has moved on twice.
+
+    ``seq`` / ``last_ack`` -- the heartbeat's state. The probe is kept
+    although uvicorn pings the peer itself, because a frozen tab answers
+    the browser's protocol pings and nothing from its JavaScript, and the
+    sweep of abandoned questions has to tell the two apart. The counters
+    lived on the session until two loops on one session started timing each
+    other out: the old connection's probe was answered against the new
+    connection's counter, so the old loop declared the peer dead and closed
+    a socket it did not own. Zero means unanswered, which is also where
+    every connection starts -- so a probe compares against the sequence it
+    sent, never against zero.
+
+    ``current`` -- the only question any loop here has to ask. A connection
+    that has lost it does nothing further to the session: not marking it
+    disconnected, not stopping its writer, not closing its queue. Those
+    belong to whoever holds the session now.
+    """
+
+    __slots__ = ("generation", "last_ack", "seq", "session", "socket")
+
+    def __init__(self, session: Session, socket: WebSocket[Any, Any, Any]) -> None:
+        self.session = session
+        self.socket = socket
+        self.generation = 0
+        self.seq = 0
+        self.last_ack = 0
+
+    @property
+    def current(self) -> bool:
+        """Whether this connection still speaks for its session."""
+        return self.session.current is self
+
+    async def close(self, code: int, reason: str = "") -> None:
+        """Say goodbye to the peer, if it is still there to hear it.
+
+        Best-effort and bounded. On the ``websockets`` implementation
+        ``close`` awaits the closing handshake -- up to ten seconds against
+        a peer that has stopped answering -- and this is called from the
+        handler of the socket that replaced this one, which has a client
+        waiting on it. A goodbye nobody is left to read is not worth that.
+        """
+        try:
+            await asyncio.wait_for(
+                self.socket.close(code=code, reason=reason), FORCE_CLOSE_GRACE
+            )
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            logger.debug(
+                "connection %d of session %s did not close in %ss",
+                self.generation,
+                self.session.id,
+                FORCE_CLOSE_GRACE,
+            )
+        except Exception:  # pragma: no cover - a socket already gone
+            pass
 
 
 def make_websocket_handler(
@@ -160,91 +240,97 @@ def make_websocket_handler(
         if on_arrival is not None:
             await on_arrival(arrival)
 
-        # A kept session may still be wearing its last socket. The client
-        # rebuilds its transport without waiting for the old one to close
-        # (a profile change does that), so the new socket can arrive while
-        # the previous handler is still reading. This one takes over: the
-        # old writer is stopped *before* anything is queued for the new
-        # socket, or it would drain ``session.ready`` onto a connection
-        # that is on its way out, and the old socket is closed so its
-        # handler stops -- two heartbeat loops on one session would time
-        # each other out.
-        await _take_over(session, socket)
-
-        # ``session.ready`` goes to the front of the queue, and only then is
-        # the writer attached: a kept session may still hold frames the
-        # previous socket never took, and those are a continuation the
-        # client is entitled to -- after the frame it starts on, not before.
-        # Attached only now, too, because a writer attached before the
-        # handshake would drain frames onto a connection we might refuse.
-        session.outbound.send(
+        connection = Connection(session, socket)
+        previous = await _take_over(
+            connection,
             ready_frame(
                 session,
                 restored=arrival.outcome.value == "kept",
                 heartbeat_ms=heartbeat_ms,
             ),
-            first=True,
         )
-        session.outbound.attach(socket)
 
         try:
             await _serve(
-                socket,
-                session,
+                connection,
                 thread_store=thread_store,
                 heartbeat_ms=heartbeat_ms,
                 on_ready=(lambda: on_ready(arrival)) if on_ready is not None else None,
                 fresh_page_load=arrival.fresh_page_load,
+                resumed_thread=arrival.resumed_thread,
+                goodbye_to=previous,
             )
         finally:
-            current = session.outbound.socket
-            superseded = current is not None and current is not socket
-            # Superseded: a newer socket holds this session, and the
-            # bookkeeping is its to do when *it* goes. Marking the session
-            # disconnected here would start a reaper against a live
-            # connection, and detaching would take the writer out from
-            # under it -- which is what left the client waiting on a
-            # ``session.ready`` that had already been written to the wrong
-            # socket. Otherwise the socket is gone and the session is not:
-            # it keeps its queue, its question and its work, and the
-            # registry keeps it until something decides otherwise.
-            if not superseded:
+            # Only the current connection tears anything down. A superseded
+            # one is a handler whose socket happened to notice its own death
+            # after a newer one had already taken the session over, and every
+            # line below would be aimed at the wrong connection: marking the
+            # session disconnected starts a reaper against a live client,
+            # detaching takes the writer out from under it, and
+            # ``on_disconnect`` runs ``on_chat_end`` on a chat that has not
+            # ended. Otherwise the socket is gone and the session is not: it
+            # keeps its queue, its question and its work, and the registry
+            # keeps it until something decides otherwise.
+            if connection.current:
+                session.current = None
                 session.connected = False
                 registry.mark_disconnected(session.id)
-                await session.outbound.detach()
+                await session.outbound.detach(socket)
                 if on_disconnect is not None:
                     await on_disconnect(session)
 
     return chainlit_websocket
 
 
-async def _take_over(session: Session, socket: WebSocket[Any, Any, Any]) -> None:
-    """Make ``socket`` the one the session writes to, whatever it had before.
+async def _take_over(connection: Connection, ready: Any) -> Optional[Connection]:
+    """Give the session to ``connection``, in the only order that works.
 
-    A queue its last writer aborted is closed for good, and the session is
-    still worth a socket -- it was kept for a reason -- so it gets a fresh
-    one. A writer still running is stopped and its socket closed; the close
-    is best-effort, the peer may already be gone.
+    A kept session may still be wearing its last socket: the client rebuilds
+    its transport without waiting for the old one to close (a profile change
+    does that), so a new socket arrives while the previous handler is still
+    reading. The four steps are ordered by what each one makes safe.
+
+    1. Become the current connection, before anything else can be observed.
+       From here the previous handler's loops are stale and know it, so
+       nothing they do afterwards can reach the session.
+    2. Stop the previous writer, before a frame is queued -- otherwise
+       ``session.ready`` drains onto the connection on its way out, and the
+       client that is waiting for it waits forever.
+    3. Queue ``session.ready`` at the *front* and attach this socket's
+       writer. A kept session may still hold frames the previous socket
+       never took; they are a continuation the client is entitled to, after
+       the frame it starts on and not before. Attached only now, too: a
+       writer attached before the handshake would drain onto a connection
+       we might still refuse.
+    4. Say goodbye to the old socket -- returned rather than done here, and
+       run alongside the reader rather than ahead of it. On a peer that
+       answers the close frame and then never closes its end of the TCP
+       connection, which is what a frozen tab looks like, ``close`` waits
+       out its own timeout; a handshake that waited with it would hold the
+       arriving client's replay behind a goodbye addressed to nobody. The
+       old handler must not need it either: its loops leave on their own the
+       moment they see they are not current.
     """
-    session.renew_outbound()
-    previous = session.outbound.socket
-    if previous is None:
-        return
-    await session.outbound.detach()
-    try:
-        await previous.close(code=CloseCode.SUPERSEDED, reason="superseded")
-    except Exception:  # pragma: no cover - a socket already gone
-        pass
+    session = connection.session
+    previous = session.adopt(connection)
+    if session.outbound.attached:
+        # Whatever writer it had, whether or not the connection that
+        # attached it is still around to be told.
+        await session.outbound.detach()
+    session.outbound.send(ready, first=True)
+    session.outbound.attach(connection.socket)
+    return previous
 
 
 async def _serve(
-    socket: WebSocket[Any, Any, Any],
-    session: Session,
+    connection: Connection,
     *,
     thread_store: Optional[ThreadStore],
     heartbeat_ms: int,
     on_ready: Optional[Callable[[], Awaitable[None]]] = None,
     fresh_page_load: bool = True,
+    resumed_thread: Optional[Mapping[str, Any]] = None,
+    goodbye_to: Optional[Connection] = None,
 ) -> None:
     """Run the reader, the restore and the heartbeat until the socket goes.
 
@@ -255,17 +341,27 @@ async def _serve(
     of a user closing a tab would escape the group and be reported to them
     as an internal server error.
     """
+    session = connection.session
     try:
         async with anyio.create_task_group() as tasks:
-            tasks.start_soon(_read_loop, socket, session, tasks.cancel_scope)
-            tasks.start_soon(_heartbeat, session, heartbeat_ms, tasks.cancel_scope)
+            tasks.start_soon(_read_loop, connection, tasks.cancel_scope)
+            tasks.start_soon(_heartbeat, connection, heartbeat_ms, tasks.cancel_scope)
+            if goodbye_to is not None:
+                # The last step of the takeover, run where a task that may
+                # outlive its usefulness is already accounted for: if this
+                # connection ends first the group cancels the goodbye, which
+                # is exactly the right answer to "was it delivered?".
+                tasks.start_soon(goodbye_to.close, CloseCode.SUPERSEDED, "superseded")
             # Concurrent with the reader on purpose. `session.ready` has
             # already gone out, so the client is flushing whatever it
             # buffered while disconnected -- and an answer typed before a
             # reload arrives *during* this, which is exactly what the
             # restore has to notice.
             await restore(
-                session, thread_store=thread_store, fresh_page_load=fresh_page_load
+                session,
+                thread_store=thread_store,
+                fresh_page_load=fresh_page_load,
+                resumed_thread=resumed_thread,
             )
             if on_ready is not None:
                 # After the replay, inside the group: a hook that fails is
@@ -278,9 +374,9 @@ async def _serve(
         logger.exception("websocket session %s failed", session.id, exc_info=errors)
 
 
-async def _read_loop(
-    socket: WebSocket[Any, Any, Any], session: Session, scope: anyio.CancelScope
-) -> None:
+async def _read_loop(connection: Connection, scope: anyio.CancelScope) -> None:
+    socket = connection.socket
+    session = connection.session
     while True:
         try:
             raw = await socket.receive_text()
@@ -289,7 +385,13 @@ async def _read_loop(
             return
 
         if len(raw.encode()) > MAX_FRAME_BYTES:
-            session.outbound.abort(CloseCode.FRAME_TOO_LARGE, "inbound frame too large")
+            # The socket goes, not the queue: a client that overran the
+            # frame limit is a client that will reconnect, and what the
+            # session has to say is still worth saying to it.
+            if connection.current:
+                await session.outbound.drop(
+                    CloseCode.FRAME_TOO_LARGE, "inbound frame too large"
+                )
             scope.cancel()
             return
 
@@ -306,15 +408,20 @@ async def _read_loop(
             session.send(Error(code=ErrorCode.BAD_MESSAGE.value, message=str(error)))
             continue
 
+        if isinstance(message, HeartbeatAck):
+            # Answered to this connection, never to the session: the ack is
+            # about the socket it arrived on, and a session that held the
+            # counter had the old connection's probe satisfied by the new
+            # connection's client.
+            connection.last_ack = message.seq
+            continue
+
         await _dispatch(session, message)
 
 
 async def _dispatch(session: Session, message: ClientMsg) -> None:
-    """Seven tags. Everything else the client can say, it cannot say twice."""
-    if isinstance(message, HeartbeatAck):
-        session.last_ack = message.seq
-        return
-
+    """Five tags. The sixth, ``hb.ack``, is the connection's and never
+    reaches here. Everything else the client can say, it cannot say twice."""
     if isinstance(message, Hello):
         # A second hello on an established socket. The handshake is not
         # re-runnable -- it has side effects -- so this is ignored rather
@@ -369,23 +476,38 @@ def _deliver_reply(session: Session, message: AskReply) -> None:
 
 
 async def _heartbeat(
-    session: Session, interval_ms: int, scope: anyio.CancelScope
+    connection: Connection, interval_ms: int, scope: anyio.CancelScope
 ) -> None:
     """Probe a silent socket, and close one that stops answering.
 
+    Every wake begins by asking whether this connection is still the one.
+    Two loops on one session is the ordinary case -- a client rebuilds its
+    transport and both handlers are alive for a moment -- and the stale one
+    must neither probe (the frame would go to the new socket, against a
+    counter that is not its own) nor conclude anything from the silence it
+    is bound to hear. It leaves instead, which is also what ends its
+    handler when the goodbye sent to its peer never lands.
+
     Closing is the queue's job, not this loop's: the writer owns the close
-    sequence, so a probe that expires aborts the queue rather than touching
-    the socket, and one owner still ends the connection.
+    sequence. It is ``drop``, not ``abort`` -- the socket is finished, the
+    conversation is not, and the client's answer to both is to reconnect.
     """
     interval = interval_ms / 1000
-    seq = 0
     while True:
         await asyncio.sleep(interval)
-        seq += 1
-        session.send(Heartbeat(seq=seq))
+        if not connection.current:
+            scope.cancel()
+            return
+        connection.seq += 1
+        connection.session.send(Heartbeat(seq=connection.seq))
         await asyncio.sleep(interval)
-        if session.last_ack != seq:
-            session.outbound.abort(CloseCode.HEARTBEAT_TIMEOUT, "no heartbeat ack")
+        if not connection.current:
+            scope.cancel()
+            return
+        if connection.last_ack != connection.seq:
+            await connection.session.outbound.drop(
+                CloseCode.HEARTBEAT_TIMEOUT, "no heartbeat ack"
+            )
             scope.cancel()
             return
 

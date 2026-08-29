@@ -46,9 +46,7 @@ __all__ = [
 # hand-off between two sessions and would resurrect on every resume; the
 # rest are mirrors of the session the accessor keeps for the app's
 # convenience, and the conversation log, which is the steps table's job.
-_VOLATILE_STATE = frozenset(
-    {"transit_message", "__chat_messages", "__resumed_thread", "id", "user", "env"}
-)
+_VOLATILE_STATE = frozenset({"transit_message", "__chat_messages", "id", "user", "env"})
 
 
 def writer_of(session: Optional["Session"] = None) -> Optional[SessionWriter]:

@@ -96,6 +96,19 @@ async def settled(outbound: Outbound, *, timeout: float = 10.0) -> None:
     assert outbound.backlog == 0, f"{outbound.backlog} frame(s) still queued"
 
 
+async def detached(outbound: Outbound, *, timeout: float = 10.0) -> None:
+    """Wait for the writer to be gone, however it went.
+
+    The end of a connection that is not the end of a queue: there is no
+    ``closed`` to wait on, because a socket dropped on its own account
+    leaves the session able to take another.
+    """
+    deadline = time.monotonic() + timeout
+    while outbound.attached and time.monotonic() < deadline:
+        await asyncio.sleep(0.005)
+    assert not outbound.attached, "the writer is still attached"
+
+
 def close_code_of(ws: Any, *, limit: int = 2000, timeout: float = 10.0) -> int:
     """Read frames until the socket closes and return the code it closed on."""
     for _ in range(limit):
@@ -157,11 +170,16 @@ def test_concurrent_producers_reach_the_wire_in_send_order() -> None:
 
 
 def test_overflow_refuses_the_frame_closes_and_is_observable() -> None:
-    """A full backlog is a refused frame and a closed connection.
+    """A full backlog is a refused frame and a closed *connection*.
 
     The frames go in without an ``await`` between them, so the writer never
     gets to run and the bound is reached deterministically -- no TCP needed
     to prove the policy, only to prove it is ever reached.
+
+    The queue outlives it, and the backlog does not. The client is told to
+    come back, so a queue that could never take another writer would refuse
+    exactly that -- and handing the next writer the frames that overflowed
+    would overflow it on its first send.
     """
     state: Dict[str, Any] = {}
 
@@ -171,8 +189,10 @@ def test_overflow_refuses_the_frame_closes_and_is_observable() -> None:
         outbound = Outbound(max_backlog=4, name="overflow")
         outbound.attach(socket)
         state["accepted"] = [outbound.send(token("s", str(i))) for i in range(6)]
-        await asyncio.wait_for(outbound.wait_closed(), 10)
+        await detached(outbound)
         state["closed"] = outbound.closed
+        state["backlog"] = outbound.backlog
+        state["accepts_again"] = outbound.send(token("s", "next"))
 
     with create_test_client([handler]) as client, client.websocket_connect("/ws") as ws:
         code = close_code_of(ws)
@@ -181,7 +201,9 @@ def test_overflow_refuses_the_frame_closes_and_is_observable() -> None:
     # The fifth frame is the overflow; the sixth is refused by a queue that
     # is already closing.
     assert state["accepted"] == [True, True, True, True, False, False]
-    assert state["closed"] is True
+    assert state["closed"] is False
+    assert state["backlog"] == 0
+    assert state["accepts_again"] is True
 
 
 def test_send_never_blocks_a_producer_on_a_stalled_socket() -> None:
@@ -285,6 +307,76 @@ def test_abort_drops_the_backlog_and_closes_now() -> None:
         assert socket.closed == (CloseCode.SESSION_FORBIDDEN, "not yours")
         assert socket.frames == []
         assert outbound.send(token("s", "late")) is False
+
+    asyncio.run(scenario())
+
+
+def test_drop_closes_the_socket_and_keeps_the_queue() -> None:
+    """The per-connection close, and the reason it is not ``abort``.
+
+    A probe that goes unanswered, a frame the client had no business
+    sending: neither says anything about the conversation. The socket is
+    finished and everything queued for it is still owed to whoever picks the
+    session up next, which -- since the client's answer to both is to
+    reconnect -- is a socket that arrives moments later.
+    """
+
+    async def scenario() -> None:
+        socket = StubSocket()
+        outbound = Outbound(name="drop")
+        outbound.attach(socket)  # type: ignore[arg-type]
+        await settled(outbound)
+        for index in range(3):
+            outbound.send(token("s", str(index)))
+
+        await outbound.drop(CloseCode.HEARTBEAT_TIMEOUT, "no heartbeat ack")
+
+        assert socket.closed == (CloseCode.HEARTBEAT_TIMEOUT, "no heartbeat ack")
+        assert outbound.closed is False
+        assert outbound.attached is False
+        assert outbound.backlog == 3
+        assert outbound.send(token("s", "after")) is True
+
+        # And the next socket is handed all four, in order.
+        second = StubSocket()
+        outbound.attach(second)  # type: ignore[arg-type]
+        await settled(outbound)
+        assert [json.loads(f)["token"] for f in second.frames] == [
+            "0",
+            "1",
+            "2",
+            "after",
+        ]
+        await outbound.detach()
+
+    asyncio.run(scenario())
+
+
+def test_detach_named_for_a_socket_leaves_a_newer_writer_alone() -> None:
+    """A handler unwinding cannot know it is still the one attached.
+
+    Its socket died; by the time its teardown gets a turn, a reconnect may
+    already have handed the session to a newer socket and started that one's
+    writer. An unqualified detach there stops the wrong writer, and the
+    queue the arriving client is waiting on has nothing draining it.
+    """
+
+    async def scenario() -> None:
+        first = StubSocket()
+        outbound = Outbound(name="named-detach")
+        outbound.attach(first)  # type: ignore[arg-type]
+        await outbound.detach()
+
+        second = StubSocket()
+        outbound.attach(second)  # type: ignore[arg-type]
+        await outbound.detach(first)  # type: ignore[arg-type]
+        assert outbound.attached is True
+
+        outbound.send(token("s", "for-the-second"))
+        await settled(outbound)
+        assert [json.loads(f)["token"] for f in second.frames] == ["for-the-second"]
+        await outbound.detach(second)  # type: ignore[arg-type]
+        assert outbound.attached is False
 
     asyncio.run(scenario())
 
@@ -562,7 +654,10 @@ async def test_live_slow_client_overflows_rather_than_blocking_producers() -> No
             await asyncio.sleep(0)
         state["accepted"] = accepted
         state["push_seconds"] = time.perf_counter() - started
-        await asyncio.wait_for(outbound.wait_closed(), 60)
+        # The writer is parked inside ``send_text`` on a peer that will never
+        # read again, so it cannot answer the close: this is the case
+        # ``FORCE_CLOSE_GRACE`` exists for, and the only thing that ends it.
+        await detached(outbound, timeout=60)
         state["closed"] = outbound.closed
         state["done"] = True
 
@@ -576,7 +671,7 @@ async def test_live_slow_client_overflows_rather_than_blocking_producers() -> No
             writer.close()
 
     assert state.get("done") is True, state
-    assert state["closed"] is True
+    assert state["closed"] is False
     # The bound was reached because the socket stalled, and the producer paid
     # nothing for it: every frame the peer's window absorbed plus a full
     # backlog on top, issued in well under a second, where an unqueued

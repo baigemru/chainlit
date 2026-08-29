@@ -783,3 +783,83 @@ def test_an_offer_after_a_resume_leaves_the_composer_open(
 
     spinner = [f["running"] for f in after if f["t"] == "task.indicator"]
     assert True not in spinner, after
+
+
+def test_a_reconnect_of_a_resumed_session_does_not_start_the_chat_again(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """A resumed session reconnecting is still the resumed session.
+
+    The client rebuilds its transport when the resume tells it the thread's
+    profile, and the new socket arrives as ``kept``. The resume branch does
+    not run again -- correctly -- but the chat had never been marked as
+    started, so ``on_ready`` ran ``on_chat_start`` over the restored
+    conversation and a fresh wizard appeared under it.
+    """
+    seed_user(db_url, ALICE)
+    started = 0
+
+    async def on_chat_start() -> None:
+        nonlocal started
+        started += 1
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo: {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        pass
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            send_and_read_reply(ws, "first words")
+        thread_id = handshake[0]["threadId"]
+        wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+        assert started == 1
+
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws, sessionId="s2", threadId=thread_id)
+            assert not first(frames, "session.ready").get("restored")
+            assert "thread.resume" in [f["t"] for f in frames]
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws, sessionId="s2", pageLoad=False)
+            assert first(frames, "session.ready")["restored"] is True
+            time.sleep(0.3)
+
+    assert started == 1
+
+
+def test_a_missing_thread_is_reported_after_the_ready_frame(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """A resume of a thread that is not there is told, not papered over.
+
+    The client parks on a loader until the thread it asked for becomes
+    current; a server that quietly starts a fresh chat under that id leaves
+    it there for good. ``thread_not_found`` is the frame it acts on -- and
+    it must follow ``session.ready``, like everything else.
+    """
+    seed_user(db_url, ALICE)
+
+    async def on_message(msg: cl.Message) -> None:
+        pass
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        pass
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws, threadId=str(uuid.uuid4()))
+            frames += read_until(ws, "error")
+
+    assert frames[0]["t"] == "session.ready"
+    assert first(frames, "error")["code"] == "thread_not_found"

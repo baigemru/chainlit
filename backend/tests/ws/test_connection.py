@@ -317,3 +317,72 @@ def test_a_kept_sessions_backlog_follows_the_ready_frame() -> None:
 
     assert tags[0] == "session.ready"
     assert "hb" in tags
+
+
+def _read(ws: Any, tag: str, *, limit: int = 20, timeout: float = 5.0) -> List[dict]:
+    """Frames up to and including the first one tagged ``tag``."""
+    frames: List[dict] = []
+    for _ in range(limit):
+        frame = json.loads(ws.receive_text(timeout=timeout))
+        frames.append(frame)
+        if frame["t"] == tag:
+            return frames
+    raise AssertionError(f"never saw {tag!r}: {[f['t'] for f in frames]}")
+
+
+def test_a_newer_socket_takes_a_kept_session_over() -> None:
+    """The client rebuilds its transport without waiting for the old close.
+
+    So the new socket can arrive while the previous handler is still
+    reading. It has to take the session over -- writer and all -- and the
+    old handler's teardown has to notice it was superseded: detaching there
+    took the writer out from under the new socket, and its ``session.ready``
+    had already gone to the old one, so the client waited forever.
+    """
+    handler, middleware, registry = build()
+    with create_test_client(route_handlers=[handler], middleware=middleware) as client:
+        with client.websocket_connect("/ws") as first:
+            assert open_session(first)[0] == "session.ready"
+            with client.websocket_connect("/ws") as second:
+                second.send_text(hello(pageLoad=False))
+                ready = json.loads(second.receive_text(timeout=5))
+                assert ready["t"] == "session.ready"
+                assert ready["restored"] is True
+                # The old socket is closed by the takeover, terminally.
+                assert close_code_of(first) == CloseCode.SUPERSEDED
+
+                entry = registry.get("s1")
+                assert entry is not None
+                assert entry.connected is True
+                entry.session.send(Heartbeat(seq=7))
+                seqs = [f.get("seq") for f in _read(second, "hb")]
+                assert 7 in seqs
+
+    entry = registry.get("s1")
+    assert entry is not None
+    assert entry.connected is False
+
+
+def test_a_session_whose_socket_timed_out_takes_a_new_one() -> None:
+    """An aborted queue is closed for good; the session is not.
+
+    The heartbeat closes a silent socket by aborting the queue, and the
+    client's recovery is to reconnect. A kept session that could never take
+    another writer would refuse exactly that reconnect, with an internal
+    error where ``session.ready`` should be.
+    """
+    handler, middleware, registry = build(heartbeat_ms=40)
+    with create_test_client(route_handlers=[handler], middleware=middleware) as client:
+        with client.websocket_connect("/ws") as ws:
+            open_session(ws)
+            assert close_code_of(ws) == CloseCode.HEARTBEAT_TIMEOUT
+        entry = registry.get("s1")
+        assert entry is not None
+        assert entry.session.outbound.closed  # type: ignore[attr-defined]
+
+        with client.websocket_connect("/ws") as ws:
+            ws.send_text(hello(pageLoad=False))
+            ready = json.loads(ws.receive_text(timeout=5))
+            assert ready["t"] == "session.ready"
+            assert ready["restored"] is True
+            assert _read(ws, "hb")

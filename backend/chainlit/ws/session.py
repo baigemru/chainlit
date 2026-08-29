@@ -308,6 +308,18 @@ class Session:
 
     # ---------------------------------------------------------------- sending
 
+    def renew_outbound(self) -> None:
+        """Replace a closed queue with a fresh one, for the next socket.
+
+        A queue closes for good when its writer aborts the socket -- a
+        heartbeat that went unanswered, a backlog the peer stopped reading.
+        The session survives that (it may be parked on a question), and the
+        client's recovery from both is to reconnect; a session whose queue
+        can never take another writer would refuse exactly that reconnect.
+        """
+        if self.outbound.closed:
+            self.outbound = Outbound(name=self.id)
+
     def send(self, msg: "ServerMsg") -> bool:
         """Queue one frame for this session's client."""
         return self.outbound.send(msg)

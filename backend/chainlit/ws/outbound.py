@@ -200,6 +200,16 @@ class Outbound:
     def attached(self) -> bool:
         return self._writer is not None
 
+    @property
+    def socket(self) -> Optional["WebSocket[Any, Any, Any]"]:
+        """The socket the writer is draining onto, if one is attached.
+
+        Identity is the point: a route handler about to tear a connection
+        down asks whether the session's writer is still *its* socket, or a
+        newer one has taken the session over in the meantime.
+        """
+        return self._socket
+
     # -------------------------------------------------------------- producers
 
     def send(self, msg: "ServerMsg", *, first: bool = False) -> bool:

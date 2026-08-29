@@ -160,6 +160,17 @@ def make_websocket_handler(
         if on_arrival is not None:
             await on_arrival(arrival)
 
+        # A kept session may still be wearing its last socket. The client
+        # rebuilds its transport without waiting for the old one to close
+        # (a profile change does that), so the new socket can arrive while
+        # the previous handler is still reading. This one takes over: the
+        # old writer is stopped *before* anything is queued for the new
+        # socket, or it would drain ``session.ready`` onto a connection
+        # that is on its way out, and the old socket is closed so its
+        # handler stops -- two heartbeat loops on one session would time
+        # each other out.
+        await _take_over(session, socket)
+
         # ``session.ready`` goes to the front of the queue, and only then is
         # the writer attached: a kept session may still hold frames the
         # previous socket never took, and those are a continuation the
@@ -186,16 +197,44 @@ def make_websocket_handler(
                 fresh_page_load=arrival.fresh_page_load,
             )
         finally:
-            # The socket is gone; the session is not. It keeps its queue,
-            # its question and its work, and the registry keeps it until
-            # something decides otherwise.
-            session.connected = False
-            registry.mark_disconnected(session.id)
-            await session.outbound.detach()
-            if on_disconnect is not None:
-                await on_disconnect(session)
+            current = session.outbound.socket
+            superseded = current is not None and current is not socket
+            # Superseded: a newer socket holds this session, and the
+            # bookkeeping is its to do when *it* goes. Marking the session
+            # disconnected here would start a reaper against a live
+            # connection, and detaching would take the writer out from
+            # under it -- which is what left the client waiting on a
+            # ``session.ready`` that had already been written to the wrong
+            # socket. Otherwise the socket is gone and the session is not:
+            # it keeps its queue, its question and its work, and the
+            # registry keeps it until something decides otherwise.
+            if not superseded:
+                session.connected = False
+                registry.mark_disconnected(session.id)
+                await session.outbound.detach()
+                if on_disconnect is not None:
+                    await on_disconnect(session)
 
     return chainlit_websocket
+
+
+async def _take_over(session: Session, socket: WebSocket[Any, Any, Any]) -> None:
+    """Make ``socket`` the one the session writes to, whatever it had before.
+
+    A queue its last writer aborted is closed for good, and the session is
+    still worth a socket -- it was kept for a reason -- so it gets a fresh
+    one. A writer still running is stopped and its socket closed; the close
+    is best-effort, the peer may already be gone.
+    """
+    session.renew_outbound()
+    previous = session.outbound.socket
+    if previous is None:
+        return
+    await session.outbound.detach()
+    try:
+        await previous.close(code=CloseCode.SUPERSEDED, reason="superseded")
+    except Exception:  # pragma: no cover - a socket already gone
+        pass
 
 
 async def _serve(

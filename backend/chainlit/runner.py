@@ -31,6 +31,7 @@ from chainlit.logger import logger
 from chainlit.persistence.config import isolated
 from chainlit.persistence.records import ThreadDetail, ThreadPatch
 from chainlit.persistence.writer import PatchThread, SessionWriter, WriterRegistry
+from chainlit.protocol.codec import ErrorCode
 from chainlit.protocol.payloads import (
     AskTextReply,
     AskTextSpec,
@@ -38,6 +39,7 @@ from chainlit.protocol.payloads import (
     FileRef,
     Step,
 )
+from chainlit.protocol.server import Error
 from chainlit.utils import utc_now
 from chainlit.ws.handshake import Arrival, sweep_superseded
 from chainlit.ws.registry import SessionRegistry
@@ -232,8 +234,17 @@ class ApplicationRunner:
         async with self.persistence.uow() as unit:
             detail = await unit.threads.get_detail(thread_id)
         if detail is None:
+            # The client asked for a conversation that is not there. Said
+            # once the screen is ready, not now: nothing may go out ahead of
+            # ``session.ready``. Without it the client sat on a loader for a
+            # thread that would never become current, while the server
+            # quietly opened a fresh chat under the id it had asked for.
+            session.state["__thread_not_found"] = thread_id
             return False
         if identifier is None or detail.user_identifier != identifier:
+            # Not found, not forbidden: whether somebody else's thread
+            # exists is not this user's to learn.
+            session.state["__thread_not_found"] = thread_id
             await self._disown_thread(session)
             return False
         if not (self.code.on_chat_resume or self.code.on_thread_ready):
@@ -258,6 +269,13 @@ class ApplicationRunner:
         session.transcript[:] = _transcript_of(detail)
         session.first_interaction = "resume"
         session.resumed_thread_id = thread_id
+        # A resume *is* the start of this chat. Set here, not when the hooks
+        # are launched: a reconnect of this session (the client rebuilds its
+        # transport on a profile change) arrives as ``kept`` and skips the
+        # resume branch, and ``on_ready`` must not read the empty slot as a
+        # chat that never started and run ``on_chat_start`` over a resumed
+        # thread -- which put a fresh wizard under a restored conversation.
+        session.chat_started = True
         if session.writer is not None:
             session.writer.open_gate()
         # Handed to on_ready, which launches the hooks once the screen is
@@ -287,6 +305,15 @@ class ApplicationRunner:
         session = arrival.session
         assert session is not None
         emitter = self._bind(session)
+
+        missing = session.state.pop("__thread_not_found", None)
+        if missing is not None:
+            session.send(
+                Error(
+                    code=ErrorCode.THREAD_NOT_FOUND.value,
+                    message=f"thread {missing} not found",
+                )
+            )
 
         resumed = session.state.pop("__resumed_thread", None)
         if resumed is not None:

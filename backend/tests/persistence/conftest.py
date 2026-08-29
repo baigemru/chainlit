@@ -36,12 +36,12 @@ from chainlit.persistence.models import SCHEMA_NAME
 # Where the suite runs when TEST_DATABASE_URL is unset. Matches the service
 # container in .github/workflows/tests.yaml and the docker command below.
 DEFAULT_POSTGRES_URL = (
-    "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/chainlit_test"
+    "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/chainlit_pytest"
 )
 
 DOCKER_COMMAND = (
     "docker run -d --name chainlit-test-pg -e POSTGRES_USER=postgres "
-    "-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=chainlit_test "
+    "-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=chainlit_pytest "
     "-p 5432:5432 postgres:16"
 )
 

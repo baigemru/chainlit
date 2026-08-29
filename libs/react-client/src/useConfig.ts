@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useRecoilState, useRecoilValue } from 'recoil';
 
 import { useApi, useAuth } from './api';
@@ -10,31 +10,25 @@ const useConfig = () => {
   const { isAuthenticated } = useAuth();
   const chatProfile = useRecoilValue(chatProfileState);
   const language = navigator.language || 'en-US';
-  const prevChatProfileRef = useRef(chatProfile);
 
-  // Build the API URL with optional chat profile parameter
+  // Keyed on the profile, so a profile change fetches that profile's
+  // config -- and the config on screen stays until the new one arrives.
+  // It used to be blanked in between, which unmounted everything gated on
+  // it: the thread page's resume among them, which then mounted again and
+  // resumed the thread a second time, on a second session.
   const apiUrl = isAuthenticated
     ? `/project/settings?language=${language}${chatProfile ? `&chat_profile=${encodeURIComponent(chatProfile)}` : ''}`
     : null;
 
-  const shouldFetch = isAuthenticated && !config;
-
-  const { data, error, isLoading } = useApi<IChainlitConfig>(
-    shouldFetch ? apiUrl : null
-  );
+  const { data, error, isLoading } = useApi<IChainlitConfig>(apiUrl, {
+    revalidateOnFocus: false,
+    revalidateIfStale: false
+  });
 
   useEffect(() => {
     if (!data) return;
     setConfig(data);
   }, [data, setConfig]);
-
-  // Clear config when chat profile changes to force re-fetch
-  useEffect(() => {
-    if (prevChatProfileRef.current !== chatProfile) {
-      setConfig(undefined);
-      prevChatProfileRef.current = chatProfile;
-    }
-  }, [chatProfile, setConfig]);
 
   return { config, error, isLoading, language };
 };

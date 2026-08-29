@@ -165,6 +165,17 @@ export class ChainlitSocket {
     return this.ready && this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * True while this transport is still trying: open, opening, or between
+   * retries. False once it was closed deliberately or gave up.
+   */
+  get alive(): boolean {
+    return (
+      !this.closedByUs &&
+      (this.status !== 'closed' || this.retryTimer !== undefined)
+    );
+  }
+
   /** Open the socket, or do nothing if one is already open or opening. */
   connect(): void {
     this.closedByUs = false;
@@ -272,7 +283,9 @@ export class ChainlitSocket {
       // server has answered `session.ready`. socket.io flushed its buffer
       // *before* announcing itself, which is how buffered events used to
       // reach a half-initialised session.
-      this.write(this.options.hello());
+      const hello = this.options.hello();
+      console.debug('[chainlit] hello ' + JSON.stringify(hello));
+      this.write(hello);
     };
 
     socket.onmessage = (event) => {

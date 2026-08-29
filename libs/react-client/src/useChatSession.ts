@@ -1,5 +1,5 @@
 import { debounce } from 'lodash';
-import { useCallback, useContext, useRef } from 'react';
+import { useCallback, useContext, useEffect, useRef } from 'react';
 import {
   useRecoilCallback,
   useRecoilState,
@@ -94,6 +94,16 @@ const useChatSession = () => {
   const authFailureHandledRef = useRef(false);
 
   const [session, setSession] = useRecoilState(sessionState);
+  // The transport being replaced, read at connect time. A ref rather than a
+  // dependency of `_connect`: the session atom changes on every status
+  // transition, and a connect that rebuilt itself on each would loop.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  // The session id the live transport was built for. `connect` is called
+  // from an effect whose inputs flicker (the config is dropped and refetched
+  // on every profile change), and each call used to rebuild the socket --
+  // a second connection on the same session while the first was still up.
+  const openForRef = useRef<string>();
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
   const setMessages = useSetRecoilState(messagesState);
@@ -152,6 +162,15 @@ const useChatSession = () => {
 
   const _connect = useCallback(
     async ({ userEnv }: { userEnv: Record<string, string> }) => {
+      if (
+        openForRef.current === sessionId &&
+        sessionRef.current?.socket.alive
+      ) {
+        // Already connected, or reconnecting on its own, for this very
+        // session: nothing to rebuild.
+        return;
+      }
+      openForRef.current = sessionId;
       try {
         await client.stickyCookie(sessionId);
       } catch (err) {
@@ -529,19 +548,34 @@ const useChatSession = () => {
         };
       }
 
-      setSession((old) => {
-        old?.socket?.close();
-        return { socket };
-      });
+      // Closed *before* the atom is written, and outside the updater. A
+      // close fires the old socket's `onStatus`, which writes this same
+      // atom; Recoil forbids an update from inside an updater and throws --
+      // which used to abort the connect before `socket.connect()` ran, and
+      // every socket rebuild (a profile change, a resume that changed the
+      // profile) left the page spinning with no transport at all.
+      sessionRef.current?.socket.close();
+      // Written to the ref as well, not only the atom: a second connect
+      // fired before the next render must close *this* socket, not the one
+      // the ref still holds from the last render.
+      sessionRef.current = { socket };
+      setSession({ socket });
 
       socket.connect();
     },
-    // A profile change rebuilds the socket: the profile travels in `hello`
-    // and is fixed for the session's life.
-    [setSession, sessionId, idToResume, chatProfile]
+    // Not the profile. It travels in `hello`, read through the ref at the
+    // moment of the attempt; a deliberate switch goes through `clear()`,
+    // whose new session id rebuilds the socket. The profile the *server*
+    // announces (`session.ready`, `thread.resume`) must not: rebuilding the
+    // transport to tell the server the profile it just told us opened a
+    // second socket on the same session while the first was still up.
+    [setSession, sessionId, idToResume]
   );
 
   const connect = useCallback(debounce(_connect, 200), [_connect]);
+  // A trailing call on a superseded wrapper would open a socket for a
+  // session that `clear()` has already left behind.
+  useEffect(() => () => connect.cancel(), [connect]);
 
   const disconnect = useCallback(() => {
     session?.socket.close();

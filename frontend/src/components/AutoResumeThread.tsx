@@ -34,8 +34,16 @@ export default function AutoResumeThread({ id }: Props) {
   const transitionRef = useRef(transition);
   transitionRef.current = transition;
 
+  // Once per thread id. The config is dropped and refetched whenever the
+  // profile changes -- which a resume does, the moment the thread's profile
+  // comes back -- and an effect keyed on it would clear and resume again,
+  // opening a second session on the same thread.
+  const resumedRef = useRef<string>();
+
   useEffect(() => {
     if (!config?.threadResumable) return;
+    if (resumedRef.current === id) return;
+    resumedRef.current = id;
     const isReturn =
       transitionRef.current?.threadId === id &&
       transitionRef.current.keepTranscript;

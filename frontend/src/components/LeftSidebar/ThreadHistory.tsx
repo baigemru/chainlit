@@ -46,7 +46,7 @@ export function ThreadHistory() {
 
       const isActualResume =
         firstInteraction === 'resume' &&
-        messages[0]?.output.toLowerCase() !== 'resume';
+        messages[0]?.output?.toLowerCase() !== 'resume';
 
       if (isActualResume) return;
 

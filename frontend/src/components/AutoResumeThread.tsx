@@ -76,6 +76,12 @@ export default function AutoResumeThread({ id }: Props) {
   // The wire has one error channel now; a resume failure is the
   // `thread_not_found` code on it.
   useEffect(() => {
+    // Only once this thread is the one the session was opened for. On the
+    // commit that mounts this component the resume above has been issued
+    // but not yet rendered, and an error left over from the previous
+    // session -- which `clear()` is about to drop -- would be taken for
+    // this resume's answer and bounce the user straight back home.
+    if (id !== idToResume) return;
     if (protocolError?.code !== ErrorCode.THREAD_NOT_FOUND) return;
     toast.error(
       protocolError.message
@@ -87,7 +93,7 @@ export default function AutoResumeThread({ id }: Props) {
     clear();
     navigate('/');
     setProtocolError(undefined);
-  }, [protocolError]);
+  }, [protocolError, idToResume, id]);
 
   return null;
 }

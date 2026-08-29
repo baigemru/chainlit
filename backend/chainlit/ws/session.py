@@ -268,6 +268,13 @@ class Session:
         #: Guards the hooks that fire once per resumed session against the
         #: reconnects that follow.
         self.resumed_thread_id: Optional[str] = None
+        #: The thread the client *asked* to resume in its ``hello``, as
+        #: opposed to the one this session was minted with. Only an asked-for
+        #: thread is looked up, and only its absence is worth reporting: a
+        #: fresh session's own id is never in the database yet, and telling
+        #: the client "thread not found" about it made every new chat start
+        #: with a refusal nobody had asked about.
+        self.requested_thread_id: Optional[str] = None
 
         #: The task waiting out the disconnect grace before the session is
         #: torn down. Held on the session so the one place that decides the

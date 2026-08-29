@@ -243,9 +243,11 @@ class ApplicationRunner:
         """
         if self.persistence is None or session.first_interaction:
             return False
-        thread_id = session.thread_id
+        thread_id = session.requested_thread_id
         identifier = _identifier(session.user)
         if not thread_id:
+            # Nothing was asked for: the session keeps the thread it was
+            # minted with, and there is nothing to look up or to miss.
             return False
 
         async with self.persistence.uow() as unit:

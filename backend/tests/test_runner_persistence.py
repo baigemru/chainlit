@@ -863,3 +863,39 @@ def test_a_missing_thread_is_reported_after_the_ready_frame(
 
     assert frames[0]["t"] == "session.ready"
     assert first(frames, "error")["code"] == "thread_not_found"
+
+
+def test_a_fresh_session_is_not_told_its_own_thread_is_missing(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """A hello with no thread asks for nothing, and is refused nothing.
+
+    The session is minted with a thread id of its own, which is not in the
+    database yet and never will be until the first interaction. Looking that
+    id up and reporting it missing sent ``thread_not_found`` at the start of
+    every new chat -- and a client that keeps the last error around acted on
+    it the next time the user opened a thread from the history.
+    """
+    seed_user(db_url, ALICE)
+
+    async def on_message(msg: cl.Message) -> None:
+        pass
+
+    async def on_chat_start() -> None:
+        await cl.Message(content="hello").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        pass
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_chat_resume = on_chat_resume
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws)
+            frames += read_until(ws, "step.upsert")
+
+    assert frames[0]["t"] == "session.ready"
+    assert [f for f in frames if f["t"] == "error"] == []

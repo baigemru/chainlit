@@ -176,8 +176,11 @@ async def arrive(
     if thread_id:
         # The client's choice wins over whatever the factory minted: this is
         # a resume. Without one the session keeps the thread it was born
-        # with, so it has a thread id from its first frame onwards.
+        # with, so it has a thread id from its first frame onwards -- and
+        # nothing to look up: only a thread that was asked for can be
+        # missing.
         session.thread_id = thread_id
+        session.requested_thread_id = thread_id
     registry.register(
         session,
         user_identifier=user_identifier,

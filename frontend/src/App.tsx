@@ -3,8 +3,14 @@ import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 import { router } from 'router';
+import { toast } from 'sonner';
 
-import { useAuth, useChatSession, useConfig } from '@chainlit/react-client';
+import {
+  useAuth,
+  useChatData,
+  useChatSession,
+  useConfig
+} from '@chainlit/react-client';
 
 import { ThemeProvider } from './components/ThemeProvider';
 import { Loader } from '@/components/Loader';
@@ -27,23 +33,37 @@ function App() {
 
   const { isAuthenticated, data, isReady } = useAuth();
   const userEnv = useRecoilValue(userEnvState);
-  const { connect, chatProfile, setChatProfile } = useChatSession();
+  const { attach, descriptor, chatProfile, setChatProfile } = useChatSession();
+  const { superseded } = useChatData();
 
   const configLoaded = !!config;
 
+  // The server reads the profile out of `hello` and a session is born with
+  // it, so the first handshake must not go out before one is chosen.
   const chatProfileOk = configLoaded
     ? config.chatProfiles.length
       ? !!chatProfile
       : true
     : false;
 
+  // The whole connection policy: when the app is ready to talk, say which
+  // session it is talking about. Attaching is idempotent, so this effect
+  // states an intent rather than performing a transition.
   useEffect(() => {
     if (!isAuthenticated || !isReady || !chatProfileOk) {
       return;
     }
 
-    connect({ userEnv });
-  }, [userEnv, isAuthenticated, connect, isReady, chatProfileOk]);
+    attach(descriptor, { userEnv });
+  }, [userEnv, isAuthenticated, attach, descriptor, isReady, chatProfileOk]);
+
+  // Close 4409: the session was taken over by another connection. Nothing is
+  // broken and nothing is lost — this window simply no longer speaks for the
+  // conversation, and the composer is already locked because of it.
+  useEffect(() => {
+    if (!superseded) return;
+    toast.info('This chat was opened in another window.');
+  }, [superseded]);
 
   useEffect(() => {
     if (

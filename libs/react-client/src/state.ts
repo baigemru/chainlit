@@ -3,7 +3,7 @@ import { AtomEffect, DefaultValue, atom, selector } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
 import type { ProtocolError } from './protocol';
-import { ChainlitSocket } from './socket';
+import type { SessionDescriptor } from './transport';
 import {
   IAction,
   IAsk,
@@ -17,16 +17,6 @@ import {
 } from './types';
 import { groupByDate } from './utils/group';
 
-export interface ISession {
-  socket: ChainlitSocket;
-  error?: boolean;
-}
-
-export const threadIdToResumeState = atom<string | undefined>({
-  key: 'ThreadIdToResume',
-  default: undefined
-});
-
 /**
  * The last `error` message from the server, or undefined.
  *
@@ -37,11 +27,6 @@ export const threadIdToResumeState = atom<string | undefined>({
  */
 export const protocolErrorState = atom<ProtocolError | undefined>({
   key: 'ProtocolError',
-  default: undefined
-});
-
-export const chatProfileState = atom<string | undefined>({
-  key: 'ChatProfile',
   default: undefined
 });
 
@@ -74,7 +59,7 @@ const isReloadNavigation = (): boolean => {
 // reload reconnects to the same server session and a pending ask can be
 // restored. sessionStorage is deliberate: localStorage would collapse every
 // tab into a single server session.
-const sessionStorageSessionIdEffect: AtomEffect<string> = ({
+const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
   setSelf,
   onSet
 }) => {
@@ -83,45 +68,77 @@ const sessionStorageSessionIdEffect: AtomEffect<string> = ({
       ? sessionStorage.getItem(sessionIdStorage.key)
       : null;
     if (saved) {
-      setSelf(saved);
+      setSelf({ sessionId: saved });
     } else {
       const fresh = uuidv4();
       sessionStorage.setItem(sessionIdStorage.key, fresh);
-      setSelf(fresh);
+      setSelf({ sessionId: fresh });
     }
   } catch (_error) {
     // Storage unavailable (sandboxed iframe, privacy mode): fall back to the
     // in-memory id, i.e. the historical behavior.
   }
 
-  onSet((newValue) => {
-    // Resets never reach the atom: the sessionIdState selector converts a
-    // DefaultValue into a fresh uuid before writing.
+  onSet((descriptor) => {
     try {
-      sessionStorage.setItem(sessionIdStorage.key, newValue);
+      sessionStorage.setItem(sessionIdStorage.key, descriptor.sessionId);
     } catch (_error) {
       // Ignore storage failures; the atom still holds the id.
     }
   });
 };
 
-const sessionIdAtom = atom<string>({
-  key: 'SessionId',
-  default: uuidv4(),
+/**
+ * What the socket is currently for: the session, the thread it resumes, and
+ * the profile the client offers.
+ *
+ * One atom rather than three, because navigation moves all of them at once
+ * and the transport reacts to the result. `clear()`, a profile hand-off and
+ * a thread resume each mint a whole descriptor in a single write; when they
+ * were three atoms every one of those changes reached the connect effect
+ * separately, and the intermediate combinations — a new session id still
+ * pointing at the previous thread — were real states the socket was opened
+ * on.
+ *
+ * The three selectors below are views onto it, so the components that only
+ * read one field keep doing so.
+ */
+export const sessionDescriptorState = atom<SessionDescriptor>({
+  key: 'SessionDescriptor',
+  default: { sessionId: uuidv4() },
   effects: [sessionStorageSessionIdEffect]
 });
 
-export const sessionIdState = selector({
-  key: 'SessionIdSelector',
-  get: ({ get }) => get(sessionIdAtom),
+export const sessionIdState = selector<string>({
+  key: 'SessionId',
+  get: ({ get }) => get(sessionDescriptorState).sessionId,
+  // A reset means "give me a different session", which is a fresh uuid --
+  // the DefaultValue itself never reaches the atom.
   set: ({ set }, newValue) =>
-    set(sessionIdAtom, newValue instanceof DefaultValue ? uuidv4() : newValue)
+    set(sessionDescriptorState, (descriptor) => ({
+      ...descriptor,
+      sessionId: newValue instanceof DefaultValue ? uuidv4() : newValue
+    }))
 });
 
-export const sessionState = atom<ISession | undefined>({
-  key: 'Session',
-  dangerouslyAllowMutability: true,
-  default: undefined
+export const chatProfileState = selector<string | undefined>({
+  key: 'ChatProfile',
+  get: ({ get }) => get(sessionDescriptorState).chatProfile,
+  set: ({ set }, newValue) =>
+    set(sessionDescriptorState, (descriptor) => ({
+      ...descriptor,
+      chatProfile: newValue instanceof DefaultValue ? undefined : newValue
+    }))
+});
+
+export const threadIdToResumeState = selector<string | undefined>({
+  key: 'ThreadIdToResume',
+  get: ({ get }) => get(sessionDescriptorState).threadId,
+  set: ({ set }, newValue) =>
+    set(sessionDescriptorState, (descriptor) => ({
+      ...descriptor,
+      threadId: newValue instanceof DefaultValue ? undefined : newValue
+    }))
 });
 
 export const actionState = atom<IAction[]>({

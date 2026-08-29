@@ -9,4 +9,5 @@ export * from './context';
 export * from './state';
 export * from './protocol';
 export * from './socket';
+export * from './transport';
 export * from './utils/message';

@@ -9,9 +9,9 @@ import {
   askUserState,
   loadingState,
   messagesState,
-  sessionIdState,
   useChatInteract,
   useChatSession,
+  useChatTransport,
   useConfig
 } from '@chainlit/react-client';
 
@@ -29,12 +29,12 @@ import {
 export default function ChatProfileSwitchListener() {
   const navigate = useNavigate();
   const { config } = useConfig();
-  const { session, chatProfile, setChatProfile } = useChatSession();
+  const { chatProfile } = useChatSession();
+  const transport = useChatTransport();
   const { clear } = useChatInteract();
   const setAskUser = useSetRecoilState(askUserState);
   const setLoading = useSetRecoilState(loadingState);
   const setMessages = useSetRecoilState(messagesState);
-  const setSessionId = useSetRecoilState(sessionIdState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
   const setKeptExcursions = useSetRecoilState(keptExcursionsState);
   const setCollapsedExcursions = useSetRecoilState(collapsedExcursionsState);
@@ -74,7 +74,6 @@ export default function ChatProfileSwitchListener() {
     flushSync(() => {
       setAskUser(undefined);
       setLoading(false);
-      setChatProfile(name);
       setAttachments([]);
 
       // Read through updaters so these are the values before clear() wipes
@@ -93,16 +92,12 @@ export default function ChatProfileSwitchListener() {
       }
 
       // The real teardown, so this path inherits whatever it grows upstream.
-      clear();
-
-      // clear() resets the session id to a random one; overwrite it with
-      // the id the backend parked the hand-off record under. Recoil applies
-      // these set calls in order, so the last write wins, and flushSync
-      // commits once. Absent only when there was nothing to hand over — the
-      // random id from clear() is then exactly right.
-      if (nextSessionId) {
-        setSessionId(nextSessionId);
-      }
+      // The successor is stated in full rather than assembled: the id the
+      // backend parked the hand-off record under (absent only when there was
+      // nothing to hand over, and a random one is then exactly right) and
+      // the profile it switches to are one decision, and the connect effect
+      // must never see half of it.
+      clear({ sessionId: nextSessionId || undefined, chatProfile: name });
 
       if (keepTranscript && kept === undefined) {
         console.error(
@@ -135,13 +130,15 @@ export default function ChatProfileSwitchListener() {
     });
   };
 
-  useEffect(() => {
-    const socket = session?.socket;
-    if (!socket) return;
-    return socket.subscribe((message) => {
-      if (message.t === 'session.handoff') switchRef.current?.(message);
-    });
-  }, [session?.socket]);
+  // Subscribed to the transport, not to a socket: the listener outlives
+  // every connection the transport builds, so nothing re-registers it.
+  useEffect(
+    () =>
+      transport.onMessage((message) => {
+        if (message.t === 'session.handoff') switchRef.current?.(message);
+      }),
+    [transport]
+  );
 
   return null;
 }

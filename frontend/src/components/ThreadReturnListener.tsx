@@ -8,7 +8,8 @@ import {
   currentThreadIdState,
   protocolErrorState,
   sessionIdState,
-  useChatSession
+  useChatData,
+  useChatTransport
 } from '@chainlit/react-client';
 
 import { useOpenThread } from '@/hooks/useOpenThread';
@@ -29,7 +30,8 @@ import {
  * copilot widget, which keeps the whole feature inert there.
  */
 export default function ThreadReturnListener() {
-  const { session } = useChatSession();
+  const transport = useChatTransport();
+  const { error, superseded } = useChatData();
   const location = useLocation();
   const openThread = useOpenThread();
 
@@ -47,11 +49,10 @@ export default function ThreadReturnListener() {
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
+  // Subscribed to the transport, not to a socket: the listener outlives
+  // every connection the transport builds, so nothing re-registers it.
   useEffect(() => {
-    const socket = session?.socket;
-    if (!socket) return;
-
-    return socket.subscribe((message) => {
+    return transport.onMessage((message) => {
       switch (message.t) {
         case 'thread.open':
           if (!message.threadId) {
@@ -96,7 +97,7 @@ export default function ThreadReturnListener() {
           return;
       }
     });
-  }, [session?.socket, setParentEntry]);
+  }, [transport, setParentEntry]);
 
   // The composer's return button cannot navigate itself (it also renders in
   // the copilot widget, outside any router), so it parks a request that is
@@ -119,7 +120,9 @@ export default function ThreadReturnListener() {
         currentThreadId,
         pathname: location.pathname,
         resumeError: protocolError?.code === ErrorCode.THREAD_NOT_FOUND,
-        sessionError: !!session?.error
+        // A superseded session will never finish the open either, and
+        // leaving the transition in flight would swallow every future one.
+        sessionError: error || superseded
       })
     ) {
       setTransition(undefined);
@@ -129,7 +132,8 @@ export default function ThreadReturnListener() {
     currentThreadId,
     location.pathname,
     protocolError,
-    session?.error,
+    error,
+    superseded,
     setTransition
   ]);
 

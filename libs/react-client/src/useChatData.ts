@@ -1,11 +1,12 @@
+import { useSyncExternalStore } from 'react';
 import { useRecoilValue } from 'recoil';
 
+import { useChatTransport } from './context';
 import {
   actionState,
   askUserState,
   elementState,
   loadingState,
-  sessionState,
   tasklistState
 } from './state';
 
@@ -21,10 +22,18 @@ const useChatData = () => {
   const elements = useRecoilValue(elementState);
   const tasklists = useRecoilValue(tasklistState);
   const actions = useRecoilValue(actionState);
-  const session = useRecoilValue(sessionState);
   const askUser = useRecoilValue(askUserState);
 
-  const connected = !!session?.socket.connected && !session?.error;
+  // Read straight from the transport rather than from a mirror in the store:
+  // the connection is a live object, and every copy of its state that lived
+  // in an atom had to be kept in step with it by hand.
+  const transport = useChatTransport();
+  const { connected, error, superseded } = useSyncExternalStore(
+    transport.subscribe,
+    transport.getSnapshot,
+    transport.getSnapshot
+  );
+
   const disabled =
     !connected ||
     loading ||
@@ -41,8 +50,11 @@ const useChatData = () => {
     connected,
     disabled,
     elements,
-    error: session?.error,
+    error,
     loading,
+    // Close 4409: this conversation is being had in another connection.
+    // Distinct from `error`, which means something went wrong.
+    superseded,
     tasklists
   };
 };

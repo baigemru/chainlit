@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   ErrorCode,
   protocolErrorState,
+  useChatData,
   useChatInteract,
   useChatSession,
   useConfig
@@ -22,8 +23,9 @@ interface Props {
 export default function AutoResumeThread({ id }: Props) {
   const navigate = useNavigate();
   const { config } = useConfig();
-  const { clear, setIdToResume } = useChatInteract();
-  const { session, idToResume } = useChatSession();
+  const { clear } = useChatInteract();
+  const { idToResume } = useChatSession();
+  const { error } = useChatData();
   const [protocolError, setProtocolError] = useRecoilState(protocolErrorState);
   const resetKeptTranscript = useResetKeptTranscript();
 
@@ -34,36 +36,42 @@ export default function AutoResumeThread({ id }: Props) {
   const transitionRef = useRef(transition);
   transitionRef.current = transition;
 
-  // Once per thread id. The config is dropped and refetched whenever the
-  // profile changes -- which a resume does, the moment the thread's profile
-  // comes back -- and an effect keyed on it would clear and resume again,
-  // opening a second session on the same thread.
-  const resumedRef = useRef<string>();
-
+  // The descriptor is the guard. The config is dropped and refetched
+  // whenever the profile changes -- which a resume does, the moment the
+  // thread's profile comes back -- and this effect re-runs; a session
+  // already opened to resume this thread is the answer, so it does nothing.
   useEffect(() => {
     if (!config?.threadResumable) return;
-    if (resumedRef.current === id) return;
-    resumedRef.current = id;
+    if (idToResume === id) return;
     const isReturn =
       transitionRef.current?.threadId === id &&
       transitionRef.current.keepTranscript;
     if (!isReturn) resetKeptTranscript();
-    clear();
-    setIdToResume(id);
+    // One write: the successor session and the thread it resumes are the
+    // same decision.
+    clear({ threadId: id });
     if (!config?.dataPersistence) {
       navigate('/');
     }
-  }, [config?.threadResumable, id]);
+  }, [config?.threadResumable, id, idToResume]);
 
   useEffect(() => {
     if (id !== idToResume) {
       return;
     }
-    if (session?.error) {
+    // `error` no longer covers close 4409: a session taken over by another
+    // window is not a resume that failed, and sending the user back to the
+    // home screen for it would throw away the thread they asked for.
+    if (error) {
       toast.error("Couldn't resume chat");
+      // The descriptor is the guard above, so a resume that failed has to
+      // let go of the thread it was for -- otherwise picking the same
+      // thread out of the history again would find the guard already
+      // satisfied and do nothing at all.
+      clear();
       navigate('/');
     }
-  }, [session, idToResume, id]);
+  }, [error, idToResume, id]);
 
   // The wire has one error channel now; a resume failure is the
   // `thread_not_found` code on it.
@@ -74,6 +82,9 @@ export default function AutoResumeThread({ id }: Props) {
         ? "Couldn't resume chat: " + protocolError.message
         : "Couldn't resume chat"
     );
+    // Same release as above: the thread this session was opened for turned
+    // out not to exist, and the next attempt at it must be a fresh one.
+    clear();
     navigate('/');
     setProtocolError(undefined);
   }, [protocolError]);

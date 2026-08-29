@@ -97,6 +97,13 @@ export interface ChainlitSocketOptions {
   onStatus?: (status: ConnectionStatus) => void;
   /** Fires on every close, retried or not. */
   onClose?: (info: CloseInfo) => void;
+  /**
+   * The outbound queue to drain. Passed in by {@link ChatTransport} so one
+   * buffer outlives the sockets built from it: work queued while the
+   * connection was down survives the transport being rebuilt for a new
+   * descriptor, not only an automatic reconnect. Defaults to a private one.
+   */
+  buffer?: ClientMsg[];
 }
 
 /** Build the websocket URL from the API's HTTP endpoint. */
@@ -126,7 +133,7 @@ export class ChainlitSocket {
    * length to prove a click happened while the transport was down. Nothing
    * in the application writes to it.
    */
-  readonly sendBuffer: ClientMsg[] = [];
+  readonly sendBuffer: ClientMsg[];
 
   private readonly options: ChainlitSocketOptions;
   private readonly listeners = new Set<(message: ServerMsg) => void>();
@@ -143,6 +150,7 @@ export class ChainlitSocket {
 
   constructor(options: ChainlitSocketOptions) {
     this.options = options;
+    this.sendBuffer = options.buffer ?? [];
   }
 
   /**
@@ -165,17 +173,6 @@ export class ChainlitSocket {
     return this.ready && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  /**
-   * True while this transport is still trying: open, opening, or between
-   * retries. False once it was closed deliberately or gave up.
-   */
-  get alive(): boolean {
-    return (
-      !this.closedByUs &&
-      (this.status !== 'closed' || this.retryTimer !== undefined)
-    );
-  }
-
   /** Open the socket, or do nothing if one is already open or opening. */
   connect(): void {
     this.closedByUs = false;
@@ -191,9 +188,9 @@ export class ChainlitSocket {
   }
 
   /**
-   * Close deliberately and stay closed. The buffer is kept: a `clear()`
-   * followed by a fresh session builds a new transport anyway, and dropping
-   * queued work here would lose it silently.
+   * Close deliberately and stay closed. The buffer is kept — it belongs to
+   * the {@link ChatTransport} above, which hands the same one to the socket
+   * that replaces this.
    */
   close(): void {
     this.closedByUs = true;
@@ -283,9 +280,7 @@ export class ChainlitSocket {
       // server has answered `session.ready`. socket.io flushed its buffer
       // *before* announcing itself, which is how buffered events used to
       // reach a half-initialised session.
-      const hello = this.options.hello();
-      console.debug('[chainlit] hello ' + JSON.stringify(hello));
-      this.write(hello);
+      this.write(this.options.hello());
     };
 
     socket.onmessage = (event) => {

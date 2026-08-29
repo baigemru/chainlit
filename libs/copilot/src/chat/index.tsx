@@ -1,8 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 
 import {
-  sessionIdState,
   threadIdToResumeState,
   useChatInteract,
   useChatSession
@@ -12,64 +11,28 @@ import { copilotThreadIdState } from '../state';
 import ChatBody from './body';
 
 export default function ChatWrapper() {
-  const { connect, session, idToResume } = useChatSession();
+  const { attach, descriptor } = useChatSession();
   const { sendMessage } = useChatInteract();
   const copilotThreadId = useRecoilValue(copilotThreadIdState);
-  const sessionId = useRecoilValue(sessionIdState);
   const setThreadIdToResume = useSetRecoilState(threadIdToResumeState);
-  const hasConnected = useRef<boolean>(false);
-  const lastConnectedThreadId = useRef<string | null>(null);
-  const lastSessionId = useRef<string | null>(null);
 
-  // A replaced session id (e.g. the server refused the persisted one and a
-  // fresh id was minted) needs a new connection — re-arm the connect guard.
+  // The widget always resumes a thread of its own, so the thread the host
+  // page names is part of the descriptor rather than something bolted on
+  // after the connection is up.
   useEffect(() => {
-    if (
-      hasConnected.current &&
-      lastSessionId.current &&
-      sessionId !== lastSessionId.current
-    ) {
-      hasConnected.current = false;
-    }
-    lastSessionId.current = sessionId;
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!copilotThreadId) {
-      return;
-    }
-
+    if (!copilotThreadId) return;
     setThreadIdToResume(copilotThreadId);
   }, [copilotThreadId, setThreadIdToResume]);
 
+  // Attaching is idempotent by descriptor, so the three refs that used to
+  // stand in for "have we connected, and what for" are gone: the only thing
+  // to check is that the descriptor has caught up with the host page. A new
+  // thread id is a new descriptor, which closes the old connection and opens
+  // one for the new thread by itself.
   useEffect(() => {
-    if (
-      copilotThreadId &&
-      lastConnectedThreadId.current &&
-      copilotThreadId !== lastConnectedThreadId.current &&
-      hasConnected.current
-    ) {
-      if (session?.socket?.connected) {
-        session.socket.disconnect();
-      }
-      hasConnected.current = false;
-      lastConnectedThreadId.current = null;
-    }
-  }, [copilotThreadId]);
-
-  useEffect(() => {
-    if (!copilotThreadId || !idToResume || copilotThreadId !== idToResume) {
-      return;
-    }
-
-    if (hasConnected.current) {
-      return;
-    }
-
-    hasConnected.current = true;
-    lastConnectedThreadId.current = copilotThreadId;
-    connect({ userEnv: {} });
-  }, [copilotThreadId, idToResume, connect, sessionId]);
+    if (!copilotThreadId || descriptor.threadId !== copilotThreadId) return;
+    attach(descriptor, { userEnv: {} });
+  }, [attach, descriptor, copilotThreadId]);
 
   useEffect(() => {
     // @ts-expect-error is not a valid prop

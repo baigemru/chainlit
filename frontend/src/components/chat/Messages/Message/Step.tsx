@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/accordion';
 import { Translator } from 'components/i18n';
 
+import { useIsMobile } from '@/hooks/use-mobile';
+
 interface Props {
   step: IStep;
   isRunning?: boolean;
@@ -29,6 +31,9 @@ export default function Step({
   isRunning
 }: PropsWithChildren<Props>) {
   const { showStepDetails } = useContext(MessageContext);
+  // `w-0 flex-grow` is the row trick for a shrinkable column; stacked under
+  // the avatar the same pair collapses the step to zero width.
+  const isMobile = useIsMobile();
 
   const using = useMemo(() => {
     return isRunning && step.start && !step.end && !step.isError;
@@ -52,7 +57,9 @@ export default function Step({
   // If there's no content or step details are disabled, just render the status without accordion
   if (!hasContent || !showStepDetails) {
     return (
-      <div className="flex flex-col flex-grow w-0">
+      <div
+        className={cn('flex flex-col flex-grow', isMobile ? 'w-full' : 'w-0')}
+      >
         <p
           className={cn(
             'flex items-center gap-1 font-medium',
@@ -77,7 +84,7 @@ export default function Step({
   }
 
   return (
-    <div className="flex flex-col flex-grow w-0">
+    <div className={cn('flex flex-col flex-grow', isMobile ? 'w-full' : 'w-0')}>
       <Accordion
         type="single"
         collapsible

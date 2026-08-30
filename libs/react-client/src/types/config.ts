@@ -90,7 +90,14 @@ export interface IChainlitConfig {
       target?: '_blank' | '_self' | '_parent' | '_top';
       label_url?: string;
       label_refresh_interval?: number;
+      /** Fold this link into the header overflow menu on a narrow screen. */
+      collapse_on_mobile?: boolean;
     }[];
+    /**
+     * Built-in header buttons a narrow screen keeps; the rest fold into the
+     * overflow menu. Absent means the header's own default.
+     */
+    mobile_header?: string[];
     user_menu_links?: {
       name: string;
       url: string;

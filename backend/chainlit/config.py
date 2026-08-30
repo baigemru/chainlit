@@ -230,6 +230,11 @@ default_avatar_file_url = ""
 # environment variable, which takes precedence.
 # login_page_forgot_password_url = "https://example.com/reset-password"
 
+# Built-in header buttons kept in the header on a narrow screen; every other
+# one moves into the header's overflow menu. Known names: "new_chat",
+# "chat_profiles", "share", "readme", "api_keys", "theme", "user_nav".
+# mobile_header = ["new_chat", "chat_profiles", "user_nav"]
+
 # Specify optional one or more custom links in the header.
 # [[UI.header_links]]
 #     name = "Issues"
@@ -243,6 +248,7 @@ default_avatar_file_url = ""
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
 #     label_url = "/my/endpoint"   # Optional. Endpoint returning {{"label": "..."}} used as the button text; a click re-fetches instead of navigating.
 #     label_refresh_interval = 60  # Optional. Re-fetch the label every N seconds.
+#     collapse_on_mobile = true    # Optional, defaults to true. false keeps the link in the header on a narrow screen.
 
 # Specify optional one or more custom links inside the user menu (the dropdown
 # opened by clicking the avatar in the top-right corner).
@@ -325,6 +331,10 @@ class FeaturesSettings(Settings):
 class HeaderLink(Settings):
     name: str
     url: str
+    # Fold the link into the header's overflow menu on a narrow screen. A
+    # header link with a live label (a balance) is the one an app wants left
+    # in place, so this is opt-out rather than opt-in.
+    collapse_on_mobile: bool = True
     icon_url: Optional[str] = None
     # Per-theme icon overrides; icon_url is the fallback for both themes.
     icon_url_light: Optional[str] = None
@@ -356,6 +366,12 @@ class UserMenuLink(Settings):
     icon_mask: bool = False
     display_name: Optional[str] = None
     target: Optional[Literal["_blank", "_self", "_parent", "_top", "iframe"]] = None
+
+
+# The built-in header buttons a narrow screen keeps; every other one folds
+# into the header's overflow menu. What is left is what a phone actually
+# needs: start a chat, pick a profile, reach the account.
+DEFAULT_MOBILE_HEADER = ["new_chat", "chat_profiles", "user_nav"]
 
 
 class UISettings(Settings):
@@ -393,6 +409,12 @@ class UISettings(Settings):
     custom_build: Optional[str] = None
     header_links: Optional[List[HeaderLink]] = None
     user_menu_links: Optional[List[UserMenuLink]] = None
+    # Built-in header buttons kept in the header on a narrow screen; the rest
+    # move into the overflow menu. Known names: "new_chat", "chat_profiles",
+    # "share", "readme", "api_keys", "theme", "user_nav".
+    mobile_header: List[str] = msgspec.field(
+        default_factory=lambda: list(DEFAULT_MOBILE_HEADER)
+    )
 
 
 @dataclass

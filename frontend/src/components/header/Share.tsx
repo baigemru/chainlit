@@ -6,6 +6,7 @@ import { useChatMessages, useConfig } from '@chainlit/react-client';
 
 import ShareDialog from '@/components/share/ShareDialog';
 import { Button } from '@/components/ui/button';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import {
   Tooltip,
   TooltipContent,
@@ -15,7 +16,12 @@ import {
 
 import { Translator } from '../i18n';
 
-export default function ShareButton() {
+interface Props {
+  /** Render as a row of the header's overflow menu instead of a button. */
+  collapsed?: boolean;
+}
+
+export default function ShareButton({ collapsed }: Props) {
   const { messages, threadId } = useChatMessages();
   const [isOpen, setIsOpen] = useState(false);
   const { config } = useConfig();
@@ -30,6 +36,27 @@ export default function ShareButton() {
     !threadSharingReady
   )
     return null;
+
+  const dialog = (
+    <ShareDialog open={isOpen} onOpenChange={setIsOpen} threadId={threadId} />
+  );
+
+  if (collapsed) {
+    return (
+      <>
+        <DropdownMenuItem
+          // Selecting a row closes the menu, and the dialog is mounted here:
+          // it would be gone before it painted.
+          onSelect={(e) => e.preventDefault()}
+          onClick={() => setIsOpen(true)}
+        >
+          <Translator path="threadHistory.thread.menu.share" />
+          <Share2 className="ml-auto size-4" />
+        </DropdownMenuItem>
+        {dialog}
+      </>
+    );
+  }
 
   return (
     <>
@@ -53,7 +80,7 @@ export default function ShareButton() {
         </Tooltip>
       </TooltipProvider>
 
-      <ShareDialog open={isOpen} onOpenChange={setIsOpen} threadId={threadId} />
+      {dialog}
     </>
   );
 }

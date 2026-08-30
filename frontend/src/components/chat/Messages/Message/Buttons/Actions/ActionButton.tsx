@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import { MessageContext } from 'contexts/MessageContext';
 import { useCallback, useContext, useMemo, useState } from 'react';
 import { useRecoilValue } from 'recoil';
@@ -19,12 +20,15 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
+import { useIsMobile } from '@/hooks/use-mobile';
+
 interface ActionProps {
   action: IAction;
 }
 
 const ActionButton = ({ action }: ActionProps) => {
   const { loading, askUser } = useContext(MessageContext);
+  const isMobile = useIsMobile();
   const apiClient = useContext(ChainlitContext);
   const sessionId = useRecoilValue(sessionIdState);
   const [isRunning, setIsRunning] = useState(false);
@@ -65,11 +69,17 @@ const ActionButton = ({ action }: ActionProps) => {
       onClick={handleClick}
       size="sm"
       variant="ghost"
-      className="text-muted-foreground"
+      className={cn(
+        'text-muted-foreground',
+        // Stacked on a narrow screen, so a long label is clipped to the
+        // message width instead of reaching past it.
+        isMobile && 'w-full min-w-0 justify-start'
+      )}
       disabled={loading || isRunning}
+      title={isMobile ? content : undefined}
     >
       {icon}
-      {content}
+      {isMobile ? <span className="truncate">{content}</span> : content}
     </Button>
   );
 

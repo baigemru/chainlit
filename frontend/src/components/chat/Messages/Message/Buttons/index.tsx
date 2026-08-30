@@ -7,6 +7,8 @@ import {
 
 import CopyButton from '@/components/CopyButton';
 
+import { useIsMobile } from '@/hooks/use-mobile';
+
 import MessageActions from './Actions';
 import { DebugButton } from './DebugButton';
 import { FeedbackButtons } from './FeedbackButtons';
@@ -21,6 +23,7 @@ interface Props {
 const MessageButtons = ({ message, actions, run, contentRef }: Props) => {
   const { config } = useConfig();
   const { firstInteraction } = useChatMessages();
+  const isMobile = useIsMobile();
 
   const isUser = message.type === 'user_message';
   const isAsk = message.waitForAnswer;
@@ -39,13 +42,21 @@ const MessageButtons = ({ message, actions, run, contentRef }: Props) => {
   }
 
   return (
-    <div className="-ml-1.5 flex items-center flex-wrap">
+    <div className="-ml-1.5 flex items-center flex-wrap max-w-full">
       {showCopyButton ? (
         <CopyButton content={message.output} contentRef={contentRef} />
       ) : null}
       {run ? <FeedbackButtons message={run} /> : null}
       {messageActions.length ? (
-        <MessageActions actions={messageActions} />
+        // The labelled actions are the ones that overflow a phone; the icon
+        // buttons around them stay a row, or every icon takes a line of its own.
+        isMobile ? (
+          <div className="flex flex-col items-stretch w-full gap-1">
+            <MessageActions actions={messageActions} />
+          </div>
+        ) : (
+          <MessageActions actions={messageActions} />
+        )
       ) : null}
       {showDebugButton ? (
         <DebugButton debugUrl={config.debugUrl!} step={message} />

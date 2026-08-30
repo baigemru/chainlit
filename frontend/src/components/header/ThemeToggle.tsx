@@ -13,10 +13,32 @@ import { Translator } from 'components/i18n';
 
 interface Props {
   className?: string;
+  /**
+   * Render as rows of the header's overflow menu instead of a header button.
+   * Flat rows, not a nested menu: a second menu root inside an open one
+   * fights the first for focus and pointer events.
+   */
+  collapsed?: boolean;
 }
 
-export function ThemeToggle({ className }: Props) {
+export function ThemeToggle({ className, collapsed }: Props) {
   const { setTheme } = useTheme();
+
+  const items = (
+    <>
+      <DropdownMenuItem onClick={() => setTheme('light')}>
+        <Translator path="navigation.header.theme.light" />
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setTheme('dark')}>
+        <Translator path="navigation.header.theme.dark" />
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setTheme('system')}>
+        <Translator path="navigation.header.theme.system" />
+      </DropdownMenuItem>
+    </>
+  );
+
+  if (collapsed) return items;
 
   return (
     <DropdownMenu>
@@ -35,17 +57,7 @@ export function ThemeToggle({ className }: Props) {
           <span className="sr-only">Toggle theme</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme('light')}>
-          <Translator path="navigation.header.theme.light" />
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme('dark')}>
-          <Translator path="navigation.header.theme.dark" />
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme('system')}>
-          <Translator path="navigation.header.theme.system" />
-        </DropdownMenuItem>
-      </DropdownMenuContent>
+      <DropdownMenuContent align="end">{items}</DropdownMenuContent>
     </DropdownMenu>
   );
 }

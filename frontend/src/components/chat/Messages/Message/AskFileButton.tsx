@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import { MessageContext } from 'contexts/MessageContext';
 import { Upload } from 'lucide-react';
 import { useContext, useState } from 'react';
@@ -9,6 +10,7 @@ import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useUpload } from 'hooks/useUpload';
 
 interface UploadState {
@@ -80,6 +82,7 @@ const _AskFileButton = ({
   onError
 }: _AskFileButtonProps) => {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
 
   const [uploads, setUploads] = useState<UploadState[]>([]);
 
@@ -146,26 +149,37 @@ const _AskFileButton = ({
   if (!upload) return null;
   const { getRootProps, getInputProps } = upload;
 
+  const hint = (
+    <div className="flex flex-col min-w-0">
+      <p className="text-sm font-medium truncate">
+        <Translator path="chat.fileUpload.dragDrop" />
+      </p>
+      <p className="text-sm text-muted-foreground truncate">
+        <Translator path="chat.fileUpload.sizeLimit" /> {askUser.spec.maxSizeMb}
+        mb
+      </p>
+    </div>
+  );
+
   return (
     <Card className="w-full mt-2">
       <div
         {...getRootProps({ className: 'dropzone' })}
-        className="flex items-center p-4"
+        // On a narrow screen the row cannot hold the wording and the button
+        // side by side: the button ends up past the edge of the card.
+        className={cn(
+          'p-4',
+          isMobile ? 'flex flex-col items-stretch gap-2' : 'flex items-center'
+        )}
       >
         <input id="ask-button-input" {...getInputProps()} />
-        <div className="flex flex-col">
-          <p className="text-sm font-medium">
-            <Translator path="chat.fileUpload.dragDrop" />
-          </p>
-          <p className="text-sm text-muted-foreground">
-            <Translator path="chat.fileUpload.sizeLimit" />{' '}
-            {askUser.spec.maxSizeMb}mb
-          </p>
-        </div>
+        {/* The button leads on a phone: it is what the card is for, and the
+            wording under it is only a reminder of the size limit. */}
+        {isMobile ? null : hint}
         <Button
           id={uploading ? 'ask-upload-button-loading' : 'ask-upload-button'}
           disabled={uploading || askUser.awaitingReply}
-          className="ml-auto"
+          className={cn(isMobile ? 'w-full min-w-0' : 'ml-auto')}
           variant={uploading ? 'ghost' : 'default'}
         >
           {uploading ? (
@@ -177,6 +191,7 @@ const _AskFileButton = ({
             </>
           )}
         </Button>
+        {isMobile ? hint : null}
       </div>
     </Card>
   );

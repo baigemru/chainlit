@@ -18,6 +18,8 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
+import { useIsMobile } from '@/hooks/use-mobile';
+
 interface Props {
   author?: string;
   hide?: boolean;
@@ -42,6 +44,7 @@ const MessageAvatar = ({
   const apiClient = useContext(ChainlitContext);
   const { chatProfile } = useChatSession();
   const { config } = useConfig();
+  const isMobile = useIsMobile();
 
   const selectedChatProfile = useMemo(() => {
     const profileName = messageChatProfile ?? chatProfile;
@@ -58,7 +61,14 @@ const MessageAvatar = ({
     return apiClient?.buildEndpoint(`/avatars/${author || 'default'}`);
   }, [apiClient, selectedChatProfile, config, author]);
 
-  const avatarSize = config?.ui?.avatar_size;
+  const configuredSize = config?.ui?.avatar_size;
+  // Half the configured size on a phone: 40px is 15% of a 375px screen, and
+  // product cards live in the rest of it. The 20px default is small already
+  // and stays as it is.
+  const avatarSize =
+    configuredSize && isMobile
+      ? Math.round(configuredSize / 2)
+      : configuredSize;
   const sizeStyle = avatarSize
     ? { width: `${avatarSize}px`, height: `${avatarSize}px` }
     : undefined;

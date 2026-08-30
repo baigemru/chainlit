@@ -9,6 +9,7 @@ import {
   type IStep
 } from '@chainlit/react-client';
 
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 
 import { Messages, SegmentedMessages } from '..';
@@ -52,6 +53,7 @@ const Message = memo(
       onError
     } = useContext(MessageContext);
     const layoutMaxWidth = useLayoutMaxWidth();
+    const isMobile = useIsMobile();
     const contentRef = useRef<HTMLDivElement>(null);
     const isUserMessage = message.type === 'user_message';
     const isStep = !message.type.includes('message');
@@ -67,6 +69,16 @@ const Message = memo(
     const waitActive = isWaitActive(message, activeWaitStepId);
     const showInputSection = Boolean(message.input && message.showInput);
     const shouldRenderOutput = !showInputSection || Boolean(message.output);
+
+    const author = message.metadata?.avatarName || message.name;
+    const avatar = (
+      <MessageAvatar
+        author={author}
+        isError={message.isError}
+        iconName={message.metadata?.icon}
+        messageChatProfile={message.metadata?.chat_profile}
+      />
+    );
 
     const userMessageContent = useMemo(
       () => (
@@ -122,14 +134,25 @@ const Message = memo(
                   </UserMessage>
                 </div>
               ) : (
-                <div className="ai-message flex gap-4 w-full">
+                <div
+                  className={cn(
+                    'ai-message flex w-full',
+                    // A column on a phone: the avatar column costs 15% of the
+                    // width of every message, and product cards live in the rest.
+                    isMobile ? 'flex-col gap-2' : 'gap-4'
+                  )}
+                >
                   {!isStep || !indent ? (
-                    <MessageAvatar
-                      author={message.metadata?.avatarName || message.name}
-                      isError={message.isError}
-                      iconName={message.metadata?.icon}
-                      messageChatProfile={message.metadata?.chat_profile}
-                    />
+                    isMobile ? (
+                      <div className="flex items-center gap-2 min-w-0">
+                        {avatar}
+                        <span className="text-sm font-medium text-muted-foreground truncate">
+                          {author}
+                        </span>
+                      </div>
+                    ) : (
+                      avatar
+                    )
                   ) : null}
                   {/* Display the step and its children */}
                   {isStep ? (

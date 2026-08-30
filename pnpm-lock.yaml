@@ -32,12 +32,6 @@ importers:
       '@trivago/prettier-plugin-sort-imports':
         specifier: ^4.3.0
         version: 4.3.0(@vue/compiler-sfc@3.5.32)(prettier@3.8.1)
-      '@types/react':
-        specifier: ^18.2.15
-        version: 18.2.15
-      '@types/react-dom':
-        specifier: ^18.2.7
-        version: 18.2.7
       cypress:
         specifier: ^14.5.3
         version: 14.5.3
@@ -47,9 +41,6 @@ importers:
       cypress-split:
         specifier: ^1.24.31
         version: 1.24.31(@babel/core@7.29.0)
-      dotenv:
-        specifier: ^16.3.1
-        version: 16.3.1
       eslint:
         specifier: ^10
         version: 10.2.0
@@ -74,9 +65,6 @@ importers:
       prettier:
         specifier: ^3.8.1
         version: 3.8.1
-      shell-exec:
-        specifier: ^1.1.2
-        version: 1.1.2
       ts-node:
         specifier: ^10.9.1
         version: 10.9.1(@types/node@20.8.1)(typescript@5.2.2)
@@ -568,18 +556,6 @@ packages:
   '@types/node@20.8.1':
     resolution: {integrity: sha512-iN6stS2QGMl50pjH0h/dIfmcEUogljAreQZ+cubPw3ISWp5fJrZw9NOh/sDHJfw92A41hCU+Ls5zTIsNYzcnuA==}
 
-  '@types/prop-types@15.7.8':
-    resolution: {integrity: sha512-kMpQpfZKSCBqltAJwskgePRaYRFukDkm1oItcAbC3gNELR20XIBcN9VRgg4+m8DKsTfkWeA4m4Imp4DDuWy7FQ==}
-
-  '@types/react-dom@18.2.7':
-    resolution: {integrity: sha512-GRaAEriuT4zp9N4p1i8BDBYmEyfo+xQ3yHjJU4eiK5NDa1RmUZG+unZABUTK4/Ox/M+GaHwb6Ow8rUITrtjszA==}
-
-  '@types/react@18.2.15':
-    resolution: {integrity: sha512-oEjE7TQt1fFTFSbf8kkNuc798ahTUzn3Le67/PWjE8MAfYAD/qB7O8hSTcromLFqHCt9bcdOg5GXMokzTjJ5SA==}
-
-  '@types/scheduler@0.16.4':
-    resolution: {integrity: sha512-2L9ifAGl7wmXwP4v3pN4p2FLhD0O1qsJpvKmNin5VA8+UvNVb447UDaAEV6UdrkA+m/Xs58U1RFps44x6TFsVQ==}
-
   '@types/sinonjs__fake-timers@8.1.1':
     resolution: {integrity: sha512-0kSuKjAS0TrGLJ0M/+8MaFkGsQhZpB6pxOmvS3K8FYI72K//YmdfoW9X2qPsAKh1mkwxGD5zib9s1FIFed6E8g==}
 
@@ -955,9 +931,6 @@ packages:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
-  csstype@3.1.2:
-    resolution: {integrity: sha512-I7K1Uu0MBPzaFKg4nI5Q7Vs2t+3gWWW648spaF+Rg7pI9ds18Ugn+lvg4SHczUdKlHI5LWBXyqfS8+DufyBsgQ==}
-
   cypress-plugin-steps@1.2.1:
     resolution: {integrity: sha512-L2khZMhTMgbAMBQhh4x2SQweVlb8ugadVsQlunnwGVBN313YfhoxsvWaQjJjm/N+0z/oUSZoKD3yAYkcFKEw9A==}
     peerDependencies:
@@ -1091,10 +1064,6 @@ packages:
   dir-glob@3.0.1:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
     engines: {node: '>=8'}
-
-  dotenv@16.3.1:
-    resolution: {integrity: sha512-IPzF4w4/Rd94bA9imS68tZBaYyBWSCE47V1RGuMrB94iyTOIEwRmVL2x/4An+6mETpLrKJ5hQkB8W4kFAadeIQ==}
-    engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -2154,10 +2123,6 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
-  shell-exec@1.1.2:
-    resolution: {integrity: sha512-v2NWVDP0ws+S7miKy2oSpJ/OuL6NKuMosPNUZLDWFBlMnBtuoZxZOwxpQJwhsFZgMb+r7frpDTT8p4OSnhkpsg==}
-    engines: {node: '>=12'}
-
   shelljs@0.10.0:
     resolution: {integrity: sha512-Jex+xw5Mg2qMZL3qnzXIfaxEtBaC4n7xifqaqtrZDdlheR70OGkydrPJWT0V1cA1k3nanC86x9FwAmQl6w3Klw==}
     engines: {node: '>=18'}
@@ -2971,20 +2936,6 @@ snapshots:
 
   '@types/node@20.8.1': {}
 
-  '@types/prop-types@15.7.8': {}
-
-  '@types/react-dom@18.2.7':
-    dependencies:
-      '@types/react': 18.2.15
-
-  '@types/react@18.2.15':
-    dependencies:
-      '@types/prop-types': 15.7.8
-      '@types/scheduler': 0.16.4
-      csstype: 3.1.2
-
-  '@types/scheduler@0.16.4': {}
-
   '@types/sinonjs__fake-timers@8.1.1': {}
 
   '@types/sizzle@2.3.4': {}
@@ -3396,8 +3347,6 @@ snapshots:
       shebang-command: 2.0.0
       which: 2.0.2
 
-  csstype@3.1.2: {}
-
   cypress-plugin-steps@1.2.1(cypress@14.5.3):
     dependencies:
       cypress: 14.5.3
@@ -3601,8 +3550,6 @@ snapshots:
   dir-glob@3.0.1:
     dependencies:
       path-type: 4.0.0
-
-  dotenv@16.3.1: {}
 
   dunder-proto@1.0.1:
     dependencies:
@@ -4717,8 +4664,6 @@ snapshots:
       shebang-regex: 3.0.0
 
   shebang-regex@3.0.0: {}
-
-  shell-exec@1.1.2: {}
 
   shelljs@0.10.0:
     dependencies:

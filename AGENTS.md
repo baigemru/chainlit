@@ -45,10 +45,10 @@ pnpm **9** (pinned by `packageManager`). The repository is one uv workspace
 
 ### Install
 
-| What   | Command                               | Directory |
-| ------ | ------------------------------------- | --------- |
-| Python | `uv sync --all-packages --all-extras` | repo root |
-| JS     | `pnpm install`                        | repo root |
+| What   | Command                                                                                                                                                 | Directory |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Python | `uv sync --all-packages --all-extras --all-groups` (without `--all-groups` the root `default-groups` drops backend's `dev` group and uninstalls `ruff`) | repo root |
+| JS     | `pnpm install`                                                                                                                                          | repo root |
 
 ### Build
 

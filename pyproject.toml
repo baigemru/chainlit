@@ -8,14 +8,7 @@ python_version = "3.14"
 [[tool.mypy.overrides]]
 module = [
     "filetype",
-    "lazify",
     "plotly",
-    "socketio.*",
-    "syncer",
-    "azure.storage.filedatalake",
-    "google-cloud-storage",
-    "azure.storage.blob",
-    "azure.storage.blob.aio",
     "google.auth",
     "google.oauth2",
 ]

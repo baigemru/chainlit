@@ -31,7 +31,6 @@ classifiers = [
 dependencies = [
     "httpx>=0.28.1",
     "uvicorn[standard]>=0.52.4",
-    "aiofiles>=25.1.0",
     "click>=8.4.2,<9.0.0",
     "python-dotenv>=1.2.3,<2.0.0",
     "watchfiles>=1.2.0,<2.0.0",
@@ -71,11 +70,12 @@ tests = [
     "pandas>=3.0.5,<4.0.0",
     "polars>=1.44.0,<2.0.0",
     "moto>=5.2.3,<6.0.0",
+    # Not imported by the package — the Cypress `ask_file` app uses it, and the
+    # e2e workflow installs this extra and nothing else.
+    "aiofiles>=25.1.0",
 ]
 mypy = [
     "mypy>=1.20.2,<2.0.0",
-    "types-requests>=2.33.0.20260712,<3.0.0",
-    "types-aiofiles>=25.1.0.20260518,<26.0.0",
     "pandas-stubs>=3.0.5.260730,<4.0.0",
 ]
 custom-data = [

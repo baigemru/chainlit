@@ -1101,6 +1101,37 @@ class TestStaleCookieCutover:
         assert response.status_code == 401
         assert not set_cookies(response)
 
+    def test_the_cookie_outranks_a_proxy_injected_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The production reverse proxy injects an Authorization value of its
+        # own on every request; with the stock header-first order the fresh
+        # cookie was never read and every authed route answered 401
+        # (30.08.2026). The cookie must win.
+        async def password_auth(username, password):
+            return User(identifier=username)
+
+        monkeypatch.setattr(config.code, "password_auth_callback", password_auth)
+
+        with client() as c:
+            login = c.post("/login", files=_form())
+            assert login.status_code == 200
+            me = c.get("/user", headers={"Authorization": "Bearer proxy-junk"})
+
+        assert me.status_code == 200
+        assert me.json()["identifier"] == "ada@example.com"
+
+    def test_a_bare_header_token_still_authenticates(self):
+        # No cookie in the jar: the header remains a valid carrier for API
+        # callers.
+        auth = chainlit_auth(token_secret=SECRET)
+        token = auth.create_token(identifier="api@example.com")
+        with client(auth=auth) as c:
+            me = c.get("/user", headers={"Authorization": f"Bearer {token}"})
+
+        assert me.status_code == 200
+        assert me.json()["identifier"] == "api@example.com"
+
     def test_a_fresh_login_still_works_over_a_stale_jar(
         self, monkeypatch: pytest.MonkeyPatch
     ):

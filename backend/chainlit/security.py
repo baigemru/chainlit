@@ -122,7 +122,32 @@ class StaleTokenError(NotAuthorizedException):
 
 
 class CutoverAuthMiddleware(JWTCookieAuthenticationMiddleware):
-    """The stock cookie middleware, with undecodable tokens told apart."""
+    """The stock cookie middleware, with two cutover corrections.
+
+    The cookie outranks the ``Authorization`` header — the pre-rebuild
+    stack's order. The stock middleware prefers the header, and the first
+    production deploy found out why that matters: the reverse proxy there
+    injects an ``Authorization`` value of its own on every request, so the
+    freshly minted cookie was never even read and every authed route
+    answered 401 (30.08.2026). Browsers cannot set the header at all; the
+    one route that takes a caller-supplied JWT (``/auth/jwt``) reads it
+    explicitly, not through this middleware.
+    """
+
+    async def authenticate_request(
+        self, connection: ASGIConnection[Any, Any, Any, Any]
+    ) -> AuthenticationResult:
+        encoded_token = (
+            connection.cookies.get(self.auth_cookie_key, "").split(" ")[-1]
+            or connection.headers.get(self.auth_header, "").partition(" ")[-1]
+        )
+        if not encoded_token:
+            raise NotAuthorizedException(
+                "No JWT token found in request header or cookies"
+            )
+        return await self.authenticate_token(
+            encoded_token=encoded_token, connection=connection
+        )
 
     async def authenticate_token(
         self, encoded_token: str, connection: ASGIConnection[Any, Any, Any, Any]

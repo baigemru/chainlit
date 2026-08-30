@@ -30,20 +30,13 @@ from typing import Any, Callable, Dict, Literal, Optional, cast
 from litestar import Request
 from litestar.connection import ASGIConnection
 from litestar.datastructures import State
-from litestar.exceptions import NotAuthorizedException
-from litestar.middleware.authentication import AuthenticationResult
-from litestar.security.jwt import (
-    JWTCookieAuth,
-    JWTCookieAuthenticationMiddleware,
-    Token,
-)
+from litestar.security.jwt import JWTCookieAuth, Token
 
 __all__ = (
     "AUTH_SECRET_ENV",
     "AuthedRequest",
     "ChainlitAuth",
     "Identity",
-    "StaleTokenError",
     "chainlit_auth",
     "get_auth_secret",
     "identity_from_token",
@@ -107,46 +100,6 @@ async def identity_from_token(
     )
 
 
-class StaleTokenError(NotAuthorizedException):
-    """A token arrived by cookie and did not validate.
-
-    Every browser that used the pre-rebuild deployment still carries its old
-    ``access_token``: signed by pyjwt without a ``sub`` claim, alive for
-    weeks, refused here. Left in the jar it pins the user to the login page
-    for as long as it lives, so this case gets its own exception — the
-    handler the plugin registers answers it with the same 401 *plus* the
-    ``Set-Cookie`` deletions that take the stale cookie (and any legacy
-    chunks) out of the jar. A missing token stays a plain
-    ``NotAuthorizedException``: there is nothing to clear.
-    """
-
-
-class CutoverAuthMiddleware(JWTCookieAuthenticationMiddleware):
-    """The stock cookie middleware, with undecodable tokens told apart.
-
-    Stock also means the stock carrier order: ``Authorization`` header
-    first, cookie second. A proxy that injects a header value of its own
-    breaks that order for every browser (seen 30.08.2026, a leftover
-    ``header_up Authorization`` in the Caddyfile) — the fix belongs in the
-    proxy, not here.
-    """
-
-    async def authenticate_token(
-        self, encoded_token: str, connection: ASGIConnection[Any, Any, Any, Any]
-    ) -> AuthenticationResult:
-        try:
-            return await super().authenticate_token(encoded_token, connection)
-        except StaleTokenError:
-            raise
-        except NotAuthorizedException as error:
-            # The cookie is the only carrier a browser has; an Authorization
-            # header with a cookie alongside is nothing this app's clients
-            # send, so a failed token plus a present cookie is a stale jar.
-            if self.auth_cookie_key in connection.cookies:
-                raise StaleTokenError(detail="Invalid token") from error
-            raise
-
-
 @dataclass
 class ChainlitAuth(JWTCookieAuth[Identity, Token]):
     """``JWTCookieAuth`` with Chainlit's ``connection.user`` type pinned.
@@ -165,11 +118,6 @@ class ChainlitAuth(JWTCookieAuth[Identity, Token]):
         [Token, ASGIConnection[Any, Any, Any, Any]], Any
     ] = identity_from_token
     key: str = "access_token"
-    # The cutover middleware, so a stale legacy cookie raises
-    # ``StaleTokenError`` and the plugin's handler can clear it.
-    authentication_middleware_class: type[JWTCookieAuthenticationMiddleware] = (
-        CutoverAuthMiddleware
-    )
 
 
 def chainlit_auth(

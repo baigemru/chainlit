@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from secrets import compare_digest, token_urlsafe
 from typing import Annotated, Any, Dict, Optional
 
-from litestar import Controller, Request, Response, get, post
+from litestar import Controller, Response, get, post
 from litestar.datastructures import Cookie
 from litestar.di import NamedDependency, Provide
 from litestar.exceptions import (
@@ -59,7 +59,6 @@ from litestar.exceptions import (
     NotAuthorizedException,
     NotFoundException,
 )
-from litestar.exceptions.responses import create_exception_response
 from litestar.params import (
     FromPath,
     FromQuery,
@@ -96,7 +95,6 @@ __all__ = (
     "cleared_auth_cookie",
     "provide_user_service",
     "security_provider",
-    "stale_token_handler",
     "state_cookie",
 )
 
@@ -217,38 +215,6 @@ def auth_configuration() -> Dict[str, Any]:
 
 
 # --- cookies ----------------------------------------------------------------
-
-
-#: The legacy writer chunked oversized tokens as ``access_token_0``,
-#: ``access_token_1``, …; eight covers 24KB, far past anything it produced.
-LEGACY_CHUNK_LIMIT = 8
-
-
-def stale_token_handler(security: ChainlitAuth):
-    """The 401 for a stale cookie, with the deletions that end the loop.
-
-    Registered by the plugin for ``StaleTokenError`` only: a browser whose
-    token does not validate would otherwise present it forever — every
-    pre-rebuild ``access_token`` lives for weeks and lacks the ``sub`` claim
-    the new tokens carry. The response is the stock 401 body plus a
-    ``Set-Cookie`` deletion for the auth cookie and for every legacy chunk
-    the request actually presented.
-    """
-
-    def handle(request: Request, exc: Exception) -> Response[Any]:
-        response = create_exception_response(request, exc)
-        response.cookies.append(cleared_auth_cookie(security))
-        for i in range(LEGACY_CHUNK_LIMIT):
-            name = f"{security.key}_{i}"
-            if name in request.cookies:
-                # The legacy writer used Path=/ and no Domain; the deletion
-                # must match that scope, not the configured cookie path.
-                response.cookies.append(
-                    Cookie(key=name, value="", path="/", max_age=0, httponly=True)
-                )
-        return response
-
-    return handle
 
 
 def cleared_auth_cookie(security: ChainlitAuth) -> Cookie:

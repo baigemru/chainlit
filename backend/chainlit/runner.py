@@ -154,6 +154,7 @@ class ApplicationRunner:
             thread_id=thread_id,
             chat_profile=hello.chat_profile,
             client_type=hello.client_type,
+            device=hello.device,
             user_env=dict(hello.user_env or {}),
         )
         if self.persistence is not None:
@@ -280,7 +281,14 @@ class ApplicationRunner:
 
         metadata = dict(detail.metadata or {})
         session.state.update(
-            {k: v for k, v in metadata.items() if k not in ("env", "client_type")}
+            # ``device`` joins the excluded mirrors for the same reason: it
+            # describes the connection reading the thread, not the thread. A
+            # chat begun on a phone must not label a desktop resume "mobile".
+            {
+                k: v
+                for k, v in metadata.items()
+                if k not in ("env", "client_type", "device")
+            }
         )
         if profile := metadata.get("chat_profile"):
             session.chat_profile = profile

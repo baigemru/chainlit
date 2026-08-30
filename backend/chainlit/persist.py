@@ -180,6 +180,7 @@ def thread_state(session: "Session") -> dict[str, Any]:
     state = {k: v for k, v in session.state.items() if k not in _VOLATILE_STATE}
     state["chat_profile"] = session.chat_profile
     state["client_type"] = session.client_type
+    state["device"] = session.device
     state["env"] = dict(session.user_env) if config.project.persist_user_env else {}
     return _jsonable(state)
 

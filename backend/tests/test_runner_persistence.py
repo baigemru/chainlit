@@ -301,6 +301,70 @@ def test_the_first_interaction_persists_the_thread(
     assert metadata["counter"] == 7
 
 
+# --------------------------------------------------------------- 1a. device
+
+
+def test_the_device_reaches_the_session_and_the_thread(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """The one thing ``device`` is for: a funnel event can name the screen."""
+    seed_user(db_url, ALICE)
+    seen: List[Any] = []
+
+    async def on_message(msg: cl.Message) -> None:
+        seen.append(cl.user_session.get("device"))
+        await cl.Message(content="ok").send()
+
+    test_config.code.on_message = on_message
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws, device="mobile")
+            send_and_read_reply(ws, "from a phone")
+        thread_id = handshake[0]["threadId"]
+        detail = wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+
+    assert seen == ["mobile"]
+    assert (detail.metadata or {})["device"] == "mobile"
+
+
+def test_a_hello_without_a_device_leaves_no_device_and_still_resumes(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """The field is optional, and a thread stored without it resumes."""
+    seed_user(db_url, ALICE)
+    seen: List[Any] = []
+
+    async def on_message(msg: cl.Message) -> None:
+        seen.append(("message", cl.user_session.get("device")))
+        await cl.Message(content="ok").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        seen.append(("resume", cl.user_session.get("device")))
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            send_and_read_reply(ws, "from something")
+        thread_id = handshake[0]["threadId"]
+        stored = wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, sessionId="s2", threadId=thread_id)
+            wait_until(lambda: len(seen) == 2)
+
+    assert seen == [("message", None), ("resume", None)]
+    # Absent or null, never the string "None": the funnel has nothing to
+    # report for this client, and a reader must be able to tell.
+    assert (stored.metadata or {}).get("device") is None
+    assert first(replay, "thread.resume")["thread"]["id"] == thread_id
+
+
 # ------------------------------------------------------------------ 2. resume
 
 

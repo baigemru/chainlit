@@ -57,8 +57,16 @@ function App() {
       return;
     }
 
-    attach(descriptor, { userEnv });
-  }, [userEnv, isAuthenticated, attach, descriptor, isReady, chatProfileOk]);
+    attach(descriptor, { userEnv, device });
+  }, [
+    userEnv,
+    isAuthenticated,
+    attach,
+    descriptor,
+    isReady,
+    chatProfileOk,
+    device
+  ]);
 
   // Close 4409: the session was taken over by another connection. Nothing is
   // broken and nothing is lost — this window simply no longer speaks for the

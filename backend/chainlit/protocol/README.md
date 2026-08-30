@@ -107,6 +107,10 @@ ten names retired with the features behind them).
 | `chat_settings_edit`    | **retired**     | chat settings are unused                                                                                                                                                                                                                                           |
 | —                       | `hb.ack`        | **New.** Answer to `hb`.                                                                                                                                                                                                                                           |
 
+`hello.device` (`"mobile" | "pc" | null`) is new and **analytics only**: it
+cuts the funnel by screen class, nothing on the server may branch on it, and
+a client that omits it gets exactly the same session.
+
 ---
 
 ## Correlation

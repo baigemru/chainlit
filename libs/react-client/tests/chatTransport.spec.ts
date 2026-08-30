@@ -338,6 +338,33 @@ describe('ChatTransport', () => {
     expect(latest().hello().chatProfile).toBe('second');
   });
 
+  it('reports the device in the handshake without making it an identity', async () => {
+    transport.attach({ sessionId: 'a' }, { device: 'mobile' });
+    await settle();
+    latest().open();
+    latest().deliver(ready('a'));
+    expect(latest().hello().device).toBe('mobile');
+
+    // A rotation past the breakpoint is a payload refresh, not a different
+    // conversation: the socket must survive it.
+    transport.attach({ sessionId: 'a' }, { device: 'pc' });
+    await settle();
+    expect(sockets()).toHaveLength(1);
+
+    latest().drop();
+    vi.advanceTimersByTime(BACKOFF_CEILING);
+    latest().open();
+    expect(latest().hello().device).toBe('pc');
+  });
+
+  it('leaves the device out of a handshake nobody stated one for', async () => {
+    transport.attach({ sessionId: 'a' });
+    await settle();
+    latest().open();
+
+    expect(latest().hello().device).toBeUndefined();
+  });
+
   it('offers the thread the session is in over the one it was opened to resume', async () => {
     transport.attach(
       { sessionId: 'a', threadId: 'resumed' },

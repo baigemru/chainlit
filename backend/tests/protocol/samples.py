@@ -134,6 +134,7 @@ CLIENT_SAMPLES: dict[str, c.ClientMsg] = {
     "hello": c.Hello(
         session_id="session-1",
         client_type="copilot",
+        device="mobile",
         thread_id="thread-1",
         chat_profile="default",
         user_env={"OPENAI_API_KEY": "x"},

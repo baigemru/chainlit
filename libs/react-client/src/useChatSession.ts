@@ -56,7 +56,7 @@ import type {
   ServerMsgHandlers
 } from './protocol';
 import { CloseCode } from './protocol';
-import type { SessionDescriptor, SessionSink } from './transport';
+import type { HelloPayload, SessionDescriptor, SessionSink } from './transport';
 
 /**
  * Turn a wire ask spec into the flat shape the ask components read.
@@ -471,7 +471,13 @@ const useChatSession = () => {
   const attach = useCallback(
     (
       target: SessionDescriptor,
-      { userEnv }: { userEnv?: Record<string, string> } = {}
+      {
+        userEnv,
+        device
+      }: {
+        userEnv?: Record<string, string>;
+        device?: HelloPayload['device'];
+      } = {}
     ) => {
       transport.setSink(sink);
       transport.attach(target, {
@@ -479,7 +485,10 @@ const useChatSession = () => {
         // one it was opened to resume.
         threadId: currentThreadId || target.threadId,
         chatProfile: target.chatProfile,
-        userEnv
+        userEnv,
+        // Whoever renders knows the screen; this package does not. Passed
+        // through untouched, and only for the funnel.
+        device
       });
     },
     [transport, sink, currentThreadId]

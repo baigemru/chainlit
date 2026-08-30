@@ -204,6 +204,7 @@ export interface Hello {
   t: 'hello';
   sessionId: string;
   clientType?: 'copilot' | 'discord' | 'slack' | 'teams' | 'webapp';
+  device?: 'mobile' | 'pc' | null;
   threadId?: string | null;
   chatProfile?: string | null;
   userEnv?: Record<string, string>;

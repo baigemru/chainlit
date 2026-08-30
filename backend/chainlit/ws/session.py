@@ -199,6 +199,7 @@ class Session:
         thread_id: Optional[str] = None,
         chat_profile: Optional[str] = None,
         client_type: str = "webapp",
+        device: Optional[str] = None,
         user_env: Optional[Dict[str, str]] = None,
         files_root: Optional[Path] = None,
     ) -> None:
@@ -209,6 +210,10 @@ class Session:
         self.thread_id = thread_id
         self.chat_profile = chat_profile
         self.client_type = client_type
+        #: What the client says it is being read on. Carried for the funnel
+        #: and nothing else -- no branch in this package may read it, or the
+        #: same conversation would behave differently on a phone.
+        self.device = device
         self.user_env: Dict[str, str] = dict(user_env or {})
 
         #: The application's own state, persisted into thread metadata so it

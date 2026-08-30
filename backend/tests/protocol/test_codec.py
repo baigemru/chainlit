@@ -85,3 +85,6 @@ def test_an_absent_optional_field_decodes_to_its_default() -> None:
     assert decoded.client_type == "webapp"
     assert decoded.page_load is False
     assert decoded.user_env == {}
+    # A client that knows nothing about screen classes is a client with no
+    # funnel, not a malformed handshake.
+    assert decoded.device is None

@@ -47,6 +47,11 @@ class Hello(_Msg, tag="hello"):
 
     session_id: str
     client_type: Literal["webapp", "copilot", "teams", "slack", "discord"] = "webapp"
+    #: The screen class the client computed for itself, for cutting the
+    #: funnel by device. Analytics only: nothing on the server branches on
+    #: it, and a client that never sends it is a client with no funnel, not
+    #: a client with less of a session.
+    device: Literal["mobile", "pc"] | None = None
     thread_id: str | None = None
     chat_profile: str | None = None
     user_env: dict[str, str] = {}

@@ -16,11 +16,12 @@
  * which a stale attach can act.
  *
  * What is deliberately *not* part of that identity is the hello payload: the
- * chat profile, the live thread id and the user env travel in every handshake
- * and change while a session is running. The server announces a profile of
- * its own on `session.ready` and on `thread.resume`; treating that as a new
- * descriptor would tear the socket down to tell the server the thing the
- * server just told us, and replay the whole resume for nothing.
+ * chat profile, the live thread id, the user env and the device class travel
+ * in every handshake and change while a session is running. The server
+ * announces a profile of its own on `session.ready` and on `thread.resume`;
+ * treating that as a new descriptor would tear the socket down to tell the
+ * server the thing the server just told us, and replay the whole resume for
+ * nothing.
  */
 import type { ChainlitAPI } from './api';
 import type { ClientMsg, Hello, ServerMsg } from './protocol';
@@ -72,6 +73,13 @@ export interface HelloPayload {
   threadId?: string;
   chatProfile?: string;
   userEnv?: Record<string, string>;
+  /**
+   * The screen class the embedder computed. Payload, never identity: a
+   * phone rotated past the breakpoint refreshes the hello frame, it does
+   * not tear the conversation down. Reported for the funnel only — no
+   * server behaviour hangs off it.
+   */
+  device?: 'mobile' | 'pc';
 }
 
 /**
@@ -328,6 +336,7 @@ export class ChatTransport {
       chatProfile:
         this.payload.chatProfile || descriptor?.chatProfile || undefined,
       userEnv: this.payload.userEnv,
+      device: this.payload.device,
       // True only on the very first connect after a full page load: the
       // server restores the old session then only to rescue a live pending
       // ask; otherwise a reload means a fresh chat.

@@ -65,6 +65,7 @@ from chainlit.controllers.auth import (
     AuthController,
     provide_user_service,
     security_provider,
+    stale_token_handler,
 )
 from chainlit.controllers.files import FilesController
 from chainlit.controllers.index import render_index
@@ -74,7 +75,12 @@ from chainlit.runner import (
     ApplicationRunner,
     ThreadStoreAdapter,
 )
-from chainlit.security import ChainlitAuth, chainlit_auth, get_auth_secret
+from chainlit.security import (
+    ChainlitAuth,
+    StaleTokenError,
+    chainlit_auth,
+    get_auth_secret,
+)
 from chainlit.transit_store import (
     SWEEP_INTERVAL_SECONDS,
     TRANSIT_STORE_NAME,
@@ -462,6 +468,12 @@ class ChainlitPlugin(InitPlugin):
             # what authenticates the websocket upgrade — the browser cannot
             # set an Authorization header on one, and the cookie it can set.
             app_config = self._auth.on_app_init(app_config)
+            # A browser still holding the pre-rebuild cookie would 401 on
+            # every request for weeks; the handler clears it (see
+            # ``StaleTokenError``). setdefault, like every handler here.
+            app_config.exception_handlers.setdefault(
+                StaleTokenError, stale_token_handler(self._auth)
+            )
 
         if handlers := self.route_handlers():
             app_config.route_handlers.append(

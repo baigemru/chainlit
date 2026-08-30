@@ -1038,3 +1038,83 @@ def test_the_public_routes_do_not_need_a_credential(monkeypatch: pytest.MonkeyPa
 def test_os_environ_is_not_read_at_import_time():
     """The cookie settings are read when the auth is built, not at import."""
     assert "CHAINLIT_AUTH_COOKIE_NAME" not in os.environ
+
+
+# --- the cutover: stale legacy cookies --------------------------------------
+
+
+def _legacy_token() -> str:
+    """A real pre-rebuild token: pyjwt, ``identifier`` claim, no ``sub``."""
+    import jwt as pyjwt
+
+    return pyjwt.encode(
+        {
+            "identifier": "ada@example.com",
+            "metadata": {"provider": "keycloak"},
+            "exp": 4102444800,  # 2100; the legacy cookie outlives the cutover
+        },
+        SECRET,
+        algorithm="HS256",
+    )
+
+
+def deleted(response, name: str) -> bool:
+    """Whether the response carries a ``Set-Cookie`` deletion for ``name``."""
+    for header in set_cookies(response):
+        key, _, rest = header.partition("=")
+        if key.strip() == name and "max-age=0" in rest.lower():
+            return True
+    return False
+
+
+class TestStaleCookieCutover:
+    def test_a_legacy_token_is_refused_and_the_cookie_cleared(self):
+        # The exact prod jar of 30.08.2026: every pre-rebuild browser holds
+        # a pyjwt cookie without ``sub``, alive for weeks. Without the
+        # deletion it pins the user to the login page for as long as it
+        # lives.
+        with client() as c:
+            c.cookies.set(COOKIE, _legacy_token())
+            response = c.get("/user")
+
+        assert response.status_code == 401
+        assert deleted(response, COOKIE), "the stale cookie was not cleared"
+
+    def test_garbage_and_legacy_chunks_are_cleared_together(self):
+        with client() as c:
+            c.cookies.set(COOKIE, "not-a-jwt")
+            c.cookies.set(f"{COOKIE}_0", "first-chunk")
+            c.cookies.set(f"{COOKIE}_1", "second-chunk")
+            response = c.get("/user")
+
+        assert response.status_code == 401
+        assert deleted(response, COOKIE)
+        assert deleted(response, f"{COOKIE}_0")
+        assert deleted(response, f"{COOKIE}_1")
+
+    def test_no_cookie_clears_nothing(self):
+        # Nothing presented, nothing to clear: the plain 401 must not spray
+        # deletions at a jar that is already empty.
+        with client() as c:
+            response = c.get("/user")
+
+        assert response.status_code == 401
+        assert not set_cookies(response)
+
+    def test_a_fresh_login_still_works_over_a_stale_jar(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The cutover cost is one login: with the legacy cookie still in the
+        # jar, a password login must mint a session that wins.
+        async def password_auth(username, password):
+            return User(identifier=username)
+
+        monkeypatch.setattr(config.code, "password_auth_callback", password_auth)
+
+        with client() as c:
+            c.cookies.set(COOKIE, _legacy_token())
+            login = c.post("/login", files=_form())
+            assert login.status_code == 200
+            me = c.get("/user")
+
+        assert me.status_code == 200

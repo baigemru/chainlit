@@ -150,15 +150,18 @@ export default function MobileNotice() {
           ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{notice.dismiss_label}</AlertDialogCancel>
-          <AlertDialogAction
+          {/* The emphasis is on staying: this is a warning, not a push off
+              the phone. The link is the quiet, outlined button, and on a
+              narrow screen it sits below the highlighted one. */}
+          <AlertDialogCancel
             onClick={() => {
               markSeen(notice.frequency);
               followLink(notice.link_url);
             }}
           >
             {notice.link_label}
-          </AlertDialogAction>
+          </AlertDialogCancel>
+          <AlertDialogAction>{notice.dismiss_label}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

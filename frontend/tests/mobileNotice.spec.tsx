@@ -119,6 +119,21 @@ describe('MobileNotice', () => {
     expect(screen.getByText(NOTICE.dismiss_label)).toBeInTheDocument();
   });
 
+  it('highlights staying, not leaving: the notice warns, it does not push', () => {
+    configure();
+
+    render(<MobileNotice />);
+
+    // The filled button is the primary one; the outlined one is the link.
+    expect(screen.getByText(NOTICE.dismiss_label).className).toContain(
+      'bg-primary'
+    );
+    expect(screen.getByText(NOTICE.link_label).className).toContain('border');
+    expect(screen.getByText(NOTICE.link_label).className).not.toContain(
+      'bg-primary'
+    );
+  });
+
   it('uses the text as the heading when no title is configured', () => {
     configure({ title: '' });
 

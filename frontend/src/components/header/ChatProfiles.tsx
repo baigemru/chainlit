@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { useSetRecoilState } from 'recoil';
 
 import {
@@ -23,6 +23,11 @@ import {
   SelectValue
 } from '@/components/ui/select';
 
+import {
+  matchesDevice,
+  pickDefaultProfile,
+  useDeviceKey
+} from '@/hooks/use-mobile';
 import { useResetKeptTranscript } from '@/hooks/useParentThread';
 
 import { IAttachment, attachmentsState } from '@/state/chat';
@@ -43,30 +48,47 @@ export default function ChatProfiles({ navigate }: Props) {
   const resetKeptTranscript = useResetKeptTranscript();
   const [newChatProfile, setNewChatProfile] = useState<string | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const device = useDeviceKey();
 
-  // Early return check to prevent unnecessary renders and resource waste
-  if (!config?.chatProfiles?.length || config.chatProfiles.length <= 1) {
-    return null;
-  }
+  const profiles = config?.chatProfiles;
+
+  // Only the offer is filtered. A thread opened from history may well live in
+  // a profile this device is never offered — it has to keep working, and the
+  // trigger has to keep naming it, so the selected one stays in the list.
+  const visibleProfiles = useMemo(
+    () =>
+      profiles?.filter(
+        (profile) =>
+          matchesDevice(profile.device, device) || profile.name === chatProfile
+      ) ?? [],
+    [profiles, device, chatProfile]
+  );
 
   // Handle case when no profile is selected
   useEffect(() => {
-    if (!chatProfile) {
-      setChatProfile(config.chatProfiles[0].name);
+    if (!chatProfile && profiles?.length) {
+      setChatProfile(pickDefaultProfile(profiles, device));
     }
-  }, [chatProfile, config.chatProfiles, setChatProfile]);
+  }, [chatProfile, profiles, device, setChatProfile]);
 
-  // Handle case when selected profile becomes invalid
+  // Handle case when selected profile becomes invalid. Checked against the
+  // full list on purpose: a profile hidden on this device has not vanished.
   useEffect(() => {
-    if (chatProfile) {
-      const profileExists = config.chatProfiles.some(
+    if (chatProfile && profiles?.length) {
+      const profileExists = profiles.some(
         (profile) => profile.name === chatProfile
       );
       if (!profileExists) {
-        setChatProfile(config.chatProfiles[0].name);
+        setChatProfile(profiles[0].name);
       }
     }
-  }, [chatProfile, config.chatProfiles, setChatProfile]);
+  }, [chatProfile, profiles, setChatProfile]);
+
+  // Nothing to choose between: one door is not a selector. Placed below every
+  // hook — the effects above still have to settle the profile.
+  if (visibleProfiles.length <= 1) {
+    return null;
+  }
 
   const handleClose = () => {
     setOpenDialog(false);
@@ -108,7 +130,7 @@ export default function ChatProfiles({ navigate }: Props) {
           <SelectValue placeholder="Select profile" />
         </SelectTrigger>
         <SelectContent>
-          {config.chatProfiles.map((profile) => {
+          {visibleProfiles.map((profile) => {
             const icon = profile.icon?.includes('/public')
               ? apiClient.buildEndpoint(profile.icon)
               : profile.icon;

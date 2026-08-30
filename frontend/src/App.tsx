@@ -16,6 +16,8 @@ import { ThemeProvider } from './components/ThemeProvider';
 import { Loader } from '@/components/Loader';
 import { Toaster } from '@/components/ui/sonner';
 
+import { pickDefaultProfile, useDeviceKey } from '@/hooks/use-mobile';
+
 import { userEnvState } from 'state/user';
 
 declare global {
@@ -35,6 +37,7 @@ function App() {
   const userEnv = useRecoilValue(userEnvState);
   const { attach, descriptor, chatProfile, setChatProfile } = useChatSession();
   const { superseded } = useChatData();
+  const device = useDeviceKey();
 
   const configLoaded = !!config;
 
@@ -75,16 +78,10 @@ function App() {
       return;
     }
 
-    const defaultChatProfile = config.chatProfiles.find(
-      (profile) => profile.default
-    );
-
-    if (defaultChatProfile) {
-      setChatProfile(defaultChatProfile.name);
-    } else {
-      setChatProfile(config.chatProfiles[0].name);
-    }
-  }, [configLoaded, config, chatProfile, setChatProfile]);
+    // Two hubs now claim `default`, one per device; the device decides which
+    // of them this window boots into.
+    setChatProfile(pickDefaultProfile(config.chatProfiles, device));
+  }, [configLoaded, config, chatProfile, device, setChatProfile]);
 
   if (!configLoaded && isAuthenticated) return null;
 

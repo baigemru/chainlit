@@ -1,4 +1,6 @@
+import { cn } from '@/lib/utils';
 import { useCallback, useContext } from 'react';
+import { useSetRecoilState } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
@@ -7,10 +9,15 @@ import {
   IStep,
   useAuth,
   useChatData,
-  useChatInteract
+  useChatInteract,
+  useChatSession
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
+
+import { useResetKeptTranscript } from '@/hooks/useParentThread';
+
+import { IAttachment, attachmentsState } from '@/state/chat';
 
 interface StarterProps {
   starter: IStarter;
@@ -18,13 +25,29 @@ interface StarterProps {
 
 export default function Starter({ starter }: StarterProps) {
   const apiClient = useContext(ChainlitContext);
-  const { sendMessage } = useChatInteract();
+  const { sendMessage, clear } = useChatInteract();
+  const { setChatProfile } = useChatSession();
   const { loading, connected } = useChatData();
   const { user } = useAuth();
+  const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
+  const resetKeptTranscript = useResetKeptTranscript();
 
   const disabled = loading || !connected;
 
   const onSubmit = useCallback(async () => {
+    // A starter naming a profile is a door, not a question: it moves the user
+    // to that profile and says nothing on their behalf — no server round trip
+    // and no line in the transcript. The same teardown as a manual selection
+    // (ChatProfiles.handleConfirm), minus its dialog: starters are only on
+    // screen while the chat is still empty, so there is nothing to confirm.
+    if (starter.profile) {
+      setChatProfile(starter.profile);
+      setAttachments([]);
+      resetKeptTranscript();
+      clear();
+      return;
+    }
+
     const message: IStep = {
       threadId: '',
       id: uuidv4(),
@@ -37,13 +60,27 @@ export default function Starter({ starter }: StarterProps) {
     };
 
     sendMessage(message, []);
-  }, [user, sendMessage, starter]);
+  }, [
+    user,
+    sendMessage,
+    starter,
+    setChatProfile,
+    setAttachments,
+    resetKeptTranscript,
+    clear
+  ]);
+
+  const highlight = starter.highlight === true;
 
   return (
     <Button
       id={`starter-${starter.label.trim().toLowerCase().replaceAll(' ', '-')}`}
-      variant="outline"
-      className="w-fit justify-start rounded-3xl"
+      variant={highlight ? 'default' : 'outline'}
+      className={cn(
+        highlight
+          ? 'w-full justify-center h-12 text-base rounded-2xl'
+          : 'w-fit justify-start rounded-3xl'
+      )}
       disabled={disabled}
       onClick={onSubmit}
     >
@@ -59,7 +96,12 @@ export default function Starter({ starter }: StarterProps) {
             alt={starter.label}
           />
         ) : null}
-        <p className="text-sm text-muted-foreground truncate">
+        <p
+          className={cn(
+            'truncate',
+            highlight ? 'text-base' : 'text-sm text-muted-foreground'
+          )}
+        >
           {starter.label}
         </p>
       </div>

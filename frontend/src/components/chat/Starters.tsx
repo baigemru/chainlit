@@ -3,6 +3,8 @@ import { useMemo, useState } from 'react';
 
 import { useChatSession, useConfig } from '@chainlit/react-client';
 
+import { matchesDevice, useDeviceKey } from '@/hooks/use-mobile';
+
 import Starter from './Starter';
 import StarterCategory from './StarterCategory';
 
@@ -13,6 +15,7 @@ interface Props {
 export default function Starters({ className }: Props) {
   const { chatProfile } = useChatSession();
   const { config } = useConfig();
+  const device = useDeviceKey();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const starters = useMemo(() => {
@@ -27,7 +30,25 @@ export default function Starters({ className }: Props) {
     return config?.starters;
   }, [config, chatProfile]);
 
-  const starterCategories = config?.starterCategories;
+  const visibleStarters = useMemo(
+    () => starters?.filter((starter) => matchesDevice(starter.device, device)),
+    [starters, device]
+  );
+
+  // A category whose every starter belongs to the other device is an empty
+  // promise: it opens onto nothing, so it is not offered at all.
+  const starterCategories = useMemo(
+    () =>
+      config?.starterCategories
+        ?.map((category) => ({
+          ...category,
+          starters: category.starters.filter((starter) =>
+            matchesDevice(starter.device, device)
+          )
+        }))
+        .filter((category) => category.starters.length),
+    [config, device]
+  );
 
   if (starterCategories?.length) {
     const selectedCategoryData = starterCategories.find(
@@ -53,25 +74,25 @@ export default function Starters({ className }: Props) {
             />
           ))}
         </div>
-        {selectedCategoryData?.starters?.length && (
+        {selectedCategoryData?.starters?.length ? (
           <div className="flex gap-2 justify-center flex-wrap">
             {selectedCategoryData.starters.map((starter) => (
               <Starter key={starter.label} starter={starter} />
             ))}
           </div>
-        )}
+        ) : null}
       </div>
     );
   }
 
-  if (!starters?.length) return null;
+  if (!visibleStarters?.length) return null;
 
   return (
     <div
       id="starters"
       className={cn('flex gap-2 justify-center flex-wrap', className)}
     >
-      {starters.map((starter, i) => (
+      {visibleStarters.map((starter, i) => (
         <Starter key={i} starter={starter} />
       ))}
     </div>

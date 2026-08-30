@@ -19,6 +19,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
+import { getDeviceKey, pickDefaultProfile } from '@/hooks/use-mobile';
 import { useResetKeptTranscript } from '@/hooks/useParentThread';
 
 import { EditSquare } from '../icons/EditSquare';
@@ -99,7 +100,16 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
       // A new chat blanks the screen; transcripts kept by returns to a
       // parent thread would otherwise linger above it.
       resetKeptTranscript();
-      clear();
+      // A new chat opens where the config says it should, not wherever the
+      // last one ended up. The device is read here rather than subscribed to:
+      // this is a click, and the answer only matters at this instant.
+      const fallback = pickDefaultProfile(
+        config?.chatProfiles ?? [],
+        getDeviceKey()
+      );
+      // One descriptor write, so the connect effect never sees a session that
+      // is half new chat and half old profile.
+      clear(fallback ? { chatProfile: fallback } : {});
       navigate?.('/');
     }
     handleClose();

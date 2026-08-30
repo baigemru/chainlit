@@ -1,8 +1,19 @@
+/**
+ * Who a profile or a starter is offered to. Purely visibility: nothing
+ * branches on it, and a hidden profile stays perfectly usable when a thread
+ * from another device resolves to it.
+ */
+export type DeviceKey = 'mobile' | 'pc' | 'all';
+
 export interface IStarter {
   label: string;
   message: string;
   icon?: string;
   command?: string;
+  device?: DeviceKey;
+  /** Switches to this chat profile instead of sending `message`. */
+  profile?: string;
+  highlight?: boolean;
 }
 
 export interface IStarterCategory {
@@ -13,6 +24,7 @@ export interface IStarterCategory {
 
 export interface ChatProfile {
   default: boolean;
+  device?: DeviceKey;
   icon?: string;
   name: string;
   display_name?: string;

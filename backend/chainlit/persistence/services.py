@@ -19,16 +19,19 @@ Two conversions run through everything here:
 """
 
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Sequence, cast
+from typing import Any, Dict, Iterator, List, Optional, Sequence, cast
 
 from advanced_alchemy.extensions.litestar import exceptions, service
 from msgspec import UNSET, Struct
 from msgspec.structs import asdict, fields
 from sqlalchemy import CursorResult, Result, Row, RowMapping, delete, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import MultipleResultsFound, NoResultFound
 from sqlalchemy.sql import Executable
 
+from chainlit.logger import logger
 from chainlit.persistence import statements
 from chainlit.persistence.models import (
     ELEMENTS,
@@ -165,8 +168,37 @@ class ChainlitService:
     def dialect(self) -> str:
         return self.repository.session.get_bind().dialect.name
 
+    @contextmanager
+    def _translated(self) -> Iterator[None]:
+        """advanced_alchemy's translation, with the original error kept.
+
+        The translation is lossy on purpose -- an HTTP client gets "There was
+        an issue processing the statement", not the SQL -- but that line was
+        also all the *server* log had, and a 409 that hides whether Postgres
+        refused the statement or asyncpg never sent it cannot be diagnosed
+        after the fact. Expected outcomes (no row, too many rows) are the
+        caller's business and stay quiet.
+        """
+        try:
+            with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
+                yield
+        except exceptions.RepositoryError as error:
+            cause = error.__cause__ or error
+            # `.one()` on an empty result is an answer, not a failure; the
+            # translation files it under InvalidRequestError, so it is told
+            # apart by its cause rather than by its translated type.
+            if isinstance(cause, NoResultFound | MultipleResultsFound):
+                raise
+            logger.error(
+                "Database statement failed: %s: %s",
+                type(cause).__name__,
+                cause,
+                exc_info=cause,
+            )
+            raise
+
     async def execute(self, statement: Executable) -> Result[Any]:
-        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with self._translated():
             return await self.repository.session.execute(statement)
 
     # Reading the result is inside the wrap too, and that is the whole point
@@ -176,17 +208,17 @@ class ChainlitService:
     # exactly the taxonomy this class exists to close.
 
     async def fetch_one(self, statement: Executable) -> Any:
-        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with self._translated():
             result = await self.repository.session.execute(statement)
             return result.one()
 
     async def fetch_one_or_none(self, statement: Executable) -> Optional[Any]:
-        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with self._translated():
             result = await self.repository.session.execute(statement)
             return result.one_or_none()
 
     async def fetch_scalar(self, statement: Executable) -> Any:
-        with exceptions.wrap_sqlalchemy_exception(dialect_name=self.dialect):
+        with self._translated():
             result = await self.repository.session.execute(statement)
             return result.scalar_one_or_none()
 

@@ -42,8 +42,13 @@ export default function ElementSideView() {
   if (isMobile) {
     return (
       <Sheet open onOpenChange={(open) => !open && setSideView(undefined)}>
+        {/* Almost the whole screen: the sheet's default three quarters left a
+            product card squeezed against a 175px image on a phone. */}
         <SheetContent
-          className={cn('md:hidden flex flex-col', isCanvas && 'p-0')}
+          className={cn(
+            'md:hidden flex flex-col w-[95vw] sm:max-w-[95vw]',
+            isCanvas && 'p-0'
+          )}
         >
           {!isCanvas ? (
             <SheetHeader>

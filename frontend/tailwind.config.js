@@ -122,6 +122,20 @@ export default {
     {
       pattern:
         /^(filter-none|blur(?:-\w+)?|brightness-\d+|contrast-\d+|grayscale(?:-\d+)?|hue-rotate-\d+|-hue-rotate-\d+|invert(?:-\d+)?|saturate-\d+|sepia(?:-\d+)?)$/
+    },
+    // Custom elements (`public/elements/*.jsx`) are compiled in the browser
+    // against this stylesheet, so a utility they use exists only if the
+    // application happens to use it too. The layout, spacing and type
+    // utilities below are kept regardless: a host's card must not lose its
+    // grid because a feature that used `grid-cols-2` was deleted here.
+    {
+      pattern:
+        /^(grid-cols-(?:[1-9]|1[0-2])|col-span-(?:[1-9]|1[0-2])|gap(?:-[xy])?-(?:0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|8)|-?[mp][trblxy]?-(?:0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|8|10|12|auto)|space-[xy]-(?:0|0\.5|1|1\.5|2|3|4)|[hw]-(?:0|0\.5|1|1\.5|2|3|4|5|6|8|10|12|16|20|24|32|40|48|64|full|auto|fit|screen)|(?:min|max)-w-(?:0|full|xs|sm|md|lg|xl|2xl|none|fit)|tracking-(?:tighter|tight|normal|wide|wider|widest)|leading-(?:none|tight|snug|normal|relaxed|loose)|font-(?:thin|light|normal|medium|semibold|bold)|text-(?:xs|sm|base|lg|xl|2xl|left|center|right)|rounded(?:-[tblr]|-[tb][lr])?(?:-(?:none|sm|md|lg|xl|2xl|full))?|(?:items|self)-(?:start|end|center|stretch|baseline)|justify-(?:start|end|center|between|around|evenly)|flex-(?:row|col|wrap|nowrap|1|auto|none|shrink-0|grow)|line-clamp-[1-6]|truncate|whitespace-(?:nowrap|pre-wrap|normal)|overflow-(?:hidden|auto|x-auto|y-auto))$/
+    },
+    {
+      pattern:
+        /^(opacity-(?:0|10|20|30|40|50|60|70|80|90|100)|(?:border|text|bg)-(?:primary|muted|accent|destructive)(?:-foreground)?(?:\/(?:10|20|30|40|50|60|70|80|90))?)$/,
+      variants: ['hover', 'disabled']
     }
   ],
   plugins: [animate]

@@ -115,10 +115,15 @@ latter on uvicorn 0.52, which is what the consumer's container runs). Select the
 with `uv run --no-project pytest backend/tests/ws/test_connection.py -k live`.
 
 **Bounded runs on macOS** (no GNU `timeout`) — never leave a server or a suite
-unsupervised in an agent session:
+unsupervised in an agent session. Prefer the tool's own timeout (the Bash
+tool's `timeout` parameter, up to 10 minutes) and run the command in the
+foreground. If you must bound it from the shell, use a watchdog that returns
+as soon as the command finishes — **not** `sleep N` after `&`, which waits
+the whole `N` even when the command took a minute (a ten-gate run lost half
+an hour to it on 30.08.2026):
 
 ```
-( cmd & p=$!; sleep 120; kill $p 2>/dev/null; wait $p )
+perl -e 'alarm shift; exec @ARGV' 600 uv run pytest -q
 ```
 
 ### Lint, format, type-check

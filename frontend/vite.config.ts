@@ -15,7 +15,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       // To prevent conflicts with packages in @chainlit/react-client, we need to specify the resolution paths for these dependencies.
       react: path.resolve(__dirname, './node_modules/react'),
-      'usehooks-ts': path.resolve(__dirname, './node_modules/usehooks-ts'),
       sonner: path.resolve(__dirname, './node_modules/sonner'),
       lodash: path.resolve(__dirname, './node_modules/lodash'),
       recoil: path.resolve(__dirname, './node_modules/recoil')

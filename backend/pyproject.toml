@@ -40,6 +40,9 @@ dependencies = [
     "litestar>=2.24.0",
     "msgspec>=0.19",
     "advanced-alchemy>=1.11",
+    # Imported directly by the migrations and their env; declared rather than
+    # inherited from advanced-alchemy so a bump there cannot take it away.
+    "alembic>=1.19",
 ]
 
 [dependency-groups]

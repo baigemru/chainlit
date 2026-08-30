@@ -182,6 +182,7 @@ name = "chainlit-litestar"
 source = { editable = "backend" }
 dependencies = [
     { name = "advanced-alchemy" },
+    { name = "alembic" },
     { name = "click" },
     { name = "filetype" },
     { name = "httpx" },
@@ -229,6 +230,7 @@ requires-dist = [
     { name = "advanced-alchemy", specifier = ">=1.11" },
     { name = "aiofiles", marker = "extra == 'tests'", specifier = ">=25.1.0" },
     { name = "aiosqlite", marker = "extra == 'tests'", specifier = ">=0.22.1,<1.0.0" },
+    { name = "alembic", specifier = ">=1.19" },
     { name = "asyncpg", marker = "extra == 'custom-data'", specifier = ">=0.31.0,<1.0.0" },
     { name = "boto3", marker = "extra == 'custom-data'", specifier = ">=1.43.79,<2.0.0" },
     { name = "click", specifier = ">=8.4.2,<9.0.0" },

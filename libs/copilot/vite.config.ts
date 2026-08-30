@@ -34,7 +34,6 @@ export default defineConfig({
       sonner: path.resolve(__dirname, './node_modules/sonner'),
       'highlight.js': path.resolve(__dirname, './node_modules/highlight.js'),
       'react-i18next': path.resolve(__dirname, './node_modules/react-i18next'),
-      'usehooks-ts': path.resolve(__dirname, './node_modules/usehooks-ts'),
       lodash: path.resolve(__dirname, './node_modules/lodash'),
       recoil: path.resolve(__dirname, './node_modules/recoil')
     }

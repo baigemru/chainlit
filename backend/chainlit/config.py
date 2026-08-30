@@ -235,6 +235,19 @@ default_avatar_file_url = ""
 # "chat_profiles", "share", "readme", "api_keys", "theme", "user_nav".
 # mobile_header = ["new_chat", "chat_profiles", "user_nav"]
 
+# A phone opening the app is told the full application lives on a desktop,
+# with a link to it. Off unless an app asks for it: most deployments have
+# nothing a phone cannot do, and a pop-up nobody configured is a bug.
+# [UI.mobile_notice]
+#     enabled = true
+#     mode = "dialog"                      # Optional, defaults to "dialog" (modal). "toast" is a non-blocking corner notice.
+#     title = "Full version"               # Optional. Dialog heading; empty falls back to a text-only notice.
+#     text = "The full application is available on a computer."
+#     link_url = "/?device=pc"             # Optional. The query pins the desktop layout for the tab, so the notice stays away.
+#     link_label = "Open the full version" # Optional.
+#     dismiss_label = "Stay here"          # Optional. The dialog's second button.
+#     frequency = "session"                # Optional, defaults to "session" (once per tab). "once" is per browser, "always" is every load.
+
 # Specify optional one or more custom links in the header.
 # [[UI.header_links]]
 #     name = "Issues"
@@ -368,6 +381,35 @@ class UserMenuLink(Settings):
     target: Optional[Literal["_blank", "_self", "_parent", "_top", "iframe"]] = None
 
 
+class MobileNotice(Settings):
+    """What a phone is told when the full application lives on a desktop.
+
+    Text, link and mode are configuration rather than code: the fork ships
+    the notice, each application decides whether it has anything a phone
+    cannot do.
+    """
+
+    # Off by default. Nothing about a narrow screen means an app is degraded
+    # there, and a pop-up no deployment asked for is a regression for every
+    # app that never wanted one.
+    enabled: bool = False
+    # "dialog" blocks until dismissed; "toast" sits in a corner and does not.
+    mode: Literal["dialog", "toast"] = "dialog"
+    # Empty leaves the dialog without a heading; the client then shows the
+    # text alone rather than an empty title row.
+    title: str = ""
+    text: str = "The full application is available on a computer."
+    # By convention the desktop link carries `?device=pc`, which pins the
+    # desktop layout for the tab, so following it does not bring the notice
+    # straight back.
+    link_url: str = "/?device=pc"
+    link_label: str = "Open the full version"
+    dismiss_label: str = "Stay here"
+    # "session" is once per tab (sessionStorage), "once" once per browser
+    # (localStorage), "always" every page load.
+    frequency: Literal["session", "once", "always"] = "session"
+
+
 # The built-in header buttons a narrow screen keeps; every other one folds
 # into the header's overflow menu. What is left is what a phone actually
 # needs: start a chat, pick a profile, reach the account.
@@ -415,6 +457,9 @@ class UISettings(Settings):
     mobile_header: List[str] = msgspec.field(
         default_factory=lambda: list(DEFAULT_MOBILE_HEADER)
     )
+    # The notice a phone gets about the desktop version; None means the
+    # section is absent, which is the same as disabled.
+    mobile_notice: Optional[MobileNotice] = None
 
 
 @dataclass

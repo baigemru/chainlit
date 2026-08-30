@@ -98,6 +98,21 @@ export interface IChainlitConfig {
      * overflow menu. Absent means the header's own default.
      */
     mobile_header?: string[];
+    /**
+     * Offer, on a phone, to move to the desktop version. Absent or disabled
+     * means nothing is shown: an app that never said so must not surprise its
+     * users with a modal on first paint.
+     */
+    mobile_notice?: {
+      enabled: boolean;
+      mode: 'dialog' | 'toast';
+      title: string;
+      text: string;
+      link_url: string;
+      link_label: string;
+      dismiss_label: string;
+      frequency: 'session' | 'once' | 'always';
+    };
     user_menu_links?: {
       name: string;
       url: string;

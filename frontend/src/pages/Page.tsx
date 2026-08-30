@@ -6,6 +6,7 @@ import { sideViewState, useAuth, useConfig } from '@chainlit/react-client';
 import ChatProfileSwitchListener from '@/components/ChatProfileSwitchListener';
 import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
+import MobileNotice from '@/components/MobileNotice';
 import { TaskList } from '@/components/Tasklist';
 import ThreadReturnListener from '@/components/ThreadReturnListener';
 import { Header } from '@/components/header';
@@ -59,6 +60,7 @@ const Page = ({ children }: Props) => {
       defaultOpen={config?.ui.default_sidebar_state !== 'closed'}
     >
       <ChatProfileSwitchListener />
+      <MobileNotice />
       <ThreadReturnListener />
       {historyEnabled && !sidebarHidden ? (
         <>

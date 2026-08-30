@@ -251,6 +251,17 @@ running container:
 docker cp frontend/dist/. <container>:/usr/local/lib/python3.14/site-packages/chainlit/frontend/dist/
 ```
 
+**Never start the consumer's container with `docker compose` from an agent shell
+without clearing `POSTGRES_*` first.** Compose substitutes `${POSTGRES_HOST}` and
+friends from the shell before `.env`, and an agent session has been observed to
+inherit the production values — the dev container then runs against the
+production database (30.08.2026, three times, found only because production
+lacks `threads.updatedAt`). Use
+`env -u POSTGRES_HOST -u POSTGRES_DB -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_PORT docker compose -f docker-compose.dev.yml up -d --build`
+and verify with `docker inspect chainlit-panda` that `POSTGRES_HOST` is
+`chainlit-test-pg`. Production has never been migrated by this fork: deploying
+it there needs `litestar database stamp 0001_baseline` then `upgrade` first.
+
 The consumer's dev container runs `uvicorn --reload` under
 `debugpy --wait-for-client`, so after any restart it blocks until a debugger
 attaches — a "hung" container after a restart is usually this, not a crash.

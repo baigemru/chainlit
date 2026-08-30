@@ -268,6 +268,9 @@ async def test_set_starters(test_config):
         "message": "Test message",
         "command": None,
         "icon": "i",
+        "device": "all",
+        "profile": None,
+        "highlight": False,
     }
 
 
@@ -291,6 +294,9 @@ async def test_set_starter_categories_with_chat_profile(test_config):
             "message": "m",
             "command": None,
             "icon": None,
+            "device": "all",
+            "profile": None,
+            "highlight": False,
         }
     ]
 

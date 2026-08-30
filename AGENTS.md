@@ -1,222 +1,285 @@
 # AGENTS.md
 
-This file provides guidance to AI agents when working with code in this repository.
+Guidance for AI agents and developers working in this repository. Read this
+before touching anything; then read the architecture documents it links.
 
-## Litestar rebuild in progress (CRITICAL — read first)
+## 1. What this repository is
 
-This fork is being rebuilt from FastAPI/Starlette onto **Litestar 2.24**, with
-Advanced Alchemy for persistence and native WebSockets replacing socket.io. The
-work happens on `feat/litestar-rebuild`. Plan:
-https://claude.ai/code/artifact/dbf33481-64e4-469b-9c4d-44f124706bf5
+This is a hard fork of Chainlit rebuilt on **Litestar 2.24**: msgspec instead of
+Pydantic, Advanced Alchemy over asyncpg/PostgreSQL instead of the pluggable data
+layers, a native `@websocket` route with a typed wire protocol instead of
+socket.io. It is published as the distribution **`chainlit-litestar`** while the
+import name stays `chainlit`; the two distributions own the same package and must
+never be installed together. **Python 3.14 only** (`requires-python = ">=3.14,<3.15"`).
+The work lives on `feat/litestar-rebuild`, and the fork's single consumer is
+`chainlit-panda`, a multi-profile product-search assistant in a sibling repository.
 
-**The backward-compatibility rule below is suspended for this work**, by explicit
-decision of the repository owner. We are leaving upstream Chainlit. Do not add
-compatibility shims for `BaseDataLayer`, `mount_chainlit`, `server_route`,
-`cl.current_user`, `cl.run_sync` or the socket.io protocol — they are being
-deleted, not preserved.
+Upstream compatibility is **abandoned, not deferred**. `BaseDataLayer`,
+`mount_chainlit`, `server_route`, `cl.current_user`, `cl.run_sync` and the
+socket.io protocol are deleted. Do not reintroduce them, and do not write shims
+for them: a shim is a promise to a caller that does not exist.
 
-The governing rule for the rebuild: for every construct, ask whether it exists
-_because the backend was FastAPI_, or because Chainlit predates a better Litestar
-primitive. If yes — delete it, do not repackage it. Write in the 3.0-shaped API
-from line one (`NamedDependency`, `FromQuery[T]`, `InitPlugin`/`CLIPlugin`,
-imports from `advanced_alchemy.extensions.litestar`), so the eventual 3.0 bump is
-a version pin rather than a port.
+The governing design rule: for every construct, ask whether it exists _because
+the backend was FastAPI_, or because Chainlit predates a better Litestar
+primitive. If either — delete it, do not repackage it. Write in the 3.0-shaped
+API from line one (`NamedDependency`, `FromQuery[T]`, `InitPlugin`/`CLIPlugin`,
+imports from `advanced_alchemy.extensions.litestar`) so the eventual 3.0 bump is
+a version pin rather than a port. `backend/tests/test_import_hygiene.py` enforces
+the floor: no module under `backend/chainlit/` may import `fastapi`, `starlette`,
+`pydantic`, `pydantic_settings`, `dataclasses_json`, `lazify`, `syncer`,
+`asyncer`, `socketio` or `literalai`. None of them are in the lockfile any more.
 
-Target: zero `fastapi`, `pydantic`, `dataclasses_json`, `lazify`, `syncer` and
-`asyncer` imports in `backend/chainlit/`. `starlette` cannot leave the install
-(`mcp` pins it), so the import-hygiene test asserts on `fastapi`, not `starlette`.
+Structure lives in the architecture documents, not here:
 
-## Backward Compatibility (suspended — see above)
+- [docs/architecture/backend.md](docs/architecture/backend.md) — package layout,
+  the websocket transport, persistence, plugin and CLI.
+- [docs/architecture/client.md](docs/architecture/client.md) — frontend,
+  `@chainlit/react-client`, the transport owner, custom elements.
 
-Outside the Litestar rebuild, all changes **MUST** be backward-compatible. If a
-refactor or breaking change is unavoidable, notify the user and stop — do not
-proceed without explicit approval. When approved, prefer adding a compatibility
-layer over keeping legacy code in place.
+## 2. Prerequisites and commands
 
-## MCP-First Approach (CRITICAL)
-
-When available, **ALWAYS** prefer MCP servers over manual alternatives. Use **Context7** for docs/API references, **Serena** for code navigation/refactoring/memory, and **GitHub MCP** for issues/PRs/actions/commits/releases/code search. Fall back to CLI tools, direct file reads, or web searches **ONLY IF** the corresponding MCP is unavailable or cannot fulfill the request.
-
-## Overview
-
-Chainlit is a Python framework for building production-ready conversational AI applications. It consists of a Python backend (migrating from FastAPI to **Litestar 2.24**) and a React frontend, with a pnpm monorepo for the JS packages. The PyPI distribution is `chainlit-litestar`; the import name is still `chainlit`.
-
-## Prerequisites
-
-- Python: **3.14** (the only version this fork supports)
-- Node.js: **24+**
-- [uv](https://docs.astral.sh/uv/) — Python package manager
-- [pnpm 9](https://pnpm.io/) — Node.js package manager (Corepack)
-
-## Quick Start
+Python **3.14**, Node **24+** (`lts/*` in CI), [uv](https://docs.astral.sh/uv/),
+pnpm **9** (pinned by `packageManager`). The repository is one uv workspace
+(root `pyproject.toml`, member `backend/`) and one pnpm workspace
+(`frontend/`, `libs/react-client/`, `libs/copilot/`).
 
 ### Install
 
-|          | Command                | Directory  |
-| -------- | ---------------------- | ---------- |
-| Backend  | `uv sync --all-extras` | `backend/` |
-| Frontend | `pnpm install`         | repo root  |
+| What   | Command                               | Directory |
+| ------ | ------------------------------------- | --------- |
+| Python | `uv sync --all-packages --all-extras` | repo root |
+| JS     | `pnpm install`                        | repo root |
 
 ### Build
 
-|                   | Command                                      | Directory  | What it does                                                                              |
-| ----------------- | -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- |
-| All JS packages   | `pnpm build`                                 | repo root  | Build all workspace packages (frontend, react-client, copilot) via `pnpm run --recursive` |
-| Backend (PyPI)    | `uv build`                                   | `backend/` | Build Python package — builds JS assets first, then bundles into the Python distribution  |
-| Single JS package | `pnpm --filter @chainlit/react-client build` | repo root  | Build one package (useful for publishing)                                                 |
+| What            | Command                                      | Directory  |
+| --------------- | -------------------------------------------- | ---------- |
+| react-client    | `pnpm --filter @chainlit/react-client build` | repo root  |
+| All JS packages | `pnpm build`                                 | repo root  |
+| Backend wheel   | `uv build`                                   | `backend/` |
+
+**Build order matters**: `@chainlit/react-client` must be built before
+`frontend` and `libs/copilot` type-check or build against it — CI does exactly
+this in `check-frontend.yaml`. `pnpm build` is `pnpm run --recursive build`,
+which respects workspace order; a bare `cd frontend && pnpm build` after editing
+the client does not.
 
 ### Dev servers
 
-|          | Command                                           | Directory   | URL                                      |
+| What     | Command                                           | Directory   | URL                                      |
 | -------- | ------------------------------------------------- | ----------- | ---------------------------------------- |
 | Backend  | `uv run chainlit run chainlit/sample/hello.py -h` | `backend/`  | http://localhost:8000                    |
 | Frontend | `pnpm run dev`                                    | `frontend/` | http://localhost:5173 (proxies to :8000) |
 
+`chainlit run` flags: `-w/--watch`, `-h/--headless` (do not open a browser),
+`-d/--debug`, `-c/--ci`, `--host`, `--port`, `--root-path`, `--ssl-cert`,
+`--ssl-key`. Migrations are run by Advanced Alchemy's CLI, not by a helper of
+ours: `LITESTAR_APP=your_module:app litestar database upgrade`.
+
 ### Tests
 
-|                       | Command                            | Directory   |
-| --------------------- | ---------------------------------- | ----------- |
-| Backend (all)         | `uv run pytest --cov=chainlit/`    | `backend/`  |
-| Backend (single file) | `uv run pytest tests/test_file.py` | `backend/`  |
-| Frontend unit         | `pnpm test`                        | `frontend/` |
-| E2E (Cypress)         | `pnpm test`                        | repo root   |
+| What               | Command                                                    | Directory |
+| ------------------ | ---------------------------------------------------------- | --------- |
+| Backend (all)      | `uv run --no-project pytest --cov=chainlit/`               | repo root |
+| Backend (one file) | `uv run --no-project pytest backend/tests/test_message.py` | repo root |
+| Frontend/lib unit  | `pnpm test`                                                | repo root |
+| E2E (Cypress)      | `pnpm test:e2e`                                            | repo root |
 
-### Lint & Format
+`testpaths = ["backend/tests"]` and `asyncio_mode = "auto"` are set in the root
+`pyproject.toml`, so pytest resolves from the repo root wherever you invoke it.
+`--no-project` is the CI form: it skips the project discovery and sync a bare
+`uv run` performs and just uses the existing `.venv`.
 
-|                     | Command                            | Directory |
-| ------------------- | ---------------------------------- | --------- |
-| Lint JS/TS          | `pnpm lint`                        | repo root |
-| Lint fix JS/TS      | `pnpm lint:fix`                    | repo root |
-| Format check JS/TS  | `pnpm format-check`                | repo root |
-| Format fix JS/TS    | `pnpm format`                      | repo root |
-| Lint Python         | `uv run scripts/lint.py`           | repo root |
-| Lint fix Python     | `uv run scripts/lint.py --fix`     | repo root |
-| Format check Python | `uv run scripts/format.py --check` | repo root |
-| Format fix Python   | `uv run scripts/format.py`         | repo root |
+Root `pnpm test` is `pnpm run --recursive test` (vitest), **not** Cypress; E2E is
+`pnpm test:e2e` (`cypress run`), and the Cypress harness starts and stops its own
+`chainlit run` on port 8000.
 
-JS/TS lint and format commands accept file/directory arguments: `pnpm lint frontend/`, `pnpm format-check:files frontend/src/App.tsx`. Python scripts also accept file arguments: `uv run scripts/lint.py backend/chainlit/server.py`.
-
-### Type checking
-
-|            | Command                        | Directory |
-| ---------- | ------------------------------ | --------- |
-| Python     | `uv run scripts/type_check.py` | repo root |
-| TypeScript | `pnpm type-check`              | repo root |
-
-Type checking runs on whole projects (no per-file mode).
-
-Run `pnpm lint:fix` and `pnpm format` before committing — CI enforces checks on both.
-
-### Commits
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/). Format: `<type>(<optional scope>): <description>`.
-
-Common types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`. Scope is optional but encouraged (e.g. `fix(data): ...`, `feat(i18n): ...`).
-
-All commits made with AI assistance **must** include a `Co-Authored-By` trailer identifying the AI agent. Add it as the last line of the commit message body:
+**Persistence tests** are PostgreSQL-only and need a live server. They read
+`TEST_DATABASE_URL`, defaulting to
+`postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/chainlit_pytest`. Start one
+with the exact command the conftest prints when nothing is listening:
 
 ```
-Co-Authored-By: <Agent Name> <agent-email-or-noreply>
+docker run -d --name chainlit-test-pg -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=chainlit_pytest \
+  -p 5432:5432 postgres:16
 ```
 
-Examples:
+The suite builds its schema by running the real migrations, then `DROP SCHEMA
+"chainlit" CASCADE` and `TRUNCATE … CASCADE` between tests. See rule 6.
 
-- `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
-- `Co-Authored-By: GitHub Copilot <noreply@github.com>`
-- `Co-Authored-By: Gemini CLI <noreply@google.com>`
+**Live-server tests**: `backend/tests/ws/test_connection.py` contains
+`test_live_*` cases that run against a real uvicorn, parametrized over the
+`websockets` and `websockets-sansio` implementations (`--ws auto` resolves to the
+latter on uvicorn 0.52, which is what the consumer's container runs). Select them
+with `uv run --no-project pytest backend/tests/ws/test_connection.py -k live`.
 
-## Tech Stack
-
-| Layer                          | Stack                                                                                                                     |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| **Frontend**                   | React 18, TypeScript 5.2, Vite 5, Tailwind CSS 3, Vitest, Zod 3                                                           |
-| **Frontend (state & routing)** | Recoil, React Router 6, react-hook-form, socket.io-client, SWR                                                            |
-| **Frontend (rendering)**       | react-markdown + remark-gfm/math + rehype-katex/raw, highlight.js, lucide-react (icons), Radix UI (primitives), Plotly.js |
-| **Backend**                    | Python 3.14, FastAPI, Starlette, Uvicorn, python-socketio, Pydantic 2, PyJWT, httpx                                       |
-| **LLM integrations**           | MCP, LangChain, LlamaIndex, OpenAI SDK, Semantic Kernel, MistralAI                                                        |
-| **Infra / persistence**        | SQLAlchemy (PostgreSQL/SQLite), DynamoDB + S3 (boto3), Azure Blob / Data Lake, Google Cloud Storage, LiteralAI            |
-| **DX**                         | pre-commit hooks, linting, formatting, type checking, unit testing, E2E testing                                           |
-
-## Architecture
-
-### Monorepo structure
+**Bounded runs on macOS** (no GNU `timeout`) — never leave a server or a suite
+unsupervised in an agent session:
 
 ```
-backend/          # Python package (published to PyPI as "chainlit")
-frontend/         # React app (built output served by backend)
-libs/
-  react-client/   # @chainlit/react-client — published npm package with React hooks
-  copilot/        # Copilot widget (embedded chat bubble)
-cypress/          # E2E tests
+( cmd & p=$!; sleep 120; kill $p 2>/dev/null; wait $p )
 ```
 
-The pnpm workspace includes `frontend/`, `libs/react-client/`, and `libs/copilot/`. The built frontend assets are copied into `backend/chainlit/frontend/dist/` and served as static files.
+### Lint, format, type-check
 
-### Backend (`backend/chainlit/`)
+| What                 | Command                                                                         | Directory |
+| -------------------- | ------------------------------------------------------------------------------- | --------- |
+| Lint JS/TS           | `pnpm lint` / `pnpm lint:fix`                                                   | repo root |
+| Format JS/TS         | `pnpm format-check` / `pnpm format`                                             | repo root |
+| Lint Python          | `uv run scripts/lint.py [--fix]`                                                | repo root |
+| Format Python        | `uv run scripts/format.py [--check]`                                            | repo root |
+| Type-check Python    | `uv run scripts/type_check.py`                                                  | repo root |
+| Type-check TS        | `pnpm type-check`                                                               | repo root |
+| Protocol types fresh | `uv run --no-project --directory backend scripts/gen_protocol_types.py --check` | repo root |
 
-**Entry point for user apps**: `__init__.py` re-exports all public API decorators and classes.
+The Python scripts are thin wrappers: `ruff check`, `ruff format`, `mypy backend/`.
+All of them accept path arguments (`uv run scripts/lint.py backend/chainlit/ws/`),
+and so do `pnpm lint` and `pnpm format-check:files`. TypeScript type-checking is
+per-project only.
 
-**Key files:**
+## 3. Development rules
 
-- `server.py` — FastAPI app, all REST routes (auth, elements, threads, file upload), serves the built frontend SPA, mounts the SocketIO app
-- `socket.py` — SocketIO event handlers for real-time WebSocket communication (connect, message, audio, etc.)
-- `callbacks.py` — Decorator functions registered via `@cl.on_message`, `@cl.on_chat_start`, `@cl.on_audio_chunk`, etc. These store functions on `config.code.*`
-- `config.py` — Reads `.chainlit/config.toml` from `APP_ROOT`. `ChainlitConfig` holds both static TOML config and runtime user-registered callbacks. `APP_ROOT` defaults to `os.getcwd()`.
-- `session.py` — `WebsocketSession` (per-connection state: user, files, MCP connections, message queue) and `HTTPSession`
-- `context.py` — `ChainlitContext` per-coroutine context variable (similar to thread-local), providing access to the current session and emitter
-- `emitter.py` — Sends events back to the frontend through the SocketIO session
-- `data/base.py` — `BaseDataLayer` ABC for persistence (threads, steps, elements, users, feedback). Implementations: `sql_alchemy.py`, `dynamodb.py`, `literalai.py`
-- `auth/` — JWT creation/validation (`jwt.py`), OAuth state cookies (`cookie.py`)
-- `types.py` — Shared Pydantic models for API request/response types
+1. **Verify against source, never memory.** Use Context7 MCP when it is
+   available (pre-resolved IDs in [docs/context7.md](docs/context7.md)); when it
+   is not, read the installed library under `.venv/lib/python3.14/site-packages/`.
+   _Why: this fork sits on a Litestar version whose behaviour differs from every
+   blog post about it, and a wrong assumption here costs a day of debugging a
+   handshake._
+2. **Refute your own reading before you change anything.** A defect derived from
+   static reading is a hypothesis: have a subagent try to refute it with
+   file:line evidence, and gate the change on a test that fails first. _Why:
+   more than one "obvious" bug in this transport turned out to be unreachable,
+   and more than one "unreachable" one was live._
+3. **Every new test gets a mutation check.** Break the behaviour the test
+   guards, watch it go red, restore. _Why: a test that passes against broken
+   code is worse than none — it is a claim of coverage._
+4. **Transport changes need at least one live-server test.** The in-process
+   `create_test_client` never awaits a closing handshake, so `close` is only a
+   queue write and the superseded path always unwinds in the harmless order.
+   _Why: the old takeover test was green against code that reaped live sessions
+   on every profile change._
+5. **Wire protocol changes move as one unit.** Edit the msgspec structs in
+   `backend/chainlit/protocol/` (`server.py`, `client.py`, `payloads.py`,
+   `codec.py`), then regenerate the TypeScript view:
+   `uv run --no-project --directory backend scripts/gen_protocol_types.py`. **Never hand-edit
+   `libs/react-client/src/protocol/messages.ts`** — it is generated, and CI runs
+   the `--check` form. Update `backend/tests/protocol/test_coverage.py` (a
+   retired name needs an entry in `INTENTIONALLY_DROPPED` with a reason) and
+   `backend/tests/socketspec/` in the same change. Tags are dotted and
+   noun-first (`step.upsert`, `ask.end`, `thread.resume`), discriminated on `t`.
+   Frames are **JSON only** — there is no binary branch and nothing on this wire
+   carries `bytes`. The canonical description is
+   `backend/chainlit/protocol/README.md`. _Why: a drift between the structs and
+   the client surfaces as a runtime shape mismatch in a browser, not as a build
+   failure._
+6. **Never point tests at a database an application uses.** The persistence
+   conftest destroys the schema it connects to; the default is `chainlit_pytest`
+   and the consumer's dev container must be on its own database. Before a full
+   run, inspect the running app's `POSTGRES_DB` (`docker inspect chainlit-panda`)
+   rather than trusting that someone switched it. _Why: this has already erased a
+   live dev thread twice._
+7. **Custom elements depend on the host stylesheet.** Consumer elements
+   (`src/public/elements/*.jsx`) are compiled in the browser against the built
+   frontend CSS, so a Tailwind utility exists for them only if the application
+   happens to use it too. Layout, spacing and type utilities are therefore
+   safelisted in `frontend/tailwind.config.js`. When an element needs a utility
+   that is not there, **extend the safelist**; do not tell the consumer to inline
+   styles. _Why: a host's card must not lose its grid because a feature that
+   used `grid-cols-2` was deleted here._
+8. **Do not add Litestar primitives to `chainlit/ws`.** The raw `@websocket`
+   handler is the only duplex option in Litestar 2.24: `websocket_listener` is
+   strictly turn-taking, `websocket_stream` is send-only and discards inbound
+   frames, Channels' `Subscriber` drops frames, `litestar.events` is unordered
+   fire-and-forget, and Stores cannot hold live tasks. This was settled against
+   the installed source and live spikes; do not re-litigate it. _Why: this
+   protocol is not turn-taking — the server talks whenever it has something to
+   say, and the client talks over it._
+9. **Conventional Commits, with an AI trailer.** Format
+   `<type>(<scope>): <description>`; types `feat`, `fix`, `chore`, `docs`,
+   `refactor`, `test`, `ci`. Every commit made with AI assistance carries a
+   trailer as the last line of the body:
 
-**Data layer pattern**: The data layer is optional (no persistence by default). Register a custom implementation with `@cl.data_layer` decorator or use the built-in SQLAlchemy/DynamoDB/LiteralAI implementations. The `@queue_until_user_message()` decorator on `BaseDataLayer` methods queues write operations until the first user message arrives.
+   ```
+   Co-Authored-By: <Agent Name> <agent-email-or-noreply>
+   ```
 
-**Integrations**: `langchain/`, `llama_index/`, `openai/`, `semantic_kernel/`, `mistralai/` — each provides callback handlers that bridge those frameworks into Chainlit steps/messages.
+   e.g. `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`,
+   `Co-Authored-By: GitHub Copilot <noreply@github.com>`,
+   `Co-Authored-By: Gemini CLI <noreply@google.com>`. A husky `pre-commit` hook
+   runs `lint-staged`, which lints and formats touched files and type-checks the
+   projects they belong to. _Why: the hook is the only gate that runs before CI._
 
-### Frontend (`frontend/src/`)
+10. **Parallel agents: named ownership.** Each agent owns a named set of files —
+    including any `__init__.py` it must touch — writes scratch to its own
+    subdirectory, and never runs a repo-wide gate (`pytest` with no path,
+    `type_check.py`, `lint.py --fix` with no path). The parent integrates, runs
+    the full gates and commits. _Why: two agents formatting the same tree
+    produce a merge conflict nobody asked for, and a shared gate reports another
+    agent's half-finished work as your failure._
+11. **Write in this codebase's voice.** A module docstring says _why_ the module
+    exists and what it refuses to do; a comment names the bug it prevents. No
+    restating of the code, no ceremonial headers. Read `chainlit/ws/__init__.py`
+    or `tests/persistence/conftest.py` for the register. _Why: the reasoning is
+    the part that cannot be recovered from the code later._
 
-React 18 + TypeScript + Vite, styled with Tailwind CSS and Radix UI primitives.
+## 4. Release and consumer loop
 
-- `main.tsx` — React root, wraps app in `RecoilRoot` and `ChainlitContext.Provider`
-- `App.tsx` — Handles auth readiness, chat profile selection, and WebSocket connection lifecycle
-- `router.tsx` — Client-side routes: `/` (Home), `/thread/:id`, `/element/:id`, `/login`, `/login/callback`, `/share/:id`, `/env`
-- `state/` — Recoil atoms: `chat.ts` (messages, elements, tasks), `project.ts` (config, session), `user.ts` (env vars)
-- `components/chat/` — Core chat UI (message list, input bar, elements, audio)
-- `components/header/` — Top navigation bar
-- `components/LeftSidebar/` — Thread history sidebar
+Wheels come from `.github/workflows/build-litestar.yaml`, which fires on tags
+matching `litestar-v*` on `feat/litestar-rebuild`, builds the JS assets, copies
+them into `backend/chainlit/{frontend,copilot}/dist/`, runs the full backend
+suite against a PostgreSQL service, builds the wheel and publishes it as a
+GitHub **pre-release**. The workflow rewrites `backend/chainlit/version.py` from
+the tag (`litestar-v3.0.0a12` → `3.0.0a12`), so the tag and the committed version
+must agree.
 
-### `@chainlit/react-client` (`libs/react-client/src/`)
+The loop: fix → bump `backend/chainlit/version.py` → `chore(release): 3.0.0aN`
+→ tag `litestar-v3.0.0aN` → push branch and tag → wait for the wheel → repin the
+consumer. The consumer pins the release URL in **three** places —
+`pyproject.toml`, `requirements.txt` (its Docker image installs from
+requirements.txt, so pyproject alone changes nothing) and `uv.lock`.
 
-Publishable npm package — the bridge between the React UI and the backend WebSocket.
+For a frontend-only check without a release, hot-copy the built assets into the
+running container:
 
-- `api.ts` — `ChainlitAPI` class: HTTP calls to backend REST endpoints
-- `useChatSession.ts` — Manages socket.io connection lifecycle
-- `useChatMessages.ts` — Exposes message tree state
-- `useChatData.ts` — Exposes elements, actions, tasklists, connection status
-- `useChatInteract.ts` — `sendMessage`, `replyMessage`, `callAction`, `stopTask`, `clear`
-- `state.ts` — Recoil atoms shared between the lib and consuming apps
+```
+docker cp frontend/dist/. <container>:/usr/local/lib/python3.14/site-packages/chainlit/frontend/dist/
+```
 
-State is managed via Recoil; consuming apps must wrap the tree in `<RecoilRoot>` and provide a `ChainlitAPI` instance via `ChainlitContext.Provider`.
+The consumer's dev container runs `uvicorn --reload` under
+`debugpy --wait-for-client`, so after any restart it blocks until a debugger
+attaches — a "hung" container after a restart is usually this, not a crash.
 
-### Communication flow
+## 5. Known state and gotchas
 
-1. User sends a message → `useChatInteract.sendMessage` → emits `client_message` over SocketIO
-2. Backend `socket.py` handler receives it → calls `config.code.on_message(message)`
-3. User's app calls `cl.Message(...).send()` → `emitter.py` emits `new_message` back over SocketIO
-4. Frontend `useChatMessages` updates Recoil state → component re-renders
+- Three vitest cases in `frontend/tests/displayModePrecedence.spec.ts` fail on a
+  clean checkout; they are pre-existing, not your regression.
+- `libs/copilot` type-check is a deliberate no-op (`echo 'SKIPPED: …'`), and the
+  lint-staged entry for it is commented out. Rationale:
+  [docs/research/copilot-type-checking.md](docs/research/copilot-type-checking.md).
+- Three Cypress specs are permanently red on a ru-RU machine (locale-dependent
+  assertions). Not a regression either.
+- `starlette`, `fastapi`, `pydantic` and `mcp` are gone from `uv.lock` entirely.
+  `test_import_hygiene.py` bans `starlette` alongside `fastapi`; older notes
+  saying "starlette must stay because `mcp` pins it" are obsolete.
+- The persistence suite needs `chainlit-test-pg` running. Symptom of a wedged
+  Docker Desktop (seen 29.08.2026): `docker ps` hangs, port 5432 still accepts
+  TCP, and every DB-backed test errors in fixture setup with `TimeoutError`
+  from `asyncpg` connect. Restart Docker Desktop rather than debugging the
+  suite; the container then waits for its debugger again (see section 4).
 
-### App configuration
+## 6. MCP-first, and documentation verification
 
-Apps configure Chainlit via `.chainlit/config.toml` (created automatically on first run). Key sections: `[project]` (auth, session timeouts, CORS), `[UI]` (name, theme, layout).
+Prefer MCP servers over manual alternatives when they are available:
+**Context7** for library docs and API references, **Serena** for code navigation
+and refactoring, **GitHub MCP** for issues, PRs, actions and commits. Fall back
+to CLI tools, direct file reads or web search only when the corresponding MCP is
+unavailable or cannot answer.
 
----
-
-## Documentation Verification Requirements
-
-Before writing/modifying code, verify against official docs.
-
-**Lookup order**: Context7 MCP (preferred) → WebFetch → WebSearch.
-
-Pre-resolved Context7 library IDs: [docs/context7.md](docs/context7.md)
-
-Cross-reference API signatures and patterns during implementation. When uncertain, always check docs rather than relying on training data.
+Before writing or changing code that touches a third-party API, verify the
+signature against the docs — lookup order: Context7 → WebFetch → WebSearch →
+installed source under `.venv`. Pre-resolved Context7 IDs live in
+[docs/context7.md](docs/context7.md). **That file is stale in places**: it still
+lists FastAPI, Pydantic, python-socketio, socket.io-client and SQLite/Azure
+entries for stacks this fork no longer uses. Ignore those rows; it is not
+maintained as part of this document.

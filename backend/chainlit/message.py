@@ -36,6 +36,16 @@ RESUME_POLICY_KEY = "resume_policy"
 RESUME_POLICY_KEEP = "keep"
 RESUME_POLICY_DELETE = "delete"
 
+# The step-metadata key the client's scroll container reads, overriding
+# ``[features] assistant_message_anchor`` for this one message. "top" pins it
+# to the top of the viewport, "bottom" follows it to the end, "none" leaves the
+# view where it is -- the message just lands after whatever is already
+# anchored. Absent means the config decides. The reader is
+# ``ScrollContainer.tsx`` through the ``data-anchor`` attribute; the two agree
+# on the key by convention, as with the resume policy above.
+ANCHOR_KEY = "anchor"
+ANCHOR_VALUES = ("top", "bottom", "none")
+
 
 class MessageBase(ABC):
     id: str
@@ -98,6 +108,24 @@ class MessageBase(ABC):
             **(self.metadata or {}),
             RESUME_POLICY_KEY: RESUME_POLICY_DELETE,
         }
+
+    def _apply_anchor(self, anchor: Optional[str]) -> None:
+        """Record the per-message scroll anchor in the step metadata.
+
+        ``None`` (the default) is a strict no-op: the metadata is left
+        untouched and the config's ``assistant_message_anchor`` decides.
+        Anything else overrides it for this message alone -- see
+        ``ANCHOR_KEY``. Written into ``self.metadata`` at construction time
+        so it travels in ``step.upsert`` and is persisted with the step.
+        """
+        if anchor is None:
+            return
+        if anchor not in ANCHOR_VALUES:
+            raise ValueError(
+                "anchor must be one of "
+                f"{', '.join(repr(v) for v in ANCHOR_VALUES)}, got {anchor!r}"
+            )
+        self.metadata = {**(self.metadata or {}), ANCHOR_KEY: anchor}
 
     @classmethod
     def from_dict(self, _dict: StepDict):
@@ -284,6 +312,7 @@ class Message(MessageBase):
         wait_interval (float, optional): Seconds between text rotations (minimum 2). Defaults to 5.
         wait_loop (bool, optional): Whether the rotation loops back to the first text after the last one (True) or holds the last text (False, default).
         resume (Literal["keep", "delete"], optional): Whether the message survives a thread resume of a dead session. "keep" (default) — regular behavior. "delete" — on resume the message is hidden and deleted from the data layer together with its elements.
+        anchor (Literal["top", "bottom", "none"], optional): Where the view goes when this message arrives, overriding the `assistant_message_anchor` feature for this message alone. "top" — pinned to the top of the viewport. "bottom" — the view follows it to the end, once. "none" — the view does not move; the message lands after whatever is already anchored. Defaults to None, which leaves the decision to the config.
     """
 
     def __init__(
@@ -305,6 +334,7 @@ class Message(MessageBase):
         wait_interval: float = 5.0,
         wait_loop: bool = False,
         resume: Literal["keep", "delete"] = "keep",
+        anchor: Optional[Literal["top", "bottom", "none"]] = None,
     ):
         time.sleep(0.001)
         self.language = language
@@ -351,6 +381,7 @@ class Message(MessageBase):
             self.content = wait[0]
 
         self._apply_resume_policy(resume)
+        self._apply_anchor(anchor)
 
         super().__post_init__()
 
@@ -442,6 +473,7 @@ class AskUserMessage(AskMessageBase):
         timeout (int, optional): The number of seconds to wait for an answer before raising a TimeoutError.
         raise_on_timeout (bool, optional): Whether to raise a TimeoutError if the user does not answer in time.
         resume (Literal["keep", "delete"], optional): "delete" — the step does not survive a thread resume of a dead session (a live pending ask is untouched). Defaults to "keep".
+        anchor (Literal["top", "bottom", "none"], optional): Overrides the `assistant_message_anchor` feature for this ask alone — "top" pins it to the top of the viewport, "bottom" follows it to the end, "none" leaves the view where it is. Defaults to None (the config decides).
     """
 
     def __init__(
@@ -452,6 +484,7 @@ class AskUserMessage(AskMessageBase):
         timeout: int = 60,
         raise_on_timeout: bool = False,
         resume: Literal["keep", "delete"] = "keep",
+        anchor: Optional[Literal["top", "bottom", "none"]] = None,
     ):
         self.content = content
         self.author = author
@@ -460,6 +493,7 @@ class AskUserMessage(AskMessageBase):
         self.raise_on_timeout = raise_on_timeout
 
         self._apply_resume_policy(resume)
+        self._apply_anchor(anchor)
 
         super().__post_init__()
 
@@ -521,6 +555,7 @@ class AskFileMessage(AskMessageBase):
         timeout (int, optional): The number of seconds to wait for an answer before raising a TimeoutError.
         raise_on_timeout (bool, optional): Whether to raise a TimeoutError if the user does not answer in time.
         resume (Literal["keep", "delete"], optional): "delete" — the step does not survive a thread resume of a dead session (a live pending ask is untouched). Defaults to "keep".
+        anchor (Literal["top", "bottom", "none"], optional): Overrides the `assistant_message_anchor` feature for this ask alone — "top" pins it to the top of the viewport, "bottom" follows it to the end, "none" leaves the view where it is. Defaults to None (the config decides).
     """
 
     def __init__(
@@ -534,6 +569,7 @@ class AskFileMessage(AskMessageBase):
         timeout=90,
         raise_on_timeout=False,
         resume: Literal["keep", "delete"] = "keep",
+        anchor: Optional[Literal["top", "bottom", "none"]] = None,
     ):
         self.content = content
         self.max_size_mb = max_size_mb
@@ -545,6 +581,7 @@ class AskFileMessage(AskMessageBase):
         self.raise_on_timeout = raise_on_timeout
 
         self._apply_resume_policy(resume)
+        self._apply_anchor(anchor)
 
         super().__post_init__()
 
@@ -619,6 +656,7 @@ class AskActionMessage(AskMessageBase):
         timeout=90,
         raise_on_timeout=False,
         resume: Literal["keep", "delete"] = "keep",
+        anchor: Optional[Literal["top", "bottom", "none"]] = None,
     ):
         self.content = content
         self.actions = actions
@@ -627,6 +665,7 @@ class AskActionMessage(AskMessageBase):
         self.raise_on_timeout = raise_on_timeout
 
         self._apply_resume_policy(resume)
+        self._apply_anchor(anchor)
 
         super().__post_init__()
 
@@ -707,6 +746,7 @@ class AskElementMessage(AskMessageBase):
         timeout=90,
         raise_on_timeout=False,
         resume: Literal["keep", "delete"] = "keep",
+        anchor: Optional[Literal["top", "bottom", "none"]] = None,
     ):
         self.content = content
         self.element = element
@@ -715,6 +755,7 @@ class AskElementMessage(AskMessageBase):
         self.raise_on_timeout = raise_on_timeout
 
         self._apply_resume_policy(resume)
+        self._apply_anchor(anchor)
 
         super().__post_init__()
 

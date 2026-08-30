@@ -36,6 +36,10 @@ export default function ScrollContainer({
   // `messages` on every token; without this the smooth scroll would be
   // re-issued each time and fight the reader's own scrolling.
   const scrolledToRef = useRef<HTMLDivElement | null>(null);
+  // The message that asked to be followed to the end (`data-anchor="bottom"`).
+  // Same one-shot discipline as `scrolledToRef`: a token landing in that
+  // message must not yank the view down a second time.
+  const followedRef = useRef<HTMLDivElement | null>(null);
   const { messages } = useChatMessages();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
@@ -51,34 +55,56 @@ export default function ScrollContainer({
   // last user message, exactly as it always was. In "top" mode an assistant
   // reply competes for the job, and a nested step must not take the anchor
   // from the message that renders it — hence the top-level filter.
+  //
+  // `data-anchor` is the application's per-message override (see `ANCHOR_KEY`
+  // in `chainlit/message.py`): "top" claims the anchor whatever the mode says,
+  // "none" and "bottom" refuse it. A refusing message still counts as height
+  // after the anchor — it is a later sibling, and the spacer walks siblings.
   const findAnchor = useCallback((): HTMLDivElement | null => {
     if (!ref.current) return null;
-
-    if (!anchorsTheAssistant) {
-      const userMessages = ref.current.querySelectorAll<HTMLDivElement>(
-        '[data-step-type="user_message"]'
-      );
-      return userMessages[userMessages.length - 1] ?? null;
-    }
 
     const candidates = ref.current.querySelectorAll<HTMLDivElement>(
       '[data-step-type="user_message"], [data-step-type="assistant_message"]'
     );
     for (let i = candidates.length - 1; i >= 0; i--) {
-      if (!candidates[i].parentElement?.closest('[data-step-type]')) {
-        return candidates[i];
+      const candidate = candidates[i];
+      if (candidate.parentElement?.closest('[data-step-type]')) continue;
+
+      const requested = candidate.dataset.anchor;
+      if (requested === 'none' || requested === 'bottom') continue;
+      if (
+        requested === 'top' ||
+        anchorsTheAssistant ||
+        candidate.dataset.stepType === 'user_message'
+      ) {
+        return candidate;
       }
     }
     return null;
   }, [anchorsTheAssistant]);
+
+  // The last message that asked the view to fall to the end when it appears.
+  const findBottomFollower = useCallback((): HTMLDivElement | null => {
+    if (!ref.current) return null;
+    const marked = ref.current.querySelectorAll<HTMLDivElement>(
+      '[data-step-type][data-anchor="bottom"]'
+    );
+    return marked[marked.length - 1] ?? null;
+  }, []);
 
   // Calculate and update spacer height
   const updateSpacerHeight = useCallback(() => {
     if (!ref.current) return;
 
     // "top" is an explicit opt-in to pinning, so it carries the anchor on its
-    // own rather than riding on the user-message flag.
-    if ((autoScrollUserMessage || anchorsTheAssistant) && anchorRef.current) {
+    // own rather than riding on the user-message flag — whether it comes from
+    // the config or from the message's own `data-anchor`.
+    if (
+      anchorRef.current &&
+      (autoScrollUserMessage ||
+        anchorsTheAssistant ||
+        anchorRef.current.dataset.anchor === 'top')
+    ) {
       const containerHeight = ref.current.clientHeight;
       const lastMessageHeight = anchorRef.current.offsetHeight;
 
@@ -102,7 +128,13 @@ export default function ScrollContainer({
         spacerRef.current.style.height = `${Math.max(0, newSpacerHeight)}px`;
       }
 
-      if (anchorsTheAssistant) {
+      // A message that asked for "top" is pinned like one in top mode, even
+      // when the mode is "bottom": one scroll when it takes the anchor, and no
+      // bottom-follow for as long as it holds it. Without this it would fall
+      // into the legacy branch below, which re-issues the smooth scroll on
+      // every token and then abandons the message the moment a sibling
+      // arrives after it.
+      if (anchorsTheAssistant || anchorRef.current.dataset.anchor === 'top') {
         // Only a new message moves the view — a resize or another token does
         // not — and the reply is never followed to the bottom.
         if (scrolledToRef.current !== anchorRef.current) {
@@ -142,6 +174,7 @@ export default function ScrollContainer({
       // size the spacer around an element no longer in the document.
       anchorRef.current = null;
       scrolledToRef.current = null;
+      followedRef.current = null;
       return;
     }
 
@@ -152,7 +185,16 @@ export default function ScrollContainer({
       // Update spacer height when the anchor is found
       updateSpacerHeight();
     }
-  }, [messages, findAnchor, updateSpacerHeight]);
+
+    // Outside the branch above on purpose: a message asking to be followed is
+    // never an anchor candidate, so a thread whose only message asks for it
+    // has no anchor at all and would otherwise never be followed.
+    const follower = findBottomFollower();
+    if (follower && followedRef.current !== follower) {
+      followedRef.current = follower;
+      ref.current.scrollTop = ref.current.scrollHeight;
+    }
+  }, [messages, findAnchor, findBottomFollower, updateSpacerHeight]);
 
   // Add window resize listener to update spacer height
   useEffect(() => {

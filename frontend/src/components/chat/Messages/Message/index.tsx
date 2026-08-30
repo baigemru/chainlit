@@ -113,6 +113,10 @@ const Message = memo(
       <>
         <div
           data-step-type={message.type}
+          // The application's per-message override of the scroll anchor, read
+          // by ScrollContainer. Undefined drops the attribute, which is what
+          // "the config decides" looks like from there.
+          data-anchor={message.metadata?.anchor}
           data-test={waitActive ? 'wait-message' : undefined}
           className="step py-2"
         >

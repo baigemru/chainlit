@@ -130,6 +130,46 @@ const renderContainer = (
 const scrollToTargets = () =>
   scrollTo.mock.calls.map((call) => (call[0] as { top: number }).top);
 
+const CARDS_TOP = 400;
+const CARDS_HEIGHT = 300;
+const OFFER_TOP = 900;
+const OFFER_HEIGHT = 120;
+
+/**
+ * A message the application marked from Python (`cl.Message(anchor=...)`).
+ * The flag rides in the step metadata and reaches the DOM as `data-anchor`
+ * on the message's root element — the only thing the container can see.
+ */
+const markedMessage = (
+  key: string,
+  anchor: 'top' | 'bottom' | 'none' | undefined,
+  top: number,
+  height: number
+) => (
+  <div
+    key={key}
+    data-step-type="assistant_message"
+    data-anchor={anchor}
+    data-offset-top={top}
+    data-offset-height={height}
+  />
+);
+
+const container = (
+  anchor: 'bottom' | 'top',
+  children: ReactNode,
+  autoScrollRef: MutableRefObject<boolean>
+) => (
+  <ScrollContainer
+    autoScrollUserMessage
+    autoScrollAssistantMessage
+    assistantMessageAnchor={anchor}
+    autoScrollRef={autoScrollRef}
+  >
+    {children}
+  </ScrollContainer>
+);
+
 describe('ScrollContainer assistant anchor', () => {
   it('follows the stream to the bottom by default', () => {
     const autoScrollRef = { current: true };
@@ -256,5 +296,166 @@ describe('ScrollContainer assistant anchor', () => {
 
     const spacer = container.querySelector('.flex-shrink-0') as HTMLElement;
     expect(spacer.style.height).toBe(`${CONTAINER_HEIGHT - 300 - 32}px`);
+  });
+});
+
+describe('ScrollContainer per-message anchor', () => {
+  // Every case below opens the thread with the user's message and then
+  // forgets what that first render did: mounting is two passes of
+  // `updateSpacerHeight` (the messages effect and the resize effect's initial
+  // call), and in bottom mode both reach the scroll. What is under test here
+  // is only what the *next* message does.
+  const openThread = (
+    mode: 'bottom' | 'top',
+    autoScrollRef: MutableRefObject<boolean>
+  ) => {
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(1) });
+    // An array from the start: a single child swapped for an array remounts
+    // the div, and a remounted user message is a new anchor identity.
+    const view = render(container(mode, [userMessage], autoScrollRef));
+    scrollTo.mockClear();
+    scrollTopWrites.length = 0;
+    return view;
+  };
+
+  it('leaves the view on the cards when the offer refuses the anchor', () => {
+    // The owner's case: a feed of product cards, then "want me to analyse
+    // these?". The offer must land after the cards without moving the view.
+    const autoScrollRef = { current: true };
+    const view = openThread('top', autoScrollRef);
+
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(2) });
+    view.rerender(
+      container(
+        'top',
+        [
+          userMessage,
+          markedMessage('cards', undefined, CARDS_TOP, CARDS_HEIGHT)
+        ],
+        autoScrollRef
+      )
+    );
+
+    expect(scrollToTargets()).toEqual([CARDS_TOP - 20]);
+
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(3) });
+    view.rerender(
+      container(
+        'top',
+        [
+          userMessage,
+          markedMessage('cards', undefined, CARDS_TOP, CARDS_HEIGHT),
+          markedMessage('offer', 'none', OFFER_TOP, OFFER_HEIGHT)
+        ],
+        autoScrollRef
+      )
+    );
+
+    // The cards keep the anchor: no scroll to the offer, and no follow to the
+    // end either.
+    expect(scrollToTargets()).toEqual([CARDS_TOP - 20]);
+    expect(scrollTopWrites).toEqual([]);
+
+    // The offer is still counted as height after the anchor, so the spacer
+    // shrinks by exactly its height rather than pretending it is not there.
+    const spacer = view.container.querySelector(
+      '.flex-shrink-0'
+    ) as HTMLElement;
+    expect(spacer.style.height).toBe(
+      `${CONTAINER_HEIGHT - CARDS_HEIGHT - OFFER_HEIGHT - 32}px`
+    );
+  });
+
+  it('pins a message that asks for the top even in bottom mode', () => {
+    const autoScrollRef = { current: true };
+    const view = openThread('bottom', autoScrollRef);
+
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(2) });
+    view.rerender(
+      container(
+        'bottom',
+        [userMessage, markedMessage('cards', 'top', CARDS_TOP, CARDS_HEIGHT)],
+        autoScrollRef
+      )
+    );
+
+    expect(scrollToTargets()).toEqual([CARDS_TOP - 20]);
+    expect(scrollTopWrites).toEqual([]);
+
+    // The offer lands after the pinned cards. Appearing at the end of the
+    // thread is not what earns a message the pin — holding the anchor is — so
+    // the mode's bottom-follow must stay off now that there is height after
+    // it, and the smooth scroll must not be re-issued.
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(3) });
+    view.rerender(
+      container(
+        'bottom',
+        [
+          userMessage,
+          markedMessage('cards', 'top', CARDS_TOP, CARDS_HEIGHT),
+          markedMessage('offer', undefined, OFFER_TOP, OFFER_HEIGHT)
+        ],
+        autoScrollRef
+      )
+    );
+
+    expect(scrollToTargets()).toEqual([CARDS_TOP - 20]);
+    expect(scrollTopWrites).toEqual([]);
+  });
+
+  it('follows a message that asks for the bottom, exactly once', () => {
+    const autoScrollRef = { current: true };
+    const view = openThread('top', autoScrollRef);
+
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(2) });
+    view.rerender(
+      container(
+        'top',
+        [
+          userMessage,
+          markedMessage('offer', 'bottom', OFFER_TOP, OFFER_HEIGHT)
+        ],
+        autoScrollRef
+      )
+    );
+
+    expect(scrollTopWrites).toEqual([SCROLL_HEIGHT]);
+    // It never becomes the anchor, so nothing smooth-scrolls to it.
+    expect(scrollToTargets()).toEqual([]);
+
+    // The same message, grown by a token: the view has already been dropped
+    // to the end and must not be dragged there again.
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(2) });
+    view.rerender(
+      container(
+        'top',
+        [
+          userMessage,
+          markedMessage('offer', 'bottom', OFFER_TOP, OFFER_HEIGHT + 200)
+        ],
+        autoScrollRef
+      )
+    );
+
+    expect(scrollTopWrites).toEqual([SCROLL_HEIGHT]);
+    expect(scrollToTargets()).toEqual([]);
+  });
+
+  it('does not move at all for a lone message that refuses the anchor', () => {
+    // Top mode is not incidental here: in bottom mode a null anchor lets the
+    // resize effect's initial pass reach the bottom-follow assignment, so
+    // "no scroll at all" is only true of the mode this case runs in.
+    const autoScrollRef = { current: true };
+    mockUseChatMessages.mockReturnValue({ messages: messagesOfLength(1) });
+    render(
+      container(
+        'top',
+        [markedMessage('offer', 'none', OFFER_TOP, OFFER_HEIGHT)],
+        autoScrollRef
+      )
+    );
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollTopWrites).toEqual([]);
   });
 });

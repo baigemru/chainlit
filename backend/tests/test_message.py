@@ -388,6 +388,13 @@ class TestPersistence:
         [record] = saved_steps(held_writer)
         assert record.metadata == {"resume_policy": "delete"}
 
+    async def test_anchor_flag_reaches_the_row(
+        self, ctx, session, held_writer, no_author_rename
+    ):
+        await Message(content="test", anchor="none").send()
+        [record] = saved_steps(held_writer)
+        assert record.metadata == {"anchor": "none"}
+
 
 class TestAskUserMessage:
     async def test_initialization(self, ctx):
@@ -744,6 +751,57 @@ class TestMessageResumePolicy:
         element = CustomElement(name="e", props={})
         assert (
             AskElementMessage(content="?", element=element, resume="delete").metadata
+            == flag
+        )
+
+
+class TestMessageAnchor:
+    async def test_default_leaves_metadata_untouched(self, ctx):
+        msg = Message(content="test")
+        assert msg.metadata is None
+        assert msg.to_dict()["metadata"] == {}
+
+    async def test_anchor_sets_metadata_flag(self, ctx):
+        assert Message(content="test", anchor="none").metadata == {"anchor": "none"}
+        assert Message(content="test", anchor="top").metadata == {"anchor": "top"}
+        assert Message(content="test", metadata={"a": 1}, anchor="bottom").metadata == {
+            "a": 1,
+            "anchor": "bottom",
+        }
+
+    async def test_anchor_survives_to_dict(self, ctx):
+        assert Message(content="test", anchor="none").to_dict()["metadata"] == {
+            "anchor": "none"
+        }
+
+    async def test_anchor_rides_alongside_the_resume_policy(self, ctx):
+        assert Message(content="test", resume="delete", anchor="top").metadata == {
+            "resume_policy": "delete",
+            "anchor": "top",
+        }
+
+    async def test_invalid_value_raises(self, ctx):
+        with pytest.raises(ValueError, match="anchor must be one of"):
+            Message(content="test", anchor="middle")
+        with pytest.raises(ValueError, match="anchor must be one of"):
+            AskUserMessage(content="Question?", anchor="")
+
+    async def test_ask_messages_take_the_flag(self, ctx):
+        flag = {"anchor": "top"}
+        assert AskUserMessage(content="?", anchor="top").metadata == flag
+        assert AskUserMessage(content="?").metadata is None
+        assert (
+            AskFileMessage(content="?", accept=["text/plain"], anchor="top").metadata
+            == flag
+        )
+        action = Action(name="a", payload={})
+        assert (
+            AskActionMessage(content="?", actions=[action], anchor="top").metadata
+            == flag
+        )
+        element = CustomElement(name="e", props={})
+        assert (
+            AskElementMessage(content="?", element=element, anchor="top").metadata
             == flag
         )
 

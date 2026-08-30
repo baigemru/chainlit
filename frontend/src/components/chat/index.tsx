@@ -207,6 +207,7 @@ const Chat = () => {
           autoScrollAssistantMessage={
             config?.features?.assistant_message_autoscroll
           }
+          assistantMessageAnchor={config?.features?.assistant_message_anchor}
           autoScrollRef={autoScrollRef}
         >
           <div

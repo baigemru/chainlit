@@ -134,6 +134,7 @@ export interface IChainlitConfig {
     unsafe_allow_html?: boolean;
     user_message_autoscroll?: boolean;
     assistant_message_autoscroll?: boolean;
+    assistant_message_anchor?: 'bottom' | 'top';
     latex?: boolean;
     user_message_markdown?: boolean;
   };

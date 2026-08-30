@@ -112,6 +112,9 @@ user_message_autoscroll = true
 # Autoscroll new assistant messages
 assistant_message_autoscroll = true
 
+# Where an autoscrolled assistant message lands: "bottom" follows the stream, "top" pins it like a user message
+# assistant_message_anchor = "bottom"
+
 # Automatically tag threads with the current chat profile (if a chat profile is used)
 auto_tag_thread = true
 
@@ -330,6 +333,12 @@ class FeaturesSettings(Settings):
     user_message_markdown: bool = True
     user_message_autoscroll: bool = True
     assistant_message_autoscroll: bool = True
+    # Where a new assistant message lands when it autoscrolls: "bottom" follows
+    # the stream (the reply's end stays in view); "top" pins the message to the
+    # top of the viewport, like a user message, and lets it grow downward. A
+    # reply that is one tall element — a feed of product cards — drops the
+    # reader on its last card under "bottom".
+    assistant_message_anchor: Literal["bottom", "top"] = "bottom"
     unsafe_allow_html: bool = False
     auto_tag_thread: bool = True
     edit_message: bool = True

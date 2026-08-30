@@ -120,6 +120,14 @@ class Starter(_AsDict):
     message: str
     command: Optional[str] = None
     icon: Optional[str] = None
+    # "mobile" | "pc" | "all". Deliberately untyped and unvalidated: the client
+    # shows a starter whose device it does not recognise, so a value added here
+    # later never silently hides a starter on an older frontend.
+    device: str = "all"
+    # Clicking opens this chat profile instead of sending ``message``; the
+    # transition is the client's business, the server only advertises it.
+    profile: Optional[str] = None
+    highlight: bool = False
 
 
 @dataclass
@@ -141,6 +149,9 @@ class ChatProfile(_AsDict):
     display_name: Optional[str] = None
     default: bool = False
     starters: Optional[List[Starter]] = None
+    # Hides the profile from the switcher on the other device, nothing more: a
+    # thread already in a hidden profile still resumes and still runs.
+    device: str = "all"
     config_overrides: Any = None
 
 

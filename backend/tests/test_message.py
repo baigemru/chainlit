@@ -662,6 +662,34 @@ class TestMessageWait:
         assert frames(session, StepUpdate)[0].step.wait is not None
         assert frames(session, StepUpdate)[0].step.wait is not None
 
+    async def test_update_after_wait_says_null_to_the_client(
+        self, ctx, session, frames, no_author_rename
+    ):
+        # The loader pattern: `msg.wait = False` (or nothing) and update().
+        # The server already ended the wait in its own bookkeeping; the
+        # frame must say `wait: null` too — an omitted field is "no
+        # opinion" and the shimmer outlived the answer (seen 30.08.2026).
+        msg = Message(content="loading", wait=True)
+        await msg.send()
+        msg.content = "the answer"
+        msg.wait = False
+        await msg.update()
+        [patch] = frames(session, StepUpdate)
+        assert patch.step.wait is None
+        assert patch.step.output == "the answer"
+        assert msg._active_wait_payload is None
+
+    async def test_update_after_a_cleared_wait_stays_silent(
+        self, ctx, session, frames, no_author_rename
+    ):
+        # Once cleared, the next update has nothing to say about wait.
+        msg = Message(content="loading", wait=True)
+        await msg.send()
+        await msg.update()
+        await msg.update()
+        second = frames(session, StepUpdate)[1]
+        assert second.step.wait is not None  # UNSET, not null
+
     async def test_empty_content_takes_first_wait_text(
         self, ctx, session, frames, no_author_rename
     ):
@@ -682,10 +710,12 @@ class TestMessageWait:
         assert msg.wait is False
         msg.content = "done"
         await msg.update()
-        from msgspec import UNSET
 
         [patch] = frames(session, StepUpdate)
-        assert patch.step.wait is UNSET
+        # Consumed on the server, ended on the wire: the client is told
+        # `wait: null`, not left with an omitted field it reads as "no
+        # opinion".
+        assert patch.step.wait is None
         assert patch.step.output == "done"
 
     async def test_active_wait_payload_tracked_for_replay(self, ctx, no_author_rename):

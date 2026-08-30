@@ -205,6 +205,13 @@ class MessageBase(ABC):
     ):
         """
         Update a message already sent to the UI.
+
+        An update of a message in wait mode ends the wait unless ``wait``
+        was reassigned first (which renews it). The end must go over the
+        wire as an explicit ``wait: null``: a patch that merely omits the
+        field is "no opinion" to the client, and the shimmer would outlive
+        the answer that replaced the loader text (seen 30.08.2026 on a
+        loader that becomes the answer itself and stays the last message).
         """
 
         if self.streaming:
@@ -217,12 +224,15 @@ class MessageBase(ABC):
         wait_payload = self._wait_payload()
         # A plain update ends the wait mode; a wait update renews it — the
         # reconnect replay mirrors whatever the last emit carried.
+        was_waiting = self._active_wait_payload is not None
         self._active_wait_payload = wait_payload
         if wait_payload is not None:
             # Transient field for the emitter only; the row above got the
             # original dict without it. Consumed on emit.
             context.emitter.update_step({**step_dict, "wait": wait_payload})
             self.wait = False
+        elif was_waiting:
+            context.emitter.update_step({**step_dict, "wait": None})
         else:
             context.emitter.update_step(step_dict)
 

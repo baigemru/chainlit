@@ -228,8 +228,12 @@ const Chat = () => {
         </ScrollContainer>
         <div
           // Tighter gutters below `md`, where the composer is a pill and the
-          // desktop p-4 would frame it in more padding than it is tall.
-          className="flex flex-col mx-auto w-full p-4 pt-0 max-md:px-2 max-md:pb-2"
+          // desktop p-4 would frame it in more padding than it is tall. The
+          // bottom one takes the larger of that gutter and the safe-area inset:
+          // installed on iOS there is no browser chrome, and the home indicator
+          // would otherwise sit on the pill. In a browser tab `env()` is 0, so
+          // `max()` keeps the plain 0.5rem and nothing moves.
+          className="flex flex-col mx-auto w-full p-4 pt-0 max-md:px-2 max-md:pb-[max(0.5rem,env(safe-area-inset-bottom))]"
           style={{
             maxWidth: layoutMaxWidth
           }}

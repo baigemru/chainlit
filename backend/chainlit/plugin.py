@@ -69,6 +69,7 @@ from chainlit.controllers.auth import (
 from chainlit.controllers.files import FilesController
 from chainlit.controllers.index import render_index
 from chainlit.controllers.project import ProjectController
+from chainlit.controllers.pwa import PwaController
 from chainlit.runner import (
     DEFAULT_SESSION_TIMEOUT,
     ApplicationRunner,
@@ -334,6 +335,7 @@ class ChainlitPlugin(InitPlugin):
             AuthController,
             ProjectController,
             FilesController,
+            PwaController,
             self._websocket(),
         ]
         # The app's own static files. Public by definition -- the login page

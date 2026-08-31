@@ -50,6 +50,15 @@ export default defineConfig([
   },
 
   {
+    // The service worker runs against worker globals (self, caches), not the
+    // window ones the rest of frontend/ is checked with.
+    files: ['frontend/public/sw.js'],
+    languageOptions: {
+      globals: globals.serviceworker
+    }
+  },
+
+  {
     files: ['cypress/**/*.ts'],
     ...cypressPlugin.configs.recommended,
     plugins: {

@@ -9,6 +9,7 @@ import { ChainlitContext } from '@chainlit/react-client';
 import './index.css';
 
 import { i18nSetupLocalization } from './i18n';
+import { registerServiceWorker } from './registerServiceWorker';
 
 i18nSetupLocalization();
 
@@ -21,3 +22,5 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     </ChainlitContext.Provider>
   </React.StrictMode>
 );
+
+registerServiceWorker();

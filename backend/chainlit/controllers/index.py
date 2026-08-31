@@ -67,6 +67,11 @@ def render_index(shell: str, config: "ChainlitConfig", public_dir: Path) -> str:
     tags = (
         f"<title>{name}</title>\n"
         f'    <link rel="icon" href="{root_path}/favicon" />\n'
+        # No ``{root_path}`` on these two, deliberately: the trailing block
+        # below rewrites every ``href="/`` in the finished document, so a
+        # pre-prefixed href would come out doubled (``/app/app/…``).
+        '    <link rel="manifest" href="/manifest.webmanifest" />\n'
+        '    <link rel="apple-touch-icon" href="/apple-touch-icon" />\n'
         f'    <meta name="description" content="{description}">\n'
         f'    <meta property="og:type" content="website">\n'
         f'    <meta property="og:title" content="{name}">\n'

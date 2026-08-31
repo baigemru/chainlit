@@ -7,6 +7,7 @@ import MessageComposer from '@/components/chat/MessageComposer';
 import { IAttachment, attachmentsState } from '@/state/chat';
 
 const mockUseIsMobile = vi.fn();
+const mockSpontaneousUpload = vi.fn();
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mockUseIsMobile()
@@ -24,9 +25,14 @@ vi.mock('@chainlit/react-client', () => ({
   }),
   useChatMessages: () => ({ firstInteraction: undefined }),
   // `features` is read without an optional chain by UploadButton; the upload
-  // button is the first thing in the mobile row, so it has to be enabled.
+  // button is the first thing in the mobile row, so it defaults to enabled —
+  // the chevron cases turn it off per test.
   useConfig: () => ({
-    config: { features: { spontaneous_file_upload: { enabled: true } } }
+    config: {
+      features: {
+        spontaneous_file_upload: { enabled: mockSpontaneousUpload() }
+      }
+    }
   })
 }));
 
@@ -68,6 +74,7 @@ const input = () => document.querySelector('#chat-input')!;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSpontaneousUpload.mockReturnValue(true);
 });
 
 describe('MessageComposer, compact on a phone', () => {
@@ -135,6 +142,37 @@ describe('MessageComposer, compact on a phone', () => {
     );
 
     expect((input() as HTMLTextAreaElement).value).toBe('draft');
+  });
+
+  it('fills an empty left slot with a chevron', () => {
+    // Uploads off and no parent thread: both left buttons render null, and
+    // the pill's text would start flush at the rounded edge. The mute ">"
+    // holds the slot.
+    mockUseIsMobile.mockReturnValue(true);
+    mockSpontaneousUpload.mockReturnValue(false);
+
+    renderComposer();
+
+    expect(document.querySelector('#composer-chevron')).not.toBeNull();
+    expect(document.querySelector('#upload-button')).toBeNull();
+  });
+
+  it('keeps the chevron out while the upload button is there', () => {
+    mockUseIsMobile.mockReturnValue(true);
+
+    renderComposer();
+
+    expect(document.querySelector('#composer-chevron')).toBeNull();
+    expect(document.querySelector('#upload-button')).not.toBeNull();
+  });
+
+  it('never puts the chevron on the desktop card', () => {
+    mockUseIsMobile.mockReturnValue(false);
+    mockSpontaneousUpload.mockReturnValue(false);
+
+    renderComposer();
+
+    expect(document.querySelector('#composer-chevron')).toBeNull();
   });
 
   it('leaves the desktop card alone', () => {

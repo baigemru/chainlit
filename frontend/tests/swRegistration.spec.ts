@@ -27,23 +27,51 @@ const installServiceWorker = (
   return register;
 };
 
+/**
+ * The real `og:root_path` meta the server emits, because `getRouterBasename`
+ * reads the document rather than taking an argument -- mocking the module would
+ * only assert that the helper is wired to something.
+ */
+const setRootPath = (rootPath: string) => {
+  const meta = document.createElement('meta');
+  meta.setAttribute('property', 'og:root_path');
+  meta.setAttribute('content', rootPath);
+  document.head.appendChild(meta);
+};
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 afterEach(() => {
   delete (navigator as any).serviceWorker;
+  document
+    .querySelectorAll('meta[property="og:root_path"]')
+    .forEach((meta) => meta.remove());
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
 describe('registerServiceWorker', () => {
-  it('registers /sw.js in a production build on a browser that supports it', () => {
+  it('registers /sw.js at the origin root when no root_path is configured', () => {
     vi.stubEnv('PROD', PROD);
     const register = installServiceWorker();
 
     registerServiceWorker();
 
     expect(register).toHaveBeenCalledTimes(1);
-    expect(register).toHaveBeenCalledWith('/sw.js');
+    expect(register).toHaveBeenCalledWith('/sw.js', { scope: '/' });
+  });
+
+  it('registers under root_path rather than at the origin root', () => {
+    // The branch this closes: on a shared origin, a literal `/sw.js` is served
+    // by whatever other app owns the root, and the browser would install that
+    // foreign worker with scope `/` -- controlling this app too.
+    vi.stubEnv('PROD', PROD);
+    setRootPath('/app');
+    const register = installServiceWorker();
+
+    registerServiceWorker();
+
+    expect(register).toHaveBeenCalledWith('/app/sw.js', { scope: '/app/' });
   });
 
   it('does not touch navigator when serviceWorker is absent', () => {

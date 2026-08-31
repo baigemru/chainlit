@@ -63,6 +63,13 @@ def render_index(shell: str, config: "ChainlitConfig", public_dir: Path) -> str:
     description = _escape(ui.description)
     meta_url = _escape(ui.custom_meta_url or DEFAULT_META_URL)
     meta_image = _escape(ui.custom_meta_image_url or DEFAULT_META_IMAGE_URL)
+    # iOS reads this once, at launch, and paints the standalone status bar
+    # from it for the whole session: "black" gives white glyphs over a dark
+    # bar, "default" dark glyphs over a light one. It lives here rather than
+    # in the built shell because the theme it has to match is this
+    # deployment's config, not the build's. Not "black-translucent" -- that
+    # one moves the web view up under the bar and the header loses its top.
+    status_bar = "black" if ui.default_theme == "dark" else "default"
 
     tags = (
         f"<title>{name}</title>\n"
@@ -72,6 +79,8 @@ def render_index(shell: str, config: "ChainlitConfig", public_dir: Path) -> str:
         # pre-prefixed href would come out doubled (``/app/app/…``).
         '    <link rel="manifest" href="/manifest.webmanifest" />\n'
         '    <link rel="apple-touch-icon" href="/apple-touch-icon" />\n'
+        # A meta carries no href, so the rewrite below cannot touch it.
+        f'    <meta name="apple-mobile-web-app-status-bar-style" content="{status_bar}" />\n'
         f'    <meta name="description" content="{description}">\n'
         f'    <meta property="og:type" content="website">\n'
         f'    <meta property="og:title" content="{name}">\n'

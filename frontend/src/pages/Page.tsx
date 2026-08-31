@@ -55,8 +55,14 @@ const Page = ({ children }: Props) => {
   const historyEnabled = config?.dataPersistence && data?.requireLogin;
   const sidebarHidden = config?.ui?.default_sidebar_state === 'hidden';
 
+  // `viewport-fit=cover` in index.html is global, so on a notched phone the
+  // viewport runs under the sensor housing in every orientation. The composer
+  // already compensates for the bottom inset; the left and right ones only bite
+  // in landscape, where the housing eats the shell's leading or trailing edge.
+  // Both resolve to 0 in portrait and on desktop, so nothing moves there.
   return (
     <SidebarProvider
+      className="pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       defaultOpen={config?.ui.default_sidebar_state !== 'closed'}
     >
       <ChatProfileSwitchListener />
@@ -70,7 +76,9 @@ const Page = ({ children }: Props) => {
           </SidebarInset>
         </>
       ) : (
-        <div className="h-screen w-screen flex">{mainContent}</div>
+        // `w-full`, not `w-screen`: 100vw ignores the safe-area padding on the
+        // wrapper above and would overhang it by the inset in landscape.
+        <div className="h-screen w-full flex">{mainContent}</div>
       )}
     </SidebarProvider>
   );

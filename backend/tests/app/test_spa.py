@@ -165,6 +165,7 @@ def test_the_index_is_rendered_for_this_deployment(frontend_dir: Path, tmp_path:
             custom_css_attributes="",
             custom_js=None,
             custom_js_attributes="",
+            default_theme="dark",
         ),
         run=SimpleNamespace(root_path=""),
         project=None,

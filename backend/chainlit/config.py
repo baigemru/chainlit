@@ -175,6 +175,11 @@ confirm_new_chat = true
 # Description of the assistant. This is used for HTML tags.
 # description = ""
 
+# Name shown under the icon when the app is installed to a home screen.
+# About twelve characters fit before the launcher truncates; falls back to
+# `name`.
+# short_name = "Assistant"
+
 # Chain of Thought (CoT) display mode. Can be "hidden", "tool_call" or "full".
 cot = "full"
 
@@ -454,6 +459,11 @@ class UISettings(Settings):
 
     custom_meta_url: Optional[str] = None
     custom_meta_image_url: Optional[str] = None
+    # The name under the icon once the app is installed. A home-screen
+    # launcher gives a label roughly twelve characters before it truncates,
+    # and ``name`` is written for a title bar, not for that budget -- this is
+    # the short form the manifest uses instead when it is set.
+    short_name: Optional[str] = None
     logo_file_url: Optional[str] = None
     default_avatar_file_url: Optional[str] = None
     avatar_size: Optional[int] = None

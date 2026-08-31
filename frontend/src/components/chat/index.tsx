@@ -227,7 +227,9 @@ const Chat = () => {
           </div>
         </ScrollContainer>
         <div
-          className="flex flex-col mx-auto w-full p-4 pt-0"
+          // Tighter gutters below `md`, where the composer is a pill and the
+          // desktop p-4 would frame it in more padding than it is tall.
+          className="flex flex-col mx-auto w-full p-4 pt-0 max-md:px-2 max-md:pb-2"
           style={{
             maxWidth: layoutMaxWidth
           }}

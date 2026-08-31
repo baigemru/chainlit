@@ -152,6 +152,17 @@ export default function MessageComposer({
     onReply
   ]);
 
+  // The two layouts hang the textarea off different parents, so React
+  // remounts it on every switch and it comes back empty — while `value`, and
+  // with it the enabled send button, still holds the draft. `useIsMobile`
+  // answers false for one render on a phone, so the very first load switches;
+  // dragging a window across 768px mid-sentence does it again. Deliberately
+  // keyed on the layout alone: `value` in the deps would re-inject on every
+  // keystroke.
+  useEffect(() => {
+    if (value) inputRef.current?.setValueExtern(value);
+  }, [isMobile]);
+
   useEffect(() => {
     if (inputRef.current && promptValue && !promptUsed) {
       const prompt = promptValue;
@@ -166,42 +177,74 @@ export default function MessageComposer({
     }
   }, [promptValue, promptUsed]);
 
+  // The same three controls, arranged twice. On a phone they share one row
+  // with the textarea — Telegram's pill — because the desktop card spends
+  // ~136px of permanent height on a toolbar row of its own, and a phone has
+  // no such height to spend.
+  const uploadButton = (
+    <UploadButton
+      disabled={disabled}
+      fileSpec={fileSpec}
+      onFileUploadError={onFileUploadError}
+      onFileUpload={onFileUpload}
+    />
+  );
+  const textarea = (
+    <Input
+      ref={inputRef}
+      id="chat-input"
+      autoFocus={!isMobile}
+      onChange={setValue}
+      onPaste={onPaste}
+      onEnter={submit}
+      placeholder={t('chat.input.placeholder')}
+    />
+  );
+  const submitButton = (
+    <SubmitButton
+      onSubmit={submit}
+      disabled={disabled || (!value.trim() && attachments.length === 0)}
+      // 40px on a phone: the desktop 32px is below every tap-target floor.
+      className={isMobile ? 'h-10 w-10' : undefined}
+    />
+  );
+
   return (
     <div
       id="message-composer"
-      className="bg-accent dark:bg-card rounded-3xl p-3 px-4 w-full min-h-24 flex flex-col"
+      className={
+        isMobile
+          ? 'bg-accent dark:bg-card rounded-3xl p-1.5 pl-2 w-full flex flex-col'
+          : 'bg-accent dark:bg-card rounded-3xl p-3 px-4 w-full min-h-24 flex flex-col'
+      }
     >
       {attachments.length > 0 ? (
         <div className="mb-1">
           <Attachments />
         </div>
       ) : null}
-      <Input
-        ref={inputRef}
-        id="chat-input"
-        autoFocus={!isMobile}
-        onChange={setValue}
-        onPaste={onPaste}
-        onEnter={submit}
-        placeholder={t('chat.input.placeholder')}
-      />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center -ml-1.5">
-          <UploadButton
-            disabled={disabled}
-            fileSpec={fileSpec}
-            onFileUploadError={onFileUploadError}
-            onFileUpload={onFileUpload}
-          />
+      {isMobile ? (
+        // `items-end`, not `items-center`: once the textarea grows past one
+        // line the buttons must stay on the pill's bottom edge, next to the
+        // line being typed.
+        <div className="flex items-end gap-1">
+          {uploadButton}
           <OpenParentThreadButton />
+          {textarea}
+          {submitButton}
         </div>
-        <div className="flex items-center gap-1">
-          <SubmitButton
-            onSubmit={submit}
-            disabled={disabled || (!value.trim() && attachments.length === 0)}
-          />
-        </div>
-      </div>
+      ) : (
+        <>
+          {textarea}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center -ml-1.5">
+              {uploadButton}
+              <OpenParentThreadButton />
+            </div>
+            <div className="flex items-center gap-1">{submitButton}</div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

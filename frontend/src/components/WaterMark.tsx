@@ -20,7 +20,7 @@ export default function WaterMark() {
     >
       {/* The renderer emits the paragraph as a div, so the one-line rules
           have to be hung on `div`, not on `p`. */}
-      <Markdown className="min-w-0 [&_p]:m-0 [&_p]:leading-snug [&_div]:leading-snug [&_div]:mt-0 [&_div]:whitespace-nowrap [&_div]:overflow-hidden [&_div]:text-ellipsis [&_strong]:font-semibold text-xs text-muted-foreground">
+      <Markdown className="min-w-0 [&_p]:m-0 [&_p]:leading-snug [&_div]:leading-snug [&_div]:mt-0 [&_div]:whitespace-nowrap [&_div]:overflow-hidden [&_div]:text-ellipsis [&_strong]:font-semibold text-xs max-md:text-[10px] text-muted-foreground">
         {text}
       </Markdown>
     </div>

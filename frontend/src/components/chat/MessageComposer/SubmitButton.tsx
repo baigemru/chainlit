@@ -1,3 +1,5 @@
+import { cn } from '@/lib/utils';
+
 import {
   useChatData,
   useChatInteract,
@@ -18,11 +20,18 @@ import { Translator } from 'components/i18n';
 interface SubmitButtonProps {
   disabled?: boolean;
   onSubmit: () => void;
+  /**
+   * Sizing from the composer, which needs a bigger tap target in its mobile
+   * pill. It lands on both buttons: send and stop swap in place, and a stop
+   * that resized under the thumb would be a moving target.
+   */
+  className?: string;
 }
 
 export default function SubmitButton({
   disabled,
-  onSubmit
+  onSubmit,
+  className
 }: SubmitButtonProps) {
   const { loading } = useChatData();
   const { firstInteraction } = useChatMessages();
@@ -37,7 +46,7 @@ export default function SubmitButton({
               id="stop-button"
               onClick={stopTask}
               size="icon"
-              className="rounded-full h-8 w-8"
+              className={cn('rounded-full h-8 w-8', className)}
             >
               <Stop className="!size-6" />
             </Button>
@@ -56,7 +65,7 @@ export default function SubmitButton({
               disabled={disabled}
               onClick={onSubmit}
               size="icon"
-              className="rounded-full h-8 w-8"
+              className={cn('rounded-full h-8 w-8', className)}
             >
               <Send className="!size-6" />
             </Button>

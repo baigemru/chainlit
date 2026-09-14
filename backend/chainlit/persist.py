@@ -22,6 +22,7 @@ import msgspec
 from chainlit.context import context
 from chainlit.logger import logger
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
+from chainlit.persistence.storage.disposition import content_disposition, element_mime
 from chainlit.persistence.writer import (
     DeleteElement,
     DeleteStep,
@@ -103,11 +104,17 @@ def save_element(
             data = content
         owner = getattr(context.session.user, "identifier", None) or "unknown"
         object_key = f"{owner}/{record.id}" + (f"/{record.name}" if record.name else "")
+        # The disposition is written onto the object, not only into the
+        # response the element route builds: a presigned url serves the blob
+        # straight out of the bucket, and what it carries is the object's own
+        # header. An xlsx fetched that way without one opens as a tab of XML.
+        mime = element_mime(record)
         uploaded = await storage.upload_file(
             object_key=object_key,
             data=data,
-            mime=record.mime or "application/octet-stream",
+            mime=mime,
             overwrite=True,
+            content_disposition=content_disposition(record.name, mime),
         )
         if not uploaded:
             raise ValueError(f"Storage refused the blob of element {record.id}")

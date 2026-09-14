@@ -93,6 +93,12 @@ persist_user_env = false
 # Set to true to show API keys as ***, false to show them as plain text
 mask_user_env = false
 
+# What is written into the thread when a session goes away with a question
+# still on screen (a reload that landed on a new session, a closed tab): the
+# form and the coroutine behind it are gone, and without this the turn simply
+# stops. Set to "" for no trace at all.
+# interrupted_ask_message = "The action was interrupted and has to be started again."
+
 # Authorized origins
 allow_origins = ["*"]
 
@@ -551,6 +557,12 @@ class ProjectSettings(Settings):
     persist_user_env: Optional[bool] = False
     # Whether to mask user environment variables (API keys) in the UI with password type
     mask_user_env: Optional[bool] = False
+    # The line left in the thread when a session is torn down while a question
+    # is still open. ``None`` takes the built-in wording
+    # (``runner.DEFAULT_INTERRUPTED_ASK_MESSAGE``); ``""`` leaves no trace.
+    # A server-side string, not a UI one: it becomes a persisted step, so the
+    # deployment's own language belongs here and not in the client bundle.
+    interrupted_ask_message: Optional[str] = None
 
 
 class ChainlitConfigOverrides(Settings):

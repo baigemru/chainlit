@@ -36,6 +36,12 @@ export const protocolErrorState = atom<ProtocolError | undefined>({
 // session.
 export const sessionIdStorage = { key: 'chainlit-session-id' };
 
+// Where the thread the tab is *in* is remembered, derived from the key above
+// rather than a constant of its own: an embedder that moves one moves both,
+// and a copilot sharing a tab with the app must not read the app's thread.
+export const threadIdStorageKey = (): string =>
+  `${sessionIdStorage.key}:thread`;
+
 // A saved session id is only reused when this page load is a plain reload
 // of the same tab. A brand-new navigation — including tabs opened from this
 // one via target=_blank or window.open, which inherit a copy of
@@ -59,6 +65,15 @@ const isReloadNavigation = (): boolean => {
 // reload reconnects to the same server session and a pending ask can be
 // restored. sessionStorage is deliberate: localStorage would collapse every
 // tab into a single server session.
+//
+// The thread comes back with it, and that is not a convenience. A tab on
+// `/thread/:id` mounts `AutoResumeThread`, which compares the thread in the
+// URL against this descriptor's on mount -- before a single frame can
+// arrive -- and calls `clear()` when they differ. A descriptor restored
+// without its thread therefore always differs: the reload mints a fresh id,
+// sends `session.clear` to the session the server had just kept, and the
+// question that session was holding dies with it. Restoring both is what
+// makes the rescue reachable at all.
 const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
   setSelf,
   onSet
@@ -68,10 +83,14 @@ const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
       ? sessionStorage.getItem(sessionIdStorage.key)
       : null;
     if (saved) {
-      setSelf({ sessionId: saved });
+      const threadId = sessionStorage.getItem(threadIdStorageKey());
+      setSelf(threadId ? { sessionId: saved, threadId } : { sessionId: saved });
     } else {
       const fresh = uuidv4();
       sessionStorage.setItem(sessionIdStorage.key, fresh);
+      // A session nobody may adopt is in no thread either: leaving the
+      // previous tab's thread behind would have this one resume it.
+      sessionStorage.removeItem(threadIdStorageKey());
       setSelf({ sessionId: fresh });
     }
   } catch (_error) {
@@ -86,6 +105,29 @@ const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
       // Ignore storage failures; the atom still holds the id.
     }
   });
+};
+
+// The other half: the thread the session actually moved into, which the
+// descriptor does not know. A chat begun at `/` has no `threadId` in its
+// descriptor for its whole life -- the server names the thread on
+// `thread.first_interaction` -- so the descriptor alone would carry nothing
+// across a reload of exactly the conversation most worth carrying.
+export const rememberThreadId = (threadId: string | undefined): void => {
+  try {
+    if (threadId) {
+      sessionStorage.setItem(threadIdStorageKey(), threadId);
+    } else {
+      sessionStorage.removeItem(threadIdStorageKey());
+    }
+  } catch (_error) {
+    // Ignore storage failures; the atom still holds the thread.
+  }
+};
+
+const sessionStorageThreadIdEffect: AtomEffect<string | undefined> = ({
+  onSet
+}) => {
+  onSet(rememberThreadId);
 };
 
 /**
@@ -234,5 +276,6 @@ export const sideViewState = atom<
 
 export const currentThreadIdState = atom<string | undefined>({
   key: 'CurrentThreadId',
-  default: undefined
+  default: undefined,
+  effects: [sessionStorageThreadIdEffect]
 });

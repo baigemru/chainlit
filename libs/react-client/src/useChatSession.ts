@@ -20,7 +20,8 @@ import {
   sessionIdState,
   sessionIdStorage,
   sideViewState,
-  tasklistState
+  tasklistState,
+  threadIdStorageKey
 } from 'src/state';
 import {
   IAction,
@@ -149,9 +150,11 @@ const useChatSession = () => {
         transport.send({ t: 'session.clear' });
         try {
           // The server asked for a clean restart (dev hot-reload): drop
-          // the persisted id so the reloaded page cannot race the clear
-          // and resurrect the session it was told to leave.
+          // the persisted id and the thread that travels with it, so the
+          // reloaded page cannot race the clear and resurrect the session
+          // it was told to leave -- or resume its thread instead.
           sessionStorage.removeItem(sessionIdStorage.key);
+          sessionStorage.removeItem(threadIdStorageKey());
         } catch (_error) {
           // Storage unavailable — the reload proceeds regardless.
         }

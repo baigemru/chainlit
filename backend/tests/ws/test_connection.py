@@ -734,3 +734,81 @@ async def test_live_a_superseded_probe_cannot_close_the_new_socket(
                 assert (await read_live(second, "error"))[-1]["code"] == "unknown_tag"
         finally:
             writer.close()
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_reload_gets_its_question_back(ws_impl: str) -> None:
+    """F5 with the id the tab stored, over a socket that really closed.
+
+    In memory the first socket's close is a queue write and the session is
+    never actually left alone; here the browser's connection goes and the
+    handler unwinds for real before the reload's ``hello`` is read -- the
+    order the client fix (``state.ts`` restoring the thread with the id) is
+    there to produce. What comes back is the whole turn from the session's
+    own transcript, the question's buttons, and the question itself with
+    what is left of its deadline rather than a fresh one.
+    """
+    handler, _middleware, registry = build()
+
+    async with live_server(Litestar([handler]), ws=ws_impl) as port:
+        async with connect(f"ws://127.0.0.1:{port}/ws") as first:
+            await open_live(first, pageLoad=True, threadId="t1")
+            session = await wait_for_session(registry)
+            _stage_open_question(session)
+
+        # The socket is gone and the handler has unwound: the session is
+        # alone with its question, which is the state a reload arrives in.
+        await asyncio.sleep(0.2)
+        assert session.connected is False
+
+        async with connect(f"ws://127.0.0.1:{port}/ws") as second:
+            # The reload's hello: the id the tab stored, the thread it was
+            # in, and ``pageLoad`` -- the browser is holding nothing.
+            await second.send(hello(pageLoad=True, threadId="t1"))
+            replay = await read_live(second, "ask.start")
+
+    assert replay[0]["t"] == "session.ready"
+    assert replay[0]["restored"] is True
+    outputs = [f["step"].get("output") for f in replay if f["t"] == "step.upsert"]
+    assert outputs == ["the free report"], [f["t"] for f in replay]
+    assert [f["element"]["name"] for f in replay if f["t"] == "element.upsert"] == [
+        "report"
+    ]
+    assert [f["action"]["name"] for f in replay if f["t"] == "action.add"] == ["yes"]
+    ask = replay[-1]
+    assert ask["spec"]["stepId"] == "ask-1"
+    # The deadline is what is left of the original, never a fresh 600.
+    assert 0 < ask["spec"]["timeout"] < 600
+
+
+def _stage_open_question(session: Session) -> None:
+    """Put a turn and an open action question on a bare session.
+
+    There is no application behind this handler -- ``build`` makes sessions
+    by hand -- so the state a turn would have left is stated directly. It is
+    the same three things ``restore`` reads: what was said, the form's
+    furniture, and the ask itself.
+    """
+    from chainlit.protocol.payloads import (
+        Action,
+        AskActionSpec,
+        PdfElement,
+        Step as StepPayload,
+    )
+    from chainlit.ws.session import PendingAsk, TranscriptEntry
+
+    report = StepPayload(id="m1", type="assistant_message", output="the free report")
+    session.transcript.append(
+        TranscriptEntry(
+            step=report,
+            elements=[PdfElement(id="e1", name="report", for_id="m1")],
+        )
+    )
+    session.pending_ask = PendingAsk(
+        step_id="ask-1",
+        step=StepPayload(id="ask-1", type="assistant_message", output="Buy?"),
+        spec=AskActionSpec(step_id="ask-1", timeout=600),
+        future=asyncio.get_running_loop().create_future(),
+        deadline=time.monotonic() + 600,
+        restore_actions=[Action(id="a1", name="yes", for_id="ask-1")],
+    )

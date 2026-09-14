@@ -1,3 +1,4 @@
+import { fileExtension } from '@/lib/fileExtension';
 import React, { useEffect, useMemo } from 'react';
 import { DefaultExtensionType, FileIcon, defaultStyles } from 'react-file-icon';
 
@@ -39,14 +40,7 @@ const Attachment: React.FC<AttachmentProps> = ({
     };
   }, [imageUrl]);
 
-  let extension: DefaultExtensionType;
-  if (name.includes('.')) {
-    extension = name.split('.').pop()!.toLowerCase() as DefaultExtensionType;
-  } else {
-    extension = mime
-      ? ((mime.split('/').pop() || 'txt') as DefaultExtensionType)
-      : ('txt' as DefaultExtensionType);
-  }
+  const extension = fileExtension(name, mime) as DefaultExtensionType;
 
   if (isImage && imageUrl) {
     return (

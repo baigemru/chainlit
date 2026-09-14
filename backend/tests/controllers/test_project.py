@@ -265,6 +265,7 @@ async def make_element(
     *,
     for_id: Optional[str] = None,
     object_key: Optional[str] = None,
+    url: Optional[str] = None,
 ) -> str:
     element_id = str(uuid.uuid4())
     async with persistence.uow() as uow:
@@ -276,6 +277,7 @@ async def make_element(
                 thread_id=thread_id,
                 for_id=for_id,
                 object_key=object_key,
+                url=url,
                 props={"a": 1},
             )
         )
@@ -535,6 +537,60 @@ async def test_a_shared_thread_does_not_carry_the_sessions_own_metadata(
     assert response.status_code == 200
     assert b"sk-do-not-leak" not in response.content
     assert response.json()["metadata"] == {"is_shared": True, "topic": "public"}
+
+
+async def test_a_shared_thread_hands_out_share_urls_for_its_blobs(
+    client, persistence: Persistence
+) -> None:
+    """The read of the thread and the read of its files have to agree.
+
+    ``row_to_element`` writes the *author's* file url onto every row with an
+    object behind it, because everywhere else the reader is the author. A
+    stranger following that url gets the 404 it owes every stranger, so a
+    shared page used to arrive with every persisted image broken.
+
+    The element that owns its url keeps it: the rewrite recognises what the
+    substitution wrote, not merely "has a url".
+    """
+    thread_id = await make_thread(
+        persistence, owner=ALICE, metadata={"is_shared": True}
+    )
+    stored = await make_element(persistence, thread_id, object_key="alice/chart.png")
+    external = await make_element(
+        persistence, thread_id, url="https://example.com/cat.png"
+    )
+
+    response = await client.get(f"/project/share/{thread_id}")
+
+    assert response.status_code == 200
+    urls = {element["id"]: element["url"] for element in response.json()["elements"]}
+    assert urls[stored] == f"/project/share/{thread_id}/element/{stored}/file"
+    assert urls[external] == "https://example.com/cat.png"
+
+
+async def test_the_author_still_gets_the_author_url(
+    client, auth, persistence: Persistence
+) -> None:
+    """The rewrite belongs to the share handler, not to the row reader.
+
+    The author's own read is unchanged even on a published thread: their
+    browser carries the cookie the author route wants, and serving them the
+    public form would make every reload of their own thread depend on a flag
+    they are free to turn off.
+    """
+    thread_id = await make_thread(
+        persistence, owner=ALICE, metadata={"is_shared": True}
+    )
+    element_id = await make_element(
+        persistence, thread_id, object_key="alice/chart.png"
+    )
+    login(client, auth, ALICE)
+
+    response = await client.get(f"/project/thread/{thread_id}")
+
+    assert response.status_code == 200
+    urls = [element["url"] for element in response.json()["elements"]]
+    assert urls == [f"/project/thread/{thread_id}/element/{element_id}/file"]
 
 
 async def test_a_thread_read_hides_the_steps_a_resume_would_delete(

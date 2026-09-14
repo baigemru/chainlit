@@ -27,7 +27,12 @@ class BaseStorageClient(ABC):
 
     @abstractmethod
     async def get_read_url(self, object_key: str) -> str:
-        pass
+        """A presigned url for the object, valid for ``storage_expiry_time``.
+
+        No caller inside the package (GCS uses its own at upload). Kept as
+        the escape hatch for the redirect delivery mode: a deployment that
+        configures CORS on its bucket could 302 here instead of proxying.
+        """
 
     @abstractmethod
     async def read_file(self, object_key: str) -> Optional[bytes]:
@@ -36,13 +41,18 @@ class BaseStorageClient(ABC):
         The application serves element blobs itself rather than handing the
         browser a url into the bucket: a private bucket makes every stored
         url dead, and a redirect to a presigned one turns the ``fetch`` the
-        text, dataframe and pdf components do into a cross-origin request.
+        text, dataframe and pdf components do into a credentialed
+        cross-origin request the consumer's bucket is not configured to
+        answer.
 
-        Whole object, not a stream. The one caller is an HTTP route that must
-        answer ``404`` when the object is gone, which it cannot do once the
-        first chunk has left; and the alternative -- Litestar's ``Stream``
-        over a sync iterator -- costs one thread hop per chunk, which is one
-        per kilobyte with botocore's default chunk size.
+        Whole object, not a stream — because the workload is report files
+        (images, pdf, xlsx: kilobytes to a few megabytes), and buffering
+        them keeps the route trivially correct. Not because streaming is
+        impossible: ``get_object`` raises ``NoSuchKey`` at the call, before
+        any body is read, so a 404 stays possible, and ``iter_chunks``
+        takes its chunk size as a parameter. The day someone persists a
+        video, the upgrade is a chunked stream with ``Accept-Ranges`` —
+        this signature is the thing to change.
 
         ``None`` rather than an exception, for the same reason
         :meth:`delete_file` returns ``False``: the caller decides what a

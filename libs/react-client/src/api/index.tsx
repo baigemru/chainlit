@@ -37,7 +37,7 @@ type Payload = FormData | any;
 export class APIBase {
   constructor(
     public httpEndpoint: string,
-    public type: 'webapp' | 'copilot' | 'teams' | 'slack' | 'discord',
+    public type: 'webapp' | 'teams' | 'slack' | 'discord',
     public additionalQueryParams?: Record<string, string>,
     public on401?: () => void,
     public onError?: (error: ClientError) => void
@@ -68,8 +68,7 @@ export class APIBase {
    * A persisted element whose bytes live in object storage now arrives with
    * an app-relative url (`/project/thread/…/element/…/file`) — the stored
    * absolute one is dead. The browser would resolve that against the page
-   * origin, which loses the `root_path` prefix `httpEndpoint` carries and,
-   * in copilot, points at the host page instead of the chainlit server.
+   * origin, which loses the `root_path` prefix `httpEndpoint` carries.
    *
    * Everything else is returned untouched: an element created with an
    * external url (`cl.Image(url="https://…")`) owns its url, and so does a
@@ -193,13 +192,6 @@ export class ChainlitAPI extends APIBase {
   async jwtAuth(token: string) {
     const res = await this.fetch('POST', '/auth/jwt', undefined, undefined, {
       Authorization: `Bearer ${token}`
-    });
-    return res.json();
-  }
-
-  async stickyCookie(sessionId: string) {
-    const res = await this.fetch('POST', '/set-session-cookie', {
-      session_id: sessionId
     });
     return res.json();
   }

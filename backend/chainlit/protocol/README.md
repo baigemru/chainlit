@@ -86,30 +86,38 @@ fourteen names retired with the features behind them).
 17 old events → 6 tags (one 2→1 collapse, one drop, one new message,
 ten names retired with the features behind them).
 
-| Old event               | New tag         | Note                                                                                                                                                                                                                                                               |
-| ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `connect` (auth dict)   | `hello`         | **2 → 1.**                                                                                                                                                                                                                                                         |
-| `connection_successful` | `hello`         | The split is the source of the ordering hazard worked around all over `socket.py`: the client flushes its send buffer _before_ emitting `connection_successful`, so buffered events reach a half-initialised session. One first frame, one `session.ready` answer. |
-| `disconnect`            | _dropped_       | Transport-level: the websocket close frame replaces it. socket.io synthesises it as an event; a raw websocket does not need a name for it in the message vocabulary.                                                                                               |
-| `clear_session`         | `session.clear` |                                                                                                                                                                                                                                                                    |
-| `switch_chat_profile`   | **retired**     | in-place hot swap is off; the selector reconnects with the new profile in `hello`                                                                                                                                                                                  |
-| `stop`                  | `stop`          |                                                                                                                                                                                                                                                                    |
-| `ask_reply`             | `ask.reply`     | Still a plain message, never a request/response ack — it has to survive being buffered across a reconnect, which a socket.io ack (bound to the socket id) does not.                                                                                                |
-| `client_message`        | `message.send`  |                                                                                                                                                                                                                                                                    |
-| `edit_message`          | **retired**     | `edit_message = false`                                                                                                                                                                                                                                             |
-| `message_favorite`      | **retired**     | `favorites = false`                                                                                                                                                                                                                                                |
-| `fetch_favorites`       | **retired**     | `favorites = false`                                                                                                                                                                                                                                                |
-| `window_message`        | **retired**     | no host-page integration                                                                                                                                                                                                                                           |
-| `audio_start`           | **retired**     | audio is disabled                                                                                                                                                                                                                                                  |
-| `audio_chunk`           | **retired**     | audio is disabled; the wire has no binary frames                                                                                                                                                                                                                   |
-| `audio_end`             | **retired**     | audio is disabled                                                                                                                                                                                                                                                  |
-| `chat_settings_change`  | **retired**     | chat settings are unused                                                                                                                                                                                                                                           |
-| `chat_settings_edit`    | **retired**     | chat settings are unused                                                                                                                                                                                                                                           |
-| —                       | `hb.ack`        | **New.** Answer to `hb`.                                                                                                                                                                                                                                           |
+| Old event               | New tag         | Note                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connect` (auth dict)   | `hello`         | **2 → 1.** Carries `threadId`, `chatProfile`, `pageLoad`, `userEnv`, `device`, `clientType`, `protocolVersion` — **no session id**. Every field is optional: a first visit names nothing and the server mints both the thread and the session handle, answering with them in `session.ready`.                                         |
+| `connection_successful` | `hello`         | The split is the source of the ordering hazard worked around all over `socket.py`: the client flushes its send buffer _before_ emitting `connection_successful`, so buffered events reach a half-initialised session. One first frame, one `session.ready` answer.                                                                    |
+| `disconnect`            | _dropped_       | Transport-level: the websocket close frame replaces it. socket.io synthesises it as an event; a raw websocket does not need a name for it in the message vocabulary.                                                                                                                                                                  |
+| `clear_session`         | `session.clear` | "New chat", and the only way a user ends a session. The server tears it down and drops it from the registry rather than merely cancelling its work: the thread has to be free in the same turn, or reopening it from the history is handed the blank screen it just left. A question that was on screen gets the interrupted-ask row. |
+| `switch_chat_profile`   | **retired**     | in-place hot swap is off; the selector reconnects with the new profile in `hello`                                                                                                                                                                                                                                                     |
+| `stop`                  | `stop`          |                                                                                                                                                                                                                                                                                                                                       |
+| `ask_reply`             | `ask.reply`     | Still a plain message, never a request/response ack — it has to survive being buffered across a reconnect, which a socket.io ack (bound to the socket id) does not.                                                                                                                                                                   |
+| `client_message`        | `message.send`  |                                                                                                                                                                                                                                                                                                                                       |
+| `edit_message`          | **retired**     | `edit_message = false`                                                                                                                                                                                                                                                                                                                |
+| `message_favorite`      | **retired**     | `favorites = false`                                                                                                                                                                                                                                                                                                                   |
+| `fetch_favorites`       | **retired**     | `favorites = false`                                                                                                                                                                                                                                                                                                                   |
+| `window_message`        | **retired**     | no host-page integration                                                                                                                                                                                                                                                                                                              |
+| `audio_start`           | **retired**     | audio is disabled                                                                                                                                                                                                                                                                                                                     |
+| `audio_chunk`           | **retired**     | audio is disabled; the wire has no binary frames                                                                                                                                                                                                                                                                                      |
+| `audio_end`             | **retired**     | audio is disabled                                                                                                                                                                                                                                                                                                                     |
+| `chat_settings_change`  | **retired**     | chat settings are unused                                                                                                                                                                                                                                                                                                              |
+| `chat_settings_edit`    | **retired**     | chat settings are unused                                                                                                                                                                                                                                                                                                              |
+| —                       | `hb.ack`        | **New.** Answer to `hb`.                                                                                                                                                                                                                                                                                                              |
 
 `hello.device` (`"mobile" | "pc" | null`) is new and **analytics only**: it
 cuts the funnel by screen class, nothing on the server may branch on it, and
 a client that omits it gets exactly the same session.
+
+**`hello.threadId` is the whole identity.** The client never offers a session
+id — it has none to offer, and the one in `session.ready` is a handle for the
+HTTP routes (uploads, action buttons, custom-element writes), held in memory
+and never in storage. The server answers a named thread with the session that
+is in it, or with a session of the caller's own when nobody is; a thread held
+by another user is answered exactly like a thread that never existed, because
+a refusal is an answer about a row.
 
 ---
 
@@ -140,7 +148,7 @@ move. The client rewrite needs this list as much as the tag map.
 | `thread_id`        | `threadId`       | `thread.first_interaction` |
 
 Everything else was already camelCase (`forId`, `chainlitKey`, `parentId`,
-`isSequence`, `keepTranscript`, `nextSessionId`, `hasTransitMessage`,
+`isSequence`, `keepTranscript`, `nextThreadId`, `hasTransitMessage`,
 `parentThreadId`, `autoPlay`, `playerConfig`, `intervalMs`).
 
 ## Shape changes worth flagging
@@ -189,12 +197,18 @@ cannot be made additively.
 | ---- | ------------------------------------------------------------- |
 | 4400 | bad handshake — the first frame was not a well-formed `hello` |
 | 4401 | unauthenticated                                               |
-| 4403 | session forbidden — the session id belongs to another user    |
-| 4404 | thread forbidden — the thread is not readable by this user    |
 | 4408 | heartbeat timeout — no `hb.ack` within the deadline           |
 | 4409 | superseded — another connection took this session over        |
 | 4413 | frame too large                                               |
 | 4500 | internal                                                      |
+
+4403 (session forbidden) and 4404 (thread forbidden) are **retired**, and the
+range they sat in is deliberately left empty. Both said "that exists and is
+not yours", which says that it exists; the server now answers an unavailable
+thread with one of the caller's own in `session.ready` and says nothing about
+the other. 4409 is terminal for the client: the tab that receives it does not
+reconnect, or two tabs on one URL would take the conversation from each other
+forever.
 
 `ErrorCode` (on the `error` message) is separate: an error leaves the socket
 open. A failure that must also close it sends both.

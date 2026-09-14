@@ -9,8 +9,8 @@
  * somebody else already do this?". None of them are here, because the
  * question they answered is now answered in one place.
  *
- * The model is: navigation states a **descriptor** — the session id, and the
- * thread it resumes — and the transport is told to `attach` to it. Attaching
+ * The model is: navigation states a **descriptor** — the thread this
+ * connection is for — and the transport is told to `attach` to it. Attaching
  * to the descriptor already attached is nothing. Attaching to a different one
  * closes what is open and opens the new one, exactly once, with no window in
  * which a stale attach can act.
@@ -38,24 +38,16 @@ import { ChainlitSocket, websocketUrl } from './socket';
 let pageHasEstablishedConnection = false;
 
 /**
- * For embedders that unmount and remount the whole widget (copilot): the
- * remounted UI starts empty, so the next connect must be treated as a fresh
- * load again or the server would skip the full restore.
- */
-export const resetPageConnectionFlag = () => {
-  pageHasEstablishedConnection = false;
-};
-
-/**
  * What the application decided this connection is for.
  *
- * The two fields are the connection's identity: changing either of them means
- * a different conversation, and the transport rebuilds. `chatProfile` rides
- * along because the descriptor is also what the app offers in `hello`, but it
- * is payload, not identity — see the module docstring.
+ * `threadId` alone is the identity: the thread is the only name this side of
+ * the wire has for a conversation. The session id is minted by the server and
+ * announced in `session.ready` — a handle for the HTTP routes, never a thing
+ * the client can ask for. `chatProfile` rides along because the descriptor is
+ * also what the app offers in `hello`, but it is payload, not identity — see
+ * the module docstring.
  */
 export interface SessionDescriptor {
-  sessionId: string;
   /** The thread this session was opened to resume, if any. */
   threadId?: string;
   /** The profile the client offers. The server's answer wins. */
@@ -127,8 +119,17 @@ const IDLE: TransportState = {
   superseded: false
 };
 
+/**
+ * Same conversation, so the open socket already speaks for it.
+ *
+ * Only the thread. Two descriptors with no thread at all are therefore
+ * "the same", and that is deliberate rather than a hole: `clear()` detaches
+ * before it writes the successor, and `detach()` forgets the descriptor, so
+ * the attach that follows has nothing to compare against and always opens.
+ * Pinned by "two clears in a row open two connections" in
+ * `tests/chatTransport.spec.ts`.
+ */
 const sameSession = (a: SessionDescriptor, b: SessionDescriptor): boolean =>
-  a.sessionId === b.sessionId &&
   (a.threadId || undefined) === (b.threadId || undefined);
 
 export class ChatTransport {
@@ -143,8 +144,9 @@ export class ChatTransport {
   readonly sendBuffer: ClientMsg[] = [];
 
   /**
-   * The API this transport speaks to. Mutable because the copilot builds a
-   * fresh `ChainlitAPI` in its render body — same server, new object.
+   * The API this transport speaks to. Mutable because a host may rebuild its
+   * `ChainlitAPI` — same server, new object — and the live socket must not
+   * be rebuilt with it.
    */
   client: ChainlitAPI;
 
@@ -157,10 +159,10 @@ export class ChatTransport {
   private descriptor?: SessionDescriptor;
   private payload: HelloPayload = {};
   /**
-   * Bumped by every `attach` and `detach`. An attach has to await the sticky
-   * cookie before it may open, and this is what tells its continuation that a
-   * newer intent overtook it in the meantime — the stale one then does
-   * nothing at all, rather than closing the socket the newer one just opened.
+   * Bumped by every `attach` and `detach`, and captured by the socket this
+   * one built. A socket that has been replaced still owns timers and a
+   * pending close event; without the fence its `onStatus`/`onClose` would
+   * publish a phase over the connection that succeeded it.
    */
   private generation = 0;
 
@@ -194,7 +196,7 @@ export class ChatTransport {
     this.descriptor = descriptor;
     this.dropSocket();
     this.publish({ phase: 'connecting', connected: false, error: false });
-    void this.openWhenPinned(generation);
+    this.open(generation);
   };
 
   /** Stop speaking for anything. The buffer is kept. */
@@ -246,19 +248,11 @@ export class ChatTransport {
 
   // ------------------------------------------------------------- internals
 
-  private async openWhenPinned(generation: number): Promise<void> {
-    try {
-      await this.client.stickyCookie(this.descriptor!.sessionId);
-    } catch (error) {
-      console.error(`Failed to set sticky session cookie: ${error}`);
-    }
-    // A `clear()` (or another navigation) landed while the cookie was in
-    // flight. The attach it belongs to has already closed whatever was open
-    // and is opening its own socket; this one must not touch either.
-    if (generation !== this.generation) return;
-    this.open(generation);
-  }
-
+  // `attach` opens straight away. There used to be a `POST
+  // /set-session-cookie` awaited first, pinning a multi-worker deployment to
+  // the worker that would own the session; it is gone with the client-minted
+  // session id — there is no id to pin with before the server answers. A
+  // deployment with more than one worker needs affinity at the balancer.
   private open(generation: number): void {
     const socket = new ChainlitSocket({
       url: websocketUrl(this.client.httpEndpoint),
@@ -330,7 +324,6 @@ export class ChatTransport {
     const descriptor = this.descriptor;
     return {
       t: 'hello',
-      sessionId: descriptor?.sessionId ?? '',
       clientType: this.client.type,
       threadId: this.payload.threadId || descriptor?.threadId || undefined,
       chatProfile:
@@ -373,12 +366,14 @@ export class ChatTransport {
    * The handle the e2e suite drives the transport through, shaped like the
    * socket.io object the specs were written against. It hangs off the
    * transport rather than off one socket, so it keeps working after a
-   * rebuild. Only under Cypress, and never for the copilot widget: a handle
-   * on the user's socket must not leak to page scripts in production.
+   * rebuild. Only under Cypress: a handle on the user's socket must not leak
+   * to page scripts in production. It exposes the connection, never the
+   * session id — the id is the server's handle for this user's live objects,
+   * and a page script holding it could act as them.
    */
   private installCypressHandle(): void {
     if (typeof window === 'undefined') return;
-    if (!(window as any).Cypress || this.client.type === 'copilot') return;
+    if (!(window as any).Cypress) return;
     const connected = () => this.state.connected;
     const buffer = this.sendBuffer;
     (window as any).__chainlitSocket = {
@@ -400,15 +395,17 @@ export class ChatTransport {
 }
 
 /**
- * One transport per server, keyed by what identifies the server rather than
- * by the client object: the copilot rebuilds its `ChainlitAPI` on every
- * render of the widget wrapper, and a registry keyed on identity would hand
- * out a new transport each time.
+ * One transport per server, keyed by the server's address rather than by the
+ * client object: a host that builds its `ChainlitAPI` in a render body would
+ * otherwise be handed a new transport — and with it a second socket — on
+ * every render. `client.type` was part of the key while two clients could
+ * share one page; only one can now, and the endpoint alone says which server
+ * it is.
  */
 const transports = new Map<string, ChatTransport>();
 
 export const chatTransportFor = (client: ChainlitAPI): ChatTransport => {
-  const key = `${client.type} ${client.httpEndpoint}`;
+  const key = client.httpEndpoint;
   const existing = transports.get(key);
   if (existing) {
     existing.client = client;

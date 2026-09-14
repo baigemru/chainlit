@@ -32,6 +32,7 @@ const useChatInteract = () => {
   const sessionId = useRecoilValue(sessionIdState);
 
   const setDescriptor = useSetRecoilState(sessionDescriptorState);
+  const setSessionId = useSetRecoilState(sessionIdState);
 
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
@@ -50,21 +51,30 @@ const useChatInteract = () => {
    *
    * The successor is minted in a single write, so the connect effect never
    * sees a half-built one: `next` names the parts the caller has an opinion
-   * about — a hand-off's server-minted session id, the profile it switches
-   * to, the thread the new session resumes — and the rest is fresh.
+   * about — the thread the new session resumes, the profile it switches to —
+   * and the rest is fresh.
    */
   const clear = useCallback(
     (next: Partial<SessionDescriptor> = {}) => {
+      // The server's cue to tear the session down and give the thread up, not
+      // just to cancel its work: a session left alive on that thread would be
+      // handed straight back the next time the thread is opened, as an empty
+      // screen instead of the resume from the database.
       transport.send({ t: 'session.clear' });
       // Relinquished right away rather than left for the attach that follows
       // to close: until the new descriptor is attached, frames arriving on
       // the old socket would land in a chat that has already been wiped.
+      // `detach` also forgets the descriptor, which is what makes two clears
+      // in a row two connections even when both name the same (or no) thread.
       transport.detach();
       setDescriptor((old) => ({
-        sessionId: next.sessionId ?? uuidv4(),
         chatProfile: next.chatProfile ?? old.chatProfile,
         threadId: next.threadId
       }));
+      // The handle dies with the session it addressed. Left behind, a click
+      // made before the successor's `session.ready` would call an action on
+      // the session this one is abandoning.
+      setSessionId(undefined);
       // The old session is gone; a lingering ask would hold a dead callback
       // (and possibly an awaitingReply lock) forever.
       setAskUser(undefined);
@@ -80,6 +90,7 @@ const useChatInteract = () => {
     [
       transport,
       setDescriptor,
+      setSessionId,
       setAskUser,
       setFirstUserInteraction,
       setProtocolError,
@@ -143,9 +154,21 @@ const useChatInteract = () => {
 
   const uploadFile = useCallback(
     (file: File, onProgress: (progress: number) => void, parentId?: string) => {
+      if (!sessionId) {
+        // No session to upload into: a drop onto a chat that is being
+        // replaced, before its `session.ready` names the handle. Reported as
+        // a failed upload rather than thrown, because both callers build
+        // their attachment list inside a `map` and already `.catch` this
+        // promise -- a throw would come out of a click handler instead, half
+        // a list built.
+        return {
+          xhr: new XMLHttpRequest(),
+          promise: Promise.reject(new Error('No live session to upload to'))
+        };
+      }
       return client.uploadFile(file, onProgress, sessionId, parentId);
     },
-    [sessionId]
+    [client, sessionId]
   );
 
   return {

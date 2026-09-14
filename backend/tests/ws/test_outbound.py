@@ -300,11 +300,11 @@ def test_abort_drops_the_backlog_and_closes_now() -> None:
         outbound.attach(socket)  # type: ignore[arg-type]
         for index in range(20):
             outbound.send(token("s", str(index)))
-        outbound.abort(CloseCode.SESSION_FORBIDDEN, "not yours")
+        outbound.abort(CloseCode.INTERNAL, "not yours")
         await asyncio.wait_for(outbound.wait_closed(), 5)
         assert outbound.closed is True
         assert outbound.backlog == 0
-        assert socket.closed == (CloseCode.SESSION_FORBIDDEN, "not yours")
+        assert socket.closed == (CloseCode.INTERNAL, "not yours")
         assert socket.frames == []
         assert outbound.send(token("s", "late")) is False
 

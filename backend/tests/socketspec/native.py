@@ -22,14 +22,12 @@ that make them true and then lets the implementation decide everything else.
   chat nor a first interaction is the successor of a profile switch. The old
   backend built that session ahead of the client; this one mints only the
   id and builds the session on arrival, so nothing is held.
-* ``restored`` -- the session is *handed back*. In production that is the
-  ``kept`` outcome of ``registry.claim``, which the ``reload`` rows pin on
-  their own; every other family states the hand-back as a precondition, and
-  several of them state it about a session the claim would replace (idle,
-  and the client reloaded). So for the first ``hello`` of a ``restored`` row
-  the driver builds the ``kept`` ``Arrival`` itself, doing exactly what
-  ``arrive``'s kept branch does. Every hello after the first goes through
-  ``arrive`` as a reconnect.
+* ``restored`` -- the session is *handed back*. Nothing is built for it and
+  no ``Arrival`` is forged: every hello goes through the real ``arrive``,
+  and the hand-back happens because the hello names the conversation the
+  held session is in. That is the whole of the translation now -- a client
+  offers a thread and only a thread, so "the server still holds my session"
+  and "I am in thread T" are the same sentence.
 * ``stored_thread`` -- a stub unit of work under the real
   ``ThreadStoreAdapter`` and the real ``ApplicationRunner._resume``, so the
   record-to-frame conversion under test is the implementation's.
@@ -90,7 +88,7 @@ from chainlit.protocol.server import Error
 from chainlit.runner import ApplicationRunner, ThreadStoreAdapter
 from chainlit.transit_store import TransitStore
 from chainlit.ws.connection import HEARTBEAT_INTERVAL_MS, _dispatch
-from chainlit.ws.handshake import Arrival, arrive, ready_frame, restore
+from chainlit.ws.handshake import arrive, ready_frame, restore
 from chainlit.ws.registry import ClaimOutcome, SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 
@@ -354,7 +352,7 @@ class _Run:
         self.sleepers.append(task)
         return task
 
-    def _new_session(self, session_id: str, *, thread_id: Optional[str]) -> Session:
+    def _new_session(self, session_id: str, *, thread_id: str) -> Session:
         session = Session(
             id=session_id,
             runner=self.runner,
@@ -366,15 +364,31 @@ class _Run:
         self.sessions.append(session)
         return session
 
-    def _make_session(self, session_id: str, hello: Hello) -> Session:
-        """What the socket hands ``arrive`` for an id it has decided is new.
+    def _make_session(self, thread_id: Optional[str]) -> Session:
+        """What the socket hands ``arrive`` for a conversation nobody is in.
 
-        The runner's own factory would also start a ``SessionWriter``, which
-        is the database half and not on this table.
+        The handle is minted here, as the runner's factory mints it: nothing
+        on the wire offers one. The runner would also start a
+        ``SessionWriter``, which is the database half and not on this table.
         """
         return self._new_session(
-            session_id, thread_id=hello.thread_id or str(uuid.uuid4())
+            str(uuid.uuid4()), thread_id=thread_id or str(uuid.uuid4())
         )
+
+    @property
+    def requested_thread(self) -> Optional[str]:
+        """The conversation the client names in its hello.
+
+        The table states its preconditions as facts about a session the
+        server is holding; the only way a client asks for that session now
+        is to name the thread it is in. A row that holds nothing and resumes
+        nothing names nothing, which is a first visit.
+        """
+        if self.given.resuming_thread:
+            return self.given.resuming_thread
+        if self.given.server_holds_session:
+            return self.thread_id
+        return None
 
     @property
     def _switch_successor(self) -> bool:
@@ -424,16 +438,23 @@ class _Run:
         session.connected = False
         self.registry.register(
             session,
+            thread_id=self.thread_id,
             user_identifier=SOMEONE_ELSE if given.owned_by_someone_else else USER,
-            thread_id=session.thread_id,
             connected=False,
         )
         self.held = session
 
     def _build_bystanders(self) -> None:
         for index, bystander in enumerate(self.given.bystanders):
+            if bystander.thread is None or bystander.thread == self.thread_id:
+                raise AssertionError(
+                    "a bystander in this conversation cannot exist: a thread "
+                    "holds one session, and a second connection to it is a "
+                    "takeover. State the row about another conversation, or "
+                    "about the session this one hands over."
+                )
             session = self._new_session(
-                f"bystander-{index}", thread_id=bystander.thread or self.thread_id
+                f"bystander-{index}", thread_id=bystander.thread
             )
             session.chat_started = True
             session.first_interaction = "message"
@@ -442,10 +463,11 @@ class _Run:
             if bystander.running_task:
                 session.current_task = self._sleeper()
             session.connected = bystander.connected
+            assert session.thread_id is not None
             self.registry.register(
                 session,
-                user_identifier=USER,
                 thread_id=session.thread_id,
+                user_identifier=USER,
                 connected=bystander.connected,
             )
             self.bystanders.append(session)
@@ -455,7 +477,7 @@ class _Run:
         if handover is None:
             return
         await self.transit.park(
-            SESSION_ID,
+            self.thread_id,
             handover.message,
             SOMEONE_ELSE if handover.foreign else USER,
             parent=handover.parent,
@@ -488,36 +510,23 @@ class _Run:
         page_load = bool(
             incoming.payload.get("pageLoad", given.fresh_page_load if first else False)
         )
+        thread_id = self.requested_thread if first else self.session_thread
         hello = Hello(
-            session_id=SESSION_ID,
-            thread_id=given.resuming_thread,
+            thread_id=thread_id,
             chat_profile=given.chat_profile,
             page_load=page_load,
         )
 
-        if first and given.restored and self.held is not None:
-            # The hand-back the row states as a fact. What ``arrive`` does
-            # on its ``kept`` branch, and nothing else.
-            held = self.held
-            held.connected = True
-            self.registry.mark_connected(held.id)
-            arrival = Arrival(
-                outcome=ClaimOutcome.KEPT, session=held, fresh_page_load=page_load
-            )
-        else:
-            arrival = await arrive(
-                registry=self.registry,
-                session_id=SESSION_ID,
-                user_identifier=USER,
-                page_load=page_load,
-                thread_id=hello.thread_id,
-                make_session=lambda sid: self._make_session(sid, hello),
-            )
+        arrival = await arrive(
+            registry=self.registry,
+            user_identifier=USER,
+            page_load=page_load,
+            thread_id=hello.thread_id,
+            make_session=self._make_session,
+        )
 
         self.on_open = arrival.outcome.value
         self.fresh_page_load = arrival.fresh_page_load
-        if arrival.refused or arrival.session is None:
-            return
 
         session = arrival.session
         self.session = session
@@ -537,6 +546,16 @@ class _Run:
         )
         await self.runner.on_ready(arrival)
         await self._settle()
+
+    @property
+    def session_thread(self) -> Optional[str]:
+        """What a second hello names: whatever thread the first one landed in.
+
+        A client that reconnects asks for the conversation it is in, which
+        after a disown or a minted thread is not the one it first named.
+        """
+        session = self.session
+        return session.thread_id if session is not None else self.requested_thread
 
     def _store_during_restore(self, session: Session) -> Any:
         """The thread store, with ``Given.during_restore`` landing in its await.
@@ -664,7 +683,7 @@ class _Run:
         session = self.session
         ask = self.ask
         resolved = ask is not None and ask.future.done() and not ask.future.cancelled()
-        parked = await self.transit.store.get(self.transit._key(SESSION_ID))
+        parked = await self.transit.store.get(self.transit._key(self.thread_id))
         state: Dict[str, Any] = {
             "on_open": self.on_open,
             "fresh_page_load": self.fresh_page_load,

@@ -44,9 +44,7 @@ let pendingOpen = false;
  * profile restore — optionally keeping the messages currently on screen
  * above a return divider (the same divider mechanism `set_chat_profile`
  * uses). Serves both the `open_thread` socket event and the composer's
- * return-to-parent button. Router-dependent: only mount it under the router
- * (the copilot widget routes the button through openThreadRequestState
- * instead).
+ * return-to-parent button. Router-dependent: only call it under the router.
  */
 export const useOpenThread = () => {
   const navigate = useNavigate();
@@ -146,7 +144,8 @@ export const useOpenThread = () => {
           setTransition({ threadId, keepTranscript });
 
           // From here on this is the regular open-from-history path:
-          // AutoResumeThread on /thread/:id clears the session and resumes.
+          // ThreadAddressSync reads the new address as a request for that
+          // thread and clears the session into it.
           navigate(`/thread/${threadId}`);
         });
       } finally {

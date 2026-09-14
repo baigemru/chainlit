@@ -48,8 +48,6 @@ const MIN_WATCHDOG_MS = 10_000;
 const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set<number>([
   CloseCode.BAD_HANDSHAKE,
   CloseCode.UNAUTHENTICATED,
-  CloseCode.SESSION_FORBIDDEN,
-  CloseCode.THREAD_FORBIDDEN,
   CloseCode.SUPERSEDED,
   CloseCode.FRAME_TOO_LARGE
 ]);

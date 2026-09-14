@@ -69,6 +69,13 @@ const MessagesContainer = ({ navigate }: Props) => {
 
   const onFeedbackUpdated = useCallback(
     async (message: IStep, onSuccess: () => void, feedback: IFeedback) => {
+      if (!sessionId) {
+        // No live session to attribute the vote to. The handle arrives with
+        // `session.ready` and is dropped by `clear()`, so a click in the gap
+        // would address the session that was just abandoned.
+        toast.error(t('chat.messages.feedback.status.updating'));
+        return;
+      }
       toast.promise(apiClient.setFeedback(feedback, sessionId), {
         loading: t('chat.messages.feedback.status.updating'),
         success: (res) => {

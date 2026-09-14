@@ -57,22 +57,36 @@ class LiveSession(Protocol):
         """Run the app's callback for this action; ``LookupError`` if none."""
         ...
 
+    async def release(self) -> None:
+        """Give the conversation up: out of the registry, then torn down.
+
+        What a route calls when the thread stops existing underneath a live
+        session.
+        """
+        ...
+
 
 @runtime_checkable
 class SessionRegistry(Protocol):
     """Bound by the application under the dependency key ``sessions``.
 
-    The last two methods are about a *thread* rather than one session: the
-    question they answer -- "is anything still holding these steps?" -- can
-    only be answered by looking at every session on that thread.
+    Both lookups exist because both identities are real: the routes that act
+    on something a session rendered -- an action button, a custom element --
+    are handed the session handle, and the routes that act on a conversation
+    are handed the thread. A thread holds at most one session, which is what
+    makes the last two questions single lookups.
     """
 
     def find(self, session_id: str) -> Optional[LiveSession]:
-        """The live session with this id, or ``None``."""
+        """The live session with this handle, or ``None``."""
+        ...
+
+    def find_thread(self, thread_id: Optional[str]) -> Optional[LiveSession]:
+        """The live session in this conversation, or ``None``."""
         ...
 
     def has_live_task(self, thread_id: Optional[str]) -> bool:
-        """Whether any session on this thread is running something."""
+        """Whether the session on this thread is running something."""
         ...
 
     def protected_step_ids(self, thread_id: Optional[str]) -> AbstractSet[str]:

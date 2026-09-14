@@ -1,4 +1,3 @@
 packages:
   - frontend/
   - libs/react-client/
-  - libs/copilot/

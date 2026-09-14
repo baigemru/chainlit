@@ -62,12 +62,14 @@ class TranscriptStep:
 
 @dataclass(frozen=True)
 class Handover:
-    """A message parked by the session that handed this one its id.
+    """A message parked by the session that handed this one its thread.
 
-    A profile switch mints the successor's id server-side and parks the
-    message under it, so the value never travels through the browser. The
-    record carries the previous thread's id even when there is no message at
-    all -- that is how the new thread learns what it descends from.
+    A profile switch mints the successor's *thread* server-side and parks
+    the message under it, so the value never travels through the browser.
+    The record carries the previous thread's id even when there is no
+    message at all -- that is how the new thread learns what it descends
+    from. Finding the record is also how the server knows this arrival is a
+    handover and not a resume.
     """
 
     message: Optional[str] = None
@@ -78,20 +80,21 @@ class Handover:
 
 @dataclass(frozen=True)
 class Bystander:
-    """Another session on the same conversation.
+    """A session in *another* conversation.
 
-    A conversation is not one socket. A second tab is one of these; so is
-    the session a previous connection walked away from, which the server has
-    no way to tell apart from a tab the user is about to come back to --
-    except by what it is still holding. What may be done to a resuming
-    thread depends entirely on that.
+    It used to mean another session in this one -- a second tab, or a
+    connection that walked away without closing. A thread holds one session
+    now, so that is not a state the server can be in, and a row that states
+    one is refused by the driver rather than built. What is left is the
+    rule it was always really about: one conversation says nothing about
+    any other.
     """
 
     connected: bool = True
     pending_ask: Optional[AskState] = None
     running_task: bool = False
     thread: Optional[str] = None
-    """Which conversation it belongs to. ``None`` means this one."""
+    """Which conversation it belongs to. Must name one, and not this one."""
 
 
 @dataclass(frozen=True)
@@ -99,7 +102,12 @@ class Given:
     """The state of the conversation before the frames arrive."""
 
     restored: bool = False
-    """The session outlived the previous socket and was handed back."""
+    """The session outlived the previous socket and was handed back.
+
+    Descriptive now rather than causal: the hand-back happens because the
+    hello names the conversation the held session is in, which the driver
+    does for any row that holds one.
+    """
 
     chat_started: bool = False
     """``on_chat_start`` has already run for this session."""
@@ -139,14 +147,23 @@ class Given:
     """A record parked for this session by the one it succeeds."""
 
     server_holds_session: bool = True
-    """Whether the server still has a session under the id the client offers.
+    """Whether a session is live in the conversation the client names.
+
+    The one fact the arrival turns on: a held conversation is handed over,
+    a free one is begun. Set it ``False`` for every cold open -- a first
+    visit, and a thread read back from storage after the reaper, which is
+    reachable only when nobody is in it.
 
     Only meaningful for the frame that opens a connection; every other frame
     in the table is addressed to a session that exists by definition.
     """
 
     owned_by_someone_else: bool = False
-    """The held session belongs to a different user than the one arriving."""
+    """The held session belongs to a different user than the one arriving.
+
+    Not a refusal: the arriving user is given a conversation of their own
+    and told nothing about this one.
+    """
 
     parked_reply: bool = False
     """An answer arrived early and is still waiting for the handshake to end.
@@ -156,7 +173,7 @@ class Given:
     """
 
     bystanders: Tuple[Bystander, ...] = ()
-    """Other sessions the server is holding when the frames arrive."""
+    """Sessions of other conversations, live when the frames arrive."""
 
     produced_between_connections: Tuple[Mapping[str, Any], ...] = ()
     """Steps the conversation adds after the first frame is handled.

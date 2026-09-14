@@ -959,25 +959,26 @@ def test_logout_works_without_a_credential():
     assert any(header.startswith(f"{COOKIE}=") for header in set_cookies(response))
 
 
-# --- /set-session-cookie ----------------------------------------------------
+# --- the sticky cookie, retired ---------------------------------------------
 
 
-def test_set_session_cookie():
+def test_nothing_pins_a_session_to_a_worker_any_more():
+    """``POST /set-session-cookie`` is gone, and could not be revived.
+
+    It existed for load balancers doing session affinity, and it worked by
+    the client telling the server which session id to pin. The client has
+    no id to tell: the server mints one and only names it *after* the
+    socket is open, which is far too late to steer the upgrade that carries
+    it. A multi-worker deployment needs affinity from the balancer instead
+    -- in the release notes.
+    """
     with client() as c:
-        response = c.post("/set-session-cookie", json={"session_id": "session-1"})
+        response = c.post("/set-session-cookie", json={"session_id": "s"})
 
-    assert response.status_code == 200
-    assert response.json() == {"message": "Session cookie set"}
-    header = next(
-        h for h in set_cookies(response) if h.startswith("X-Chainlit-Session-id=")
+    assert response.status_code == 404
+    assert not any(
+        header.startswith("X-Chainlit-Session-id=") for header in set_cookies(response)
     )
-    assert "session-1" in header
-    assert "HttpOnly" in header
-
-
-def test_set_session_cookie_needs_a_session_id():
-    with client() as c:
-        assert c.post("/set-session-cookie", json={}).status_code == 400
 
 
 # --- routing ----------------------------------------------------------------
@@ -1030,9 +1031,6 @@ def test_the_public_routes_do_not_need_a_credential(monkeypatch: pytest.MonkeyPa
         assert c.get(f"/auth/oauth/{PROVIDER_ID}").status_code != 401
         assert c.get(_callback_url("nope")).status_code != 401
         assert c.post("/logout").status_code != 401
-        assert (
-            c.post("/set-session-cookie", json={"session_id": "s"}).status_code != 401
-        )
 
 
 def test_os_environ_is_not_read_at_import_time():

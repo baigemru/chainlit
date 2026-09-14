@@ -48,6 +48,13 @@ const ActionButton = ({ action }: ActionProps) => {
   }, [action, isRunning]);
 
   const handleClick = useCallback(async () => {
+    // Unlike the composer, an action button is not gated on `connected`: it
+    // is on screen from the frame that created it. The session handle is
+    // what says the session is really there -- it arrives with
+    // `session.ready` and `clear()` drops it -- so a click before the
+    // handshake, or in the gap a New Chat opens, addresses nothing rather
+    // than posting `session_id=undefined` at whatever the server has.
+    if (!sessionId) return;
     try {
       setIsRunning(true);
       await apiClient.callAction(action, sessionId);

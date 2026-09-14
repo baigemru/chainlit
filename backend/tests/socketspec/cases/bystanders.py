@@ -1,23 +1,25 @@
-"""The other sessions the server is still holding.
+"""The sessions that are not this one -- and why none of them is in this thread.
 
-A conversation is not one socket. There is the tab the user is looking at,
+A conversation used to be several sockets: the tab the user was looking at,
 the tab they left open on another screen, and the session a connection
-walked away from and never closed. The server cannot tell the last two apart
-by looking at them -- only by what they are still holding, and by whether
-anyone is on the other end.
+walked away from without closing. The server could not tell the last two
+apart except by what they were still holding, and an eviction sweep decided
+which of them was holding the conversation open for nobody.
 
-That matters twice over. A session parked on a question nobody will ever
-answer keeps the whole conversation looking busy, and a conversation that
-looks busy is never tidied up. But a session that is genuinely working, or
-genuinely on screen, must survive: evicting it takes work away from a user
-who is still there.
+None of that exists. A thread holds one session, so a second connection to
+it is that session changing hands -- there is nothing left to sweep, and
+``Bystander`` can now only mean *another conversation*. The driver refuses a
+row that states one in this thread rather than pretending to build it.
 
-One thing is deliberately not stated here: that the arriving session never
-sweeps itself up. It cannot -- handing the socket over is what marks a
-session connected again, and that happens before any of this runs, so no
-scenario can put the server in the state the check defends against. The check
-is a belt to a suspender in another function, and the table says nothing
-about it rather than pretending to.
+What is left is the rule that survived the collapse: one conversation says
+nothing about any other. A resume reads the thread it is resuming, and the
+work and questions of every other thread are none of its business.
+
+The other half of the old family -- a live conversation's flagged messages
+being protected from a reader -- moved with the reader. It is the HTTP read
+path now (``controllers.project.hide_resume_deleted``), pinned in
+``tests/controllers/test_project.py``, because the only reader that can meet
+a live session is the one that is not it.
 """
 
 from typing import Any, Dict, Mapping, Tuple
@@ -28,6 +30,7 @@ from ..spec import AskState, Bystander, Given, Incoming, Result, Scenario, asser
 HELLO = Incoming("hello")
 
 THREAD = "thread-1"
+ELSEWHERE = "another-thread"
 KEEP = {"id": "m1", "type": "user_message", "output": "which one?"}
 FLAGGED = {
     "id": "m2",
@@ -44,7 +47,9 @@ def _thread(steps: Tuple[Mapping[str, Any], ...] = (KEEP,)) -> Dict[str, Any]:
 def _resuming(
     *bystanders: Bystander, steps: Tuple[Mapping[str, Any], ...] = (KEEP,)
 ) -> Given:
+    """Opening a conversation nobody is in, while other ones are live."""
     return Given(
+        server_holds_session=False,
         resuming_thread=THREAD,
         hooks=("chat_resume",),
         stored_thread=_thread(steps),
@@ -56,153 +61,83 @@ def _ids(steps: Any) -> list:
     return [step.get("id") for step in steps]
 
 
-def _kept(result: Result) -> bool:
-    return result.state["evicted"] == []
+def _survived(result: Result) -> bool:
+    return "bystander-0" in result.state["live_sessions"]
 
 
 BYSTANDER_SCENARIOS = (
     Scenario(
-        name="a session parked on a question nobody came back to is evicted",
-        why=(
-            "A question with a long deadline holds its session open for as "
-            "long as the deadline lasts. Every reload leaves another one "
-            "behind, each still counting as work in progress, and the "
-            "conversation is never idle again -- while the user who would "
-            "have answered is right here, in the new session."
-        ),
-        given=_resuming(Bystander(connected=False, pending_ask=AskState())),
-        when=(HELLO,),
-        then=lambda result: (
-            assert_that(
-                result.state["evicted"] == ["bystander-0"],
-                "the abandoned session was left holding the conversation",
-            ),
-            assert_that(
-                "bystander-0" not in result.state["live_sessions"],
-                "the evicted session is still in the registry",
-            ),
-        ),
-    ),
-    Scenario(
-        name="a second tab showing the same question is left alone",
-        why=(
-            "Its question is really on screen and the user can really answer "
-            "it. Evicting it takes the form away mid-answer, in a tab the "
-            "server was given no reason to think was gone."
-        ),
-        given=_resuming(Bystander(connected=True, pending_ask=AskState())),
-        when=(HELLO,),
-        then=lambda result: assert_that(
-            _kept(result), "a connected session was evicted"
-        ),
-    ),
-    Scenario(
-        name="a disconnected session working between questions is left alone",
-        why=(
-            "Nothing is waiting on the user -- the work is waiting on itself, "
-            "and it will post its results when it finishes. Cancelling it "
-            "because the socket went away throws away work that was paid for."
-        ),
-        given=_resuming(Bystander(connected=False, running_task=True)),
-        when=(HELLO,),
-        then=lambda result: assert_that(
-            _kept(result), "a session between questions was evicted"
-        ),
-    ),
-    Scenario(
         name="a session of another conversation is never touched",
         why=(
-            "Resuming one conversation says nothing about any other. Widening "
-            "the sweep to every abandoned session would let one reconnect "
-            "cancel a question waiting in a conversation the user has open "
-            "somewhere else."
+            "Resuming one conversation says nothing about any other. A rule "
+            "that reached past the thread it was asked about would let one "
+            "reconnect cancel a question waiting in a conversation the user "
+            "has open somewhere else."
         ),
         given=_resuming(
-            Bystander(connected=False, pending_ask=AskState(), thread="another-thread")
+            Bystander(connected=False, pending_ask=AskState(), thread=ELSEWHERE)
         ),
         when=(HELLO,),
         then=lambda result: assert_that(
-            _kept(result), "a session of a different conversation was evicted"
+            _survived(result), "a session of a different conversation was evicted"
         ),
     ),
     Scenario(
-        name="eviction happens first, so the conversation reads as idle again",
-        superseded=(
-            "deleting resume=delete steps through the socket is gone: "
-            "handshake.restore is never called with prune=True, and "
-            "controllers.project.hide_resume_deleted owns the read path. The eviction "
-            "half is the sibling row 'a session parked on a question nobody came back "
-            "to is evicted'; the ordering wants respelling against hiding once "
-            "runner._resume hides."
-        ),
+        name="work running in another conversation protects nothing here",
         why=(
-            "This is what the eviction is for. The abandoned session's work "
-            "makes the conversation look alive, and nothing is tidied up "
-            "while it does -- so the messages that should not have survived "
-            "pile up, one more on every reload."
+            "Protection is about the thread being read, not about the server "
+            "being busy. A query that answered 'something is running "
+            "somewhere' would leave every flagged message on screen for as "
+            "long as any user anywhere had work in flight."
+        ),
+        given=_resuming(
+            Bystander(connected=True, running_task=True, thread=ELSEWHERE),
+            steps=(KEEP, FLAGGED),
+        ),
+        when=(HELLO,),
+        expect=(
+            Expect("thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1"]}),
+        ),
+        then=lambda result: assert_that(
+            _survived(result), "the other conversation's session was torn down"
+        ),
+    ),
+    Scenario(
+        name="a question waiting in another conversation protects nothing here",
+        why=(
+            "Same rule, stated about the other protection query: the step "
+            "ids a live question holds are the ones in *its* thread. Reading "
+            "them across threads would keep a stranger's offer on this "
+            "user's screen because the ids happened to collide."
         ),
         given=_resuming(
             Bystander(
-                connected=False,
-                pending_ask=AskState(step_id="a-question-of-its-own"),
-                running_task=True,
+                connected=True, pending_ask=AskState(step_id="m2"), thread=ELSEWHERE
             ),
             steps=(KEEP, FLAGGED),
         ),
         when=(HELLO,),
-        then=lambda result: (
-            assert_that(
-                result.state["evicted"] == ["bystander-0"],
-                "the abandoned session survived the resume",
-            ),
-            assert_that(
-                result.state["deleted_steps"] == ["m2"],
-                "the conversation still read as busy after the eviction",
-            ),
+        expect=(
+            Expect("thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1"]}),
         ),
     ),
     Scenario(
-        name="work running in a tab that is still open protects what it produced",
+        name="nothing is ever evicted on arrival",
         why=(
-            "The messages are not leftovers -- they are being produced right "
-            "now, in a session someone is watching. A resume from a second "
-            "tab that deleted them would have the two feeds disagree, and the "
-            "running work would put its rows back as orphans."
+            "The sweep is gone, and its absence is worth a row: a thread "
+            "holds one session, so the arriving connection either is that "
+            "session or is in a thread of its own. An arrival that tore "
+            "anything down would be tearing down a conversation nobody asked "
+            "it about."
         ),
         given=_resuming(
-            Bystander(connected=True, running_task=True), steps=(KEEP, FLAGGED)
+            Bystander(connected=False, pending_ask=AskState(), thread=ELSEWHERE),
+            Bystander(connected=True, running_task=True, thread="a-third-thread"),
         ),
         when=(HELLO,),
-        expect=(
-            Expect(
-                "thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1", "m2"]}
-            ),
-        ),
         then=lambda result: assert_that(
-            result.state["deleted_steps"] == [],
-            "a live conversation's messages were deleted from under it",
-        ),
-    ),
-    Scenario(
-        name="a question waiting in another session protects its own step",
-        why=(
-            "Whose session the question belongs to is not the point -- that "
-            "somebody is being asked is. Deleting the step from under another "
-            "live question leaves that user with nothing to answer."
-        ),
-        given=_resuming(
-            Bystander(connected=True, pending_ask=AskState(step_id="m2")),
-            steps=(KEEP, FLAGGED),
-        ),
-        when=(HELLO,),
-        expect=(
-            Expect(
-                "thread.resume", {"thread.steps": lambda s: _ids(s) == ["m1", "m2"]}
-            ),
-        ),
-        then=lambda result: assert_that(
-            result.state["deleted_steps"] == [],
-            "another session's live question did not protect its step",
+            result.state["evicted"] == [],
+            f"the arrival evicted {result.state['evicted']}",
         ),
     ),
 )

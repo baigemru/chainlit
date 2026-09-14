@@ -1,5 +1,3 @@
-import { IWidgetConfig } from '../../libs/copilot/src/types';
-
 const resizeObserverLoopErrRe = /^[^(ResizeObserver loop limit exceeded)]/;
 Cypress.on('uncaught:exception', (err) => {
   /* returning false here prevents Cypress from failing the test */
@@ -24,111 +22,36 @@ export function closeHistory() {
   cy.get(`body`).click();
 }
 
-export function loadCopilotScript() {
-  cy.step('Load the copilot script');
-
-  cy.document().then((document) => {
-    document.body.innerHTML = '<div id="root"></div>';
-
-    return new Cypress.Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = `${document.location.origin}/copilot/index.js`;
-      script.onload = resolve;
-      script.onerror = () =>
-        reject(new Error('Failed to load copilot/index.js'));
-      document.body.appendChild(script);
-    });
-  });
-
-  cy.window().should('have.property', 'mountChainlitWidget');
-}
-
-export function mountCopilotWidget(widgetConfig?: Partial<IWidgetConfig>) {
-  cy.step('Mount the widget');
-  cy.get('#chainlit-copilot').should('not.exist');
-  cy.window().then((win) => {
-    // @ts-expect-error is not a valid prop
-    win.mountChainlitWidget({
-      ...widgetConfig,
-      chainlitServer: window.location.origin
-    });
-  });
-  cy.get('#chainlit-copilot').should('exist');
-}
-
-export function colilotShouldBeClosed() {
-  cy.get('#chainlit-copilot-button').should(
-    'have.attr',
-    'aria-expanded',
-    'false'
-  );
-  cy.get('#chainlit-copilot-chat').should('not.exist');
-}
-
-export function copilotShouldBeOpen() {
-  cy.get('#chainlit-copilot-button').should(
-    'have.attr',
-    'aria-expanded',
-    'true'
-  );
-  cy.get('#chainlit-copilot-chat').should('exist');
-}
-
-export function openCopilot() {
-  cy.step('Open copilot');
-
-  colilotShouldBeClosed();
-
-  cy.get('#chainlit-copilot-button').click();
-
-  copilotShouldBeOpen();
-}
-
-export function getCopilotThreadId(
-  assertion?: (threadId: string | null) => void
-) {
-  // @ts-expect-error getChainlitCopilotThreadId is not a standard Window prop
-  const read = (window: Window) => window.getChainlitCopilotThreadId();
-  return assertion
-    ? cy.window().should((window) => assertion(read(window)))
-    : cy.window().then(read);
-}
-
-export function clearCopilotThreadId(newThreadId?: string) {
-  return cy.window().then((win) => {
-    // @ts-expect-error is not a valid prop
-    win.clearChainlitCopilotThreadId(newThreadId);
-  });
-}
-
-const SOCKET_IO_EVENT_PREFIX = '42'; // Engine.IO MESSAGE (4) + Socket.IO EVENT (2)
-const SOCKET_IO_PREFIX_LENGTH = 2;
-
-export function setupWebSocketListener(
-  eventType: string,
-  callback: (data: any) => void
-) {
+/**
+ * Read frames off the live socket, by tag.
+ *
+ * The wire is plain JSON discriminated on `t` -- there is no Engine.IO `42`
+ * prefix to strip and no event-name array to unpack. Call it before
+ * `cy.visit`, since it stubs the constructor on `window:before:load`.
+ *
+ * The only thing it is for is reaching values the UI never shows: the
+ * server-minted `session.ready.sessionId`, an element's `chainlitKey`.
+ * Assert on the DOM for anything the user can see.
+ */
+export function onServerFrames(handlers: Record<string, (frame: any) => void>) {
   cy.on('window:before:load', (win) => {
     const OriginalWebSocket = win.WebSocket;
 
+    // One stub for every tag the caller wants. Sinon refuses to wrap a method
+    // twice ("already wrapped"), so a per-tag stub would throw the moment a
+    // spec watched two frames.
     cy.stub(win, 'WebSocket').callsFake(
       (url: string, protocols?: string | string[]) => {
         const ws = new OriginalWebSocket(url, protocols);
 
         ws.addEventListener('message', (event: MessageEvent) => {
           const data = event.data;
-          if (
-            typeof data === 'string' &&
-            data.startsWith(SOCKET_IO_EVENT_PREFIX)
-          ) {
-            try {
-              const payload = JSON.parse(data.slice(SOCKET_IO_PREFIX_LENGTH));
-              if (payload[0] === eventType) {
-                callback(payload[1]);
-              }
-            } catch (_e) {
-              // Ignore parse errors
-            }
+          if (typeof data !== 'string') return;
+          try {
+            const frame = JSON.parse(data);
+            handlers[frame?.t]?.(frame);
+          } catch (_e) {
+            // Ignore parse errors
           }
         });
 

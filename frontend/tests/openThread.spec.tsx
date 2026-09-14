@@ -85,7 +85,7 @@ describe('shouldRetireTransition', () => {
   it('retires when the server refused the thread and moved the address', () => {
     // The whole failed-resume path since stage 1: there is no error frame
     // any more. The server answers `session.ready` naming a thread of its
-    // own, the client writes it and ThreadAddressListener replaces the
+    // own, the client writes it and ThreadAddressSync replaces the
     // address with it -- so the transition's own route is gone, and this is
     // what has to catch it or the in-flight guard swallows every future
     // open until a reload.

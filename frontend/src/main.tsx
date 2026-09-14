@@ -17,7 +17,7 @@ i18nSetupLocalization();
 
 // Which conversation this page load is asking for, decided before RecoilRoot
 // mounts. The descriptor is seeded from it synchronously, so by the time
-// `AutoResumeThread` compares the URL's thread with the descriptor's on its
+// `ThreadAddressSync` compares the URL's thread with the descriptor's on its
 // first commit they already agree -- an answer that arrived one effect later
 // would have it clear the session the server had just kept.
 //

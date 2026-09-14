@@ -62,7 +62,6 @@ from litestar.exceptions import (
 from litestar.params import (
     FromPath,
     FromQuery,
-    JSONBody,
     MultipartBody,
     QueryParameter,
     SkipValidation,
@@ -103,13 +102,10 @@ __all__ = (
 PUBLIC = {"exclude_from_auth": True}
 
 STATE_COOKIE_NAME = "oauth_state"
-SESSION_COOKIE_NAME = "X-Chainlit-Session-id"
 
 #: The provider is expected back within minutes; a state cookie that outlived
 #: the round trip is a replay window and nothing else.
 DEFAULT_STATE_COOKIE_LIFETIME = 3 * 60
-
-LOCAL_HOSTS = ("127.0.0.1", "localhost")
 
 #: The one error code the login page knows how to render.
 OAUTH_SIGNIN_ERROR = "oauthSignin"
@@ -130,11 +126,6 @@ class PasswordLoginForm:
 
     username: str
     password: str
-
-
-@dataclass
-class SessionCookieRequest:
-    session_id: str
 
 
 class AuthenticatedUser(Struct, omit_defaults=True, kw_only=True, frozen=True):
@@ -249,8 +240,8 @@ def _state_cookie(value: str, max_age: int) -> Cookie:
     It is not a session: it lives for one redirect round trip and is read
     once, by ``oauth_callback``, on the top-level GET the provider sends the
     browser back on. ``SameSite=Lax`` is sent on exactly that navigation, so
-    it needs neither the ``None``/``Secure`` pair a cross-origin copilot
-    deployment gives the auth cookie nor that cookie's ``Path``. Tying it to
+    it needs neither the ``None``/``Secure`` pair a cross-origin embed
+    gives the auth cookie nor that cookie's ``Path``. Tying it to
     the auth instance would only make the entry routes -- which do not
     otherwise need one -- depend on it.
     """
@@ -552,8 +543,7 @@ class AuthController(Controller):
         the one that most needs to be able to clear it. With no auth
         configured there is no cookie to clear, and nothing is written.
 
-        A hand-built ``Response`` -- one of two in the controllers, with
-        ``set_session_cookie`` -- because the cookie is decided per request
+        A hand-built ``Response`` because the cookie is decided per request
         and the decorator's ``response_cookies`` is static.
         """
         response: Response[Any] = Response(
@@ -776,33 +766,4 @@ class AuthController(Controller):
             display_name=display_name,
             metadata=record.metadata or {},
             createdAt=record.created_at,
-        )
-
-    # --- session affinity ---
-
-    @post("/set-session-cookie", status_code=HTTP_200_OK, opt=PUBLIC)
-    async def set_session_cookie(
-        self, request: AuthedRequest, data: JSONBody[SessionCookieRequest]
-    ) -> Response[Any]:
-        """Pin the websocket session id, for load balancers doing affinity.
-
-        ``SameSite=None`` off localhost because the copilot embeds this app
-        cross-origin, and that requires ``Secure``. That is also why this is
-        a hand-built ``Response``: the cookie's attributes depend on the
-        request, and ``response_cookies`` on the decorator cannot.
-        """
-        client = request.client
-        is_local = bool(client and client.host in LOCAL_HOSTS)
-        return Response(
-            content={"message": "Session cookie set"},
-            cookies=[
-                Cookie(
-                    key=SESSION_COOKIE_NAME,
-                    value=data.session_id,
-                    path="/",
-                    httponly=True,
-                    secure=not is_local,
-                    samesite="lax" if is_local else "none",
-                )
-            ],
         )

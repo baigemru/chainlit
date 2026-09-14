@@ -19,13 +19,22 @@ from chainlit.protocol.codec import (
 def test_close_codes_match_the_specified_values() -> None:
     assert CloseCode.BAD_HANDSHAKE == 4400
     assert CloseCode.UNAUTHENTICATED == 4401
-    assert CloseCode.SESSION_FORBIDDEN == 4403
-    assert CloseCode.THREAD_FORBIDDEN == 4404
     assert CloseCode.HEARTBEAT_TIMEOUT == 4408
     assert CloseCode.SUPERSEDED == 4409
     assert CloseCode.FRAME_TOO_LARGE == 4413
     assert CloseCode.BACKLOG_EXCEEDED == 4429
     assert CloseCode.INTERNAL == 4500
+
+
+def test_no_close_code_refuses_a_thread() -> None:
+    """4403 and 4404 are retired, and the range they sat in stays empty.
+
+    A close code that said "that session is not yours" or "that thread is
+    not yours" was an answer about a row the caller had guessed at. The
+    server answers a thread it will not hand over with a thread of the
+    caller's own in ``session.ready``, and says nothing about the other one.
+    """
+    assert not any(4402 <= int(code) <= 4407 for code in CloseCode)
 
 
 def test_close_codes_stay_in_the_private_range() -> None:
@@ -82,7 +91,19 @@ def test_a_field_of_the_wrong_type_is_rejected() -> None:
 
 def test_a_missing_required_field_is_rejected() -> None:
     with pytest.raises(msgspec.ValidationError):
-        decode_client(b'{"t":"hello"}')
+        decode_client(b'{"t":"ask.reply"}')
+
+
+def test_a_bare_hello_is_well_formed() -> None:
+    """Every field of ``hello`` is optional, and that is the point.
+
+    A first visit names nothing: no session id exists to offer, and there is
+    no thread yet either. The server answers with both.
+    """
+    hello = decode_client(b'{"t":"hello"}')
+    assert isinstance(hello, c.Hello)
+    assert hello.thread_id is None
+    assert hello.page_load is False
 
 
 def test_defaults_are_omitted_from_the_wire() -> None:
@@ -92,8 +113,12 @@ def test_defaults_are_omitted_from_the_wire() -> None:
 
 
 def test_an_absent_optional_field_decodes_to_its_default() -> None:
-    decoded = decode_client(b'{"t":"hello","sessionId":"s"}')
+    # ``sessionId`` is a field of the client that predates this protocol,
+    # and an unknown field is ignored rather than refused -- which is what
+    # lets a browser holding a cached bundle connect at all.
+    decoded = decode_client(b'{"t":"hello","threadId":"t","sessionId":"s"}')
     assert isinstance(decoded, c.Hello)
+    assert decoded.thread_id == "t"
     assert decoded.client_type == "webapp"
     assert decoded.page_load is False
     assert decoded.user_env == {}

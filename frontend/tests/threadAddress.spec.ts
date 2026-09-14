@@ -14,7 +14,7 @@ import {
  *
  * The reading half has to agree with react-router's own `stripBasename`
  * exactly. If it does not, the seeded descriptor and `useParams().id`
- * disagree on the first commit, and AutoResumeThread reads that as "this tab
+ * disagree on the first commit, and ThreadAddressSync reads that as "this tab
  * asked for another thread" and clears the live session.
  */
 

@@ -117,7 +117,7 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
     "thread.open": s.ThreadOpen(thread_id="thread-0", keep_transcript=False),
     "session.handoff": s.SessionHandoff(
         chat_profile="fast",
-        next_session_id="session-2",
+        next_thread_id="thread-2",
         keep_transcript=True,
         has_transit_message=True,
     ),
@@ -132,8 +132,7 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
 
 CLIENT_SAMPLES: dict[str, c.ClientMsg] = {
     "hello": c.Hello(
-        session_id="session-1",
-        client_type="copilot",
+        client_type="teams",
         device="mobile",
         thread_id="thread-1",
         chat_profile="default",

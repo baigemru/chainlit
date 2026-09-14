@@ -253,12 +253,14 @@ class SessionHandoff(_Msg, tag="session.handoff"):
 
     The old name was ``set_chat_profile``, one letter away from the
     in-place ``switch_chat_profile`` while doing something entirely
-    different. ``next_session_id`` is minted server-side; the browser
-    adopts it verbatim.
+    different. ``next_thread_id`` is minted server-side and the transit
+    record is parked under it; the browser opens ``/thread/<id>`` and the
+    server recognises the handoff by the record, not by anything the
+    client says.
     """
 
     chat_profile: str
-    next_session_id: str | None = None
+    next_thread_id: str | None = None
     keep_transcript: bool = False
     has_transit_message: bool = False
 

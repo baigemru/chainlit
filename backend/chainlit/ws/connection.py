@@ -181,7 +181,7 @@ class Connection:
 def make_websocket_handler(
     *,
     registry: SessionRegistry,
-    make_session: Callable[[str, Hello, Any], Session],
+    make_session: Callable[[Optional[str], Hello, Any], Session],
     thread_store: Optional[ThreadStore] = None,
     on_arrival: Optional[Callable[[Arrival], Awaitable[None]]] = None,
     on_ready: Optional[Callable[[Arrival], Awaitable[None]]] = None,
@@ -223,19 +223,14 @@ def make_websocket_handler(
 
         arrival = await arrive(
             registry=registry,
-            session_id=hello.session_id,
             user_identifier=_identifier(user),
             page_load=hello.page_load,
             thread_id=hello.thread_id,
-            make_session=lambda sid: make_session(sid, hello, user),
+            make_session=lambda thread_id: make_session(thread_id, hello, user),
         )
-        if arrival.refused or arrival.session is None:
-            await socket.close(
-                code=CloseCode.SESSION_FORBIDDEN,
-                reason="session belongs to another user",
-            )
-            return
-
+        # No refusal exists any more. A thread somebody else is in is
+        # answered with a conversation of this user's own, because a close
+        # code that meant "not yours" was an answer about a row.
         session = arrival.session
         if on_arrival is not None:
             await on_arrival(arrival)
@@ -421,7 +416,17 @@ async def _read_loop(connection: Connection, scope: anyio.CancelScope) -> None:
 
 async def _dispatch(session: Session, message: ClientMsg) -> None:
     """Five tags. The sixth, ``hb.ack``, is the connection's and never
-    reaches here. Everything else the client can say, it cannot say twice."""
+    reaches here. Everything else the client can say, it cannot say twice.
+
+    ``session.clear`` is the one that ends things. "New chat" is the user
+    giving the conversation up, so the session is released outright --
+    out of the registry and torn down -- rather than merely emptied. Two
+    consequences worth naming: the thread becomes free in the same turn,
+    so reopening it from the history resumes it from the database instead
+    of finding a blank live session on it; and a question that was on
+    screen when the button was pressed gets the interrupted-ask row
+    ``teardown`` writes, which ``cancel_work`` alone never did.
+    """
     if isinstance(message, Hello):
         # A second hello on an established socket. The handshake is not
         # re-runnable -- it has side effects -- so this is ignored rather
@@ -450,8 +455,9 @@ async def _dispatch(session: Session, message: ClientMsg) -> None:
         return
 
     if isinstance(message, SessionClear):
-        session.cancel_work()
-        session.transcript.clear()
+        # The client detached before it sent this, so the abort inside the
+        # release closes a socket nobody is listening on any more.
+        await session.release()
         return
 
 

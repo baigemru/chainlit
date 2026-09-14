@@ -1,10 +1,5 @@
 import { useCallback, useContext, useMemo, useRef } from 'react';
-import {
-  useRecoilCallback,
-  useRecoilValue,
-  useResetRecoilState,
-  useSetRecoilState
-} from 'recoil';
+import { useRecoilCallback, useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 import {
   actionState,
@@ -18,7 +13,6 @@ import {
   protocolErrorState,
   sessionDescriptorState,
   sessionIdState,
-  sessionIdStorage,
   sideViewState,
   tasklistState
 } from 'src/state';
@@ -55,7 +49,6 @@ import type {
   ServerMsg,
   ServerMsgHandlers
 } from './protocol';
-import { CloseCode } from './protocol';
 import type { HelloPayload, SessionDescriptor, SessionSink } from './transport';
 
 /**
@@ -72,12 +65,21 @@ const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const transport = useChatTransport();
   const descriptor = useRecoilValue(sessionDescriptorState);
-  const { sessionId, chatProfile, threadId: idToResume } = descriptor;
-  const resetSessionId = useResetRecoilState(sessionIdState);
+  const { chatProfile, threadId: idToResume } = descriptor;
+  const sessionId = useRecoilValue(sessionIdState);
+  const setSessionId = useSetRecoilState(sessionIdState);
   const setChatProfile = useSetRecoilState(chatProfileState);
-  // One-shot guard: a persisted session id the server refuses gets replaced
-  // once; a second refusal in a row surfaces as an error instead of looping.
-  const authFailureHandledRef = useRef(false);
+
+  // The handle, captured in the frame flow rather than read off a render.
+  // `element.upsert` mints its url from the session id and can follow
+  // `session.ready` in the same tick; a handler closure rebuilt on the next
+  // render would still hold the previous session's id -- or, on the first
+  // connection, none at all -- and every element url would come out
+  // `?session_id=undefined`. Written only by the `session.ready` handler,
+  // never mirrored from a render: `session.ready` is the first frame of
+  // every socket, so by the time anything reads this it is this
+  // connection's id and nothing has to clear it.
+  const sessionIdRef = useRef<string | undefined>(undefined);
 
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
@@ -130,15 +132,18 @@ const useChatSession = () => {
     () => ({
       // ---- lifecycle -------------------------------------------------
       'session.ready': (msg) => {
-        authFailureHandledRef.current = false;
+        // Before anything else: the frames that follow address the session
+        // over HTTP with this.
+        sessionIdRef.current = msg.sessionId;
+        setSessionId(msg.sessionId);
         if (msg.chatProfile) setChatProfile(msg.chatProfile);
         // The server names the thread on every branch of the handshake --
         // kept, replaced, created, resumed -- and that answer outranks
         // whatever this client asked for. A resume the server refused comes
         // back as a *different* thread here rather than an error, and the
-        // address bar follows it (ThreadAddressListener); without this
-        // write the tab would sit on /thread/<refused> with the session in
-        // another thread, and AutoResumeThread would clear it on sight.
+        // address bar follows it (ThreadAddressSync); without this write the
+        // tab would sit on /thread/<refused> with the session in another
+        // thread, and the same component would clear it on sight.
         setCurrentThreadId(msg.threadId ?? undefined);
       },
 
@@ -154,15 +159,11 @@ const useChatSession = () => {
       },
 
       reload: () => {
+        // The server asked for a clean restart (dev hot-reload). `session.clear`
+        // is the server's cue to tear the session down and forget the thread,
+        // so the page that comes back cannot be handed the session it was
+        // just told to leave.
         transport.send({ t: 'session.clear' });
-        try {
-          // The server asked for a clean restart (dev hot-reload): drop the
-          // persisted id, so the reloaded page cannot race the clear and
-          // resurrect the session it was told to leave.
-          sessionStorage.removeItem(sessionIdStorage.key);
-        } catch (_error) {
-          // Storage unavailable — the reload proceeds regardless.
-        }
         window.location.reload();
       },
 
@@ -217,7 +218,10 @@ const useChatSession = () => {
       'element.upsert': (msg) => {
         const element = toElement(msg.element);
         if (!element.url && element.chainlitKey) {
-          element.url = client.getElementUrl(element.chainlitKey, sessionId);
+          element.url = client.getElementUrl(
+            element.chainlitKey,
+            sessionIdRef.current!
+          );
         }
         element.url = client.resolveElementUrl(element.url);
         if (element.type === 'tasklist') {
@@ -297,9 +301,12 @@ const useChatSession = () => {
           (resumed.metadata as Record<string, unknown> | undefined)
             ?.viewer_read_only
         );
-        if (!isReadOnlyView && idToResume && resumed.id !== idToResume) {
-          window.location.href = `/thread/${resumed.id}`;
-        }
+        // No redirect for a thread other than the one asked for. The server
+        // answers a resume it will not grant by moving the session to a
+        // thread of its own and naming it, and the address bar follows
+        // (`ThreadAddressSync`); a full page load here would throw the live
+        // session away to arrive at the address that listener was about to
+        // write anyway.
         if (!isReadOnlyView && idToResume) {
           setCurrentThreadId(resumed.id);
         }
@@ -362,7 +369,7 @@ const useChatSession = () => {
                 if (!element.url && element.chainlitKey) {
                   element.url = client.getElementUrl(
                     element.chainlitKey,
-                    sessionId
+                    sessionIdRef.current!
                   );
                 }
                 element.url = client.resolveElementUrl(element.url);
@@ -428,7 +435,6 @@ const useChatSession = () => {
       endAsk,
       idToResume,
       pruneStaleAskActions,
-      sessionId,
       setActions,
       setAskUser,
       setChatProfile,
@@ -438,6 +444,7 @@ const useChatSession = () => {
       setLoading,
       setMessages,
       setProtocolError,
+      setSessionId,
       setSideView,
       setTasklists,
       transport
@@ -457,24 +464,14 @@ const useChatSession = () => {
         // at runtime.
         (handlers[message.t] as (m: typeof message) => void)(message);
       },
-      onClose: ({ code, terminal }) => {
-        if (
-          terminal &&
-          code === CloseCode.SESSION_FORBIDDEN &&
-          !authFailureHandledRef.current
-        ) {
-          // The persisted session id belongs to a session this user may not
-          // claim (e.g. someone else logged in within this tab). Mint a
-          // fresh id instead of retrying against the same refusal forever —
-          // the id change is a new descriptor, which reconnects. Once only:
-          // a refusal for another reason would repeat with the new id and
-          // must surface as an error.
-          authFailureHandledRef.current = true;
-          resetSessionId();
-        }
-      }
+      // Nothing to do. There used to be a branch here resetting the session
+      // id on a terminal 4403: a persisted id could name a session belonging
+      // to a user who had since been replaced in this tab. Neither half of
+      // that exists any more -- the client never names a session, so the
+      // server has nothing to refuse, and 4403 is not a close code.
+      onClose: () => undefined
     }),
-    [handlers, resetSessionId]
+    [handlers]
   );
 
   /**

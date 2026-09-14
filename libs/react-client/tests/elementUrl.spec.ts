@@ -10,11 +10,11 @@ import { ChainlitAPI } from '../src/index';
  * `resolveElementUrl` is the only thing standing between a persisted element
  * and a broken `<img>`: the backend now hands out app-relative element urls,
  * and the page origin alone resolves them wrongly under a `root_path` prefix
- * and in copilot, where the chainlit server is a different origin entirely.
+ * and for an embedder whose chainlit server is a different origin entirely.
  *
  * The cases below are the four shapes a stored url can have — relative,
  * absolute, protocol-relative, absent — plus the query-param join, because
- * copilot carries `additionalQueryParams` on every request it makes.
+ * such an embedder carries `additionalQueryParams` on every request.
  */
 const api = (
   endpoint = 'https://app.example.com/chat/',
@@ -28,7 +28,7 @@ describe('resolveElementUrl', () => {
     );
   });
 
-  it('resolves against a different origin, which is copilot every time', () => {
+  it('resolves against a different origin', () => {
     expect(
       api('https://chainlit.example.com').resolveElementUrl('/project/file/x')
     ).toBe('https://chainlit.example.com/project/file/x');

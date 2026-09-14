@@ -101,6 +101,16 @@ class CallbackRunner(Protocol):
         """The user asked for the running task to stop."""
         ...
 
+    async def release(self, session: "Session") -> None:
+        """Give the conversation up: out of the registry, then torn down.
+
+        What "New chat" means. The transport calls it rather than doing it
+        itself because the registry belongs to the application half -- and
+        because the thread has to be free before the reply to this frame
+        could possibly ask for it again.
+        """
+        ...
+
     async def record_user_message(
         self, session: "Session", message: StepPayload
     ) -> Any:
@@ -256,11 +266,16 @@ class Session:
 
         self.first_interaction: Optional[str] = None
         self.parent_thread_id: Optional[str] = None
+        #: The *thread* a profile switch minted for this session's successor,
+        #: and the key its transit record is parked under. Held so a second
+        #: switch can revoke the first one's record.
         self.pending_transit_id: Optional[str] = None
 
         #: The writer batching this session's rows, when there is a database.
-        #: Owned here rather than looked up by thread: two tabs on one
-        #: thread are two writers, and FIFO is a per-writer promise.
+        #: Owned here rather than looked up by thread: a thread holds one
+        #: session at a time, but a successor can start on it while its
+        #: predecessor's writer is still draining, and FIFO is a per-writer
+        #: promise rather than a per-thread one.
         self.writer: Optional[Any] = None
 
         #: Whether this session's chat has begun. Written and read in one
@@ -353,6 +368,17 @@ class Session:
         if self.runner is None:
             raise LookupError(action.get("name", ""))
         return await self.runner.call_action(self, action)
+
+    async def release(self) -> None:
+        """Give this conversation up: out of the registry, then torn down.
+
+        Delegated, because the registry belongs to the application half and
+        a session has no business knowing which one is holding it. With no
+        application there is no registry either, and nothing to do.
+        """
+        if self.runner is None:
+            return
+        await self.runner.release(self)
 
     # ----------------------------------------------------------------- files
 

@@ -8,7 +8,7 @@ import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
 import MobileNotice from '@/components/MobileNotice';
 import { TaskList } from '@/components/Tasklist';
-import ThreadAddressListener from '@/components/ThreadAddressListener';
+import ThreadAddressSync from '@/components/ThreadAddressSync';
 import ThreadReturnListener from '@/components/ThreadReturnListener';
 import { Header } from '@/components/header';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -69,7 +69,7 @@ const Page = ({ children }: Props) => {
       <ChatProfileSwitchListener />
       <MobileNotice />
       <ThreadReturnListener />
-      <ThreadAddressListener />
+      <ThreadAddressSync />
       {historyEnabled && !sidebarHidden ? (
         <>
           <LeftSidebar />

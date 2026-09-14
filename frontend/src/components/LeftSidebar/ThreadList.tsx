@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import {
   ChainlitContext,
   ClientError,
-  ThreadHistory, // sessionIdState,
+  ThreadHistory,
   threadHistoryState,
   useChatInteract,
   useChatMessages,
@@ -89,7 +89,6 @@ export function ThreadList({
   const { config } = useConfig();
   const dataPersistence = config?.dataPersistence;
   const threadSharingReady = Boolean((config as any)?.threadSharing);
-  // sessionId not needed here
 
   // Share thread state
   const [threadIdToShare, setThreadIdToShare] = useState<string | undefined>();
@@ -218,7 +217,7 @@ export function ThreadList({
       resetKeptTranscript();
       // Home in the same breath as the clear, like NewChat. Waiting for the
       // DELETE to answer would put this navigate after the `session.ready`
-      // of the session `clear()` just started -- ThreadAddressListener has
+      // of the session `clear()` just started -- ThreadAddressSync has
       // by then replaced the address with `/thread/<new>`, and a late
       // `navigate('/')` would leave the bar disagreeing with the session, so
       // the next reload asks for nothing and starts over.

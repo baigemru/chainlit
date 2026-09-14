@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import { useCallback, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSetRecoilState } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -24,6 +25,7 @@ interface StarterProps {
 }
 
 export default function Starter({ starter }: StarterProps) {
+  const navigate = useNavigate();
   const apiClient = useContext(ChainlitContext);
   const { sendMessage, clear } = useChatInteract();
   const { setChatProfile } = useChatSession();
@@ -45,6 +47,12 @@ export default function Starter({ starter }: StarterProps) {
       setAttachments([]);
       resetKeptTranscript();
       clear();
+      // Home in the same breath as the clear, like NewChat. Starters are on
+      // screen while the chat is empty, and an empty chat still has an
+      // address: staying on /thread/<the chat we just gave up> would have
+      // ThreadAddressSync read the route as a request and resume that thread
+      // -- on the old profile, undoing the door the user just walked through.
+      navigate('/');
       return;
     }
 

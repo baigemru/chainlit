@@ -154,7 +154,7 @@ HANDSHAKE_SCENARIOS = (
             "callback again would replay its opening messages over a "
             "conversation already in progress."
         ),
-        given=Given(hooks=("chat_start",)),
+        given=Given(server_holds_session=False, hooks=("chat_start",)),
         when=(HELLO, HELLO),
         then=lambda result: assert_that(
             result.state["hook_runs"].get("chat_start") == 1,

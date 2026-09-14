@@ -13,7 +13,6 @@ import {
 import { useOpenThread } from '@/hooks/useOpenThread';
 
 import {
-  openThreadRequestState,
   openThreadTransitionState,
   parentThreadEntryState
 } from '@/state/chat';
@@ -24,8 +23,7 @@ import {
  * threads), executes `thread.open` messages and the composer button's
  * requests through useOpenThread, and retires the transition state once the
  * opened thread is current (or the resume failed). Lives next to
- * ChatProfileSwitchListener, under the router; none of this exists in the
- * copilot widget, which keeps the whole feature inert there.
+ * ChatProfileSwitchListener, under the router.
  */
 export default function ThreadReturnListener() {
   const transport = useChatTransport();
@@ -33,24 +31,35 @@ export default function ThreadReturnListener() {
   const location = useLocation();
   const openThread = useOpenThread();
 
-  const sessionId = useRecoilValue(sessionIdState);
   const currentThreadId = useRecoilValue(currentThreadIdState);
   const setParentEntry = useSetRecoilState(parentThreadEntryState);
   const [transition, setTransition] = useRecoilState(openThreadTransitionState);
-  const [request, setRequest] = useRecoilState(openThreadRequestState);
 
   // Latest values live in refs so the socket subscription below is only
   // re-registered when the socket itself changes.
   const openThreadRef = useRef(openThread);
   openThreadRef.current = openThread;
-  const sessionIdRef = useRef(sessionId);
-  sessionIdRef.current = sessionId;
+  // The session handle, captured from the frame flow rather than mirrored on
+  // every render: `thread.parent` can arrive in the same tick as the
+  // `session.ready` that names the session, and a render-mirrored ref would
+  // still hold the previous session's id -- scoping the parent entry to a
+  // session that no longer exists, so the return button never appears. Seeded
+  // from the atom for the initial value only, because this component can be
+  // remounted (a route change unmounts `Page`) long after the `session.ready`
+  // that would otherwise have written it.
+  const sessionIdRef = useRef<string | undefined>(
+    useRecoilValue(sessionIdState)
+  );
 
   // Subscribed to the transport, not to a socket: the listener outlives
   // every connection the transport builds, so nothing re-registers it.
   useEffect(() => {
     return transport.onMessage((message) => {
       switch (message.t) {
+        case 'session.ready':
+          sessionIdRef.current = message.sessionId;
+          return;
+
         case 'thread.open':
           if (!message.threadId) {
             console.warn('thread.open: missing threadId, ignoring.');
@@ -95,15 +104,6 @@ export default function ThreadReturnListener() {
       }
     });
   }, [transport, setParentEntry]);
-
-  // The composer's return button cannot navigate itself (it also renders in
-  // the copilot widget, outside any router), so it parks a request that is
-  // executed here.
-  useEffect(() => {
-    if (!request) return;
-    setRequest(undefined);
-    openThreadRef.current(request.threadId, request.keepTranscript);
-  }, [request, setRequest]);
 
   // Retire the transition once it is over: the opened thread became current
   // (from here the guard against double events is the no-op on the current

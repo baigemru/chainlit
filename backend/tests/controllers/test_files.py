@@ -81,6 +81,9 @@ class StubRegistry:
     def find(self, session_id: str) -> Optional[StubSession]:
         return self.sessions.get(session_id)
 
+    def find_thread(self, thread_id: Optional[str]) -> Optional[StubSession]:
+        return None
+
     def has_live_task(self, thread_id: Optional[str]) -> bool:
         return False
 

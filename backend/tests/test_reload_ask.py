@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import pytest
 from litestar.testing import create_test_client
@@ -27,6 +27,7 @@ import chainlit as cl
 from chainlit.plugin import ChainlitPlugin
 from chainlit.runner import DEFAULT_INTERRUPTED_ASK_MESSAGE as TRACE
 from chainlit.security import ChainlitAuth
+from chainlit.ws.registry import has_live_work
 from tests.persistence.conftest import database_url  # noqa: F401 - fixture re-export
 from tests.test_runner import (  # noqa: F401 - fixture re-export
     frontend_dir,
@@ -398,6 +399,84 @@ def test_an_app_without_resume_hooks_gets_a_fresh_thread_not_the_old_one(
     after = thread_detail(db_url, thread_id)
     assert after is not None
     assert len(after.steps) == before, [step.output for step in after.steps]
+
+
+def test_a_reload_onto_an_unwritten_thread_keeps_its_address(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """F5 on a greeting: no rows yet, and the address must not move.
+
+    The writer holds a thread's rows until somebody speaks, so a chat that
+    has only been greeted is nowhere in the database. The reload asks for it
+    by name, the lookup misses -- and a miss that disowns would hand the tab
+    a new id for the conversation it is already looking at, turning a reload
+    into a different chat. The one thing that says this thread is the user's
+    own is that this same session id was holding it a moment ago:
+    ``arrival.superseded``.
+    """
+    seed_user(db_url, ALICE)
+    started: List[Optional[str]] = []
+
+    async def on_chat_start() -> None:
+        started.append(cl.context.session.thread_id)
+        await cl.Message(content="hello there").send()
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = _noop_resume
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws, sessionId="s1")
+            thread_id = frames[0]["threadId"]
+            frames += read_until(ws, "step.upsert", limit=20)
+        # Idle *and* disconnected before the reload: a greeting still
+        # running is live work, the registry would keep the session, and
+        # this test would pass on the reconnect branch instead.
+        wait_until(lambda: _idle(plugin, "s1"))
+        assert thread_detail(db_url, thread_id) is None, "the premise: no rows"
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, sessionId="s1", threadId=thread_id)
+            ready = replay[0]
+            assert ready["t"] == "session.ready"
+            assert not ready.get("restored"), "replaced, not kept"
+            assert ready["threadId"] == thread_id, ready
+            replay += read_until(ws, "step.upsert", limit=20)
+
+            # The address is only half of it: the writer behind the kept
+            # thread has to be the live one. The session that was replaced
+            # was torn down with a writer of its own on this very thread,
+            # and closing that one must not take the successor's with it.
+            ws.send_text(message("hi again"))
+            replay += read_until(ws, "step.upsert", limit=40)
+        detail = wait_for_thread(
+            db_url,
+            thread_id,
+            lambda d: "echo hi again" in [step.output for step in d.steps],
+        )
+        assert detail.id == thread_id
+
+    # The greeting ran again on the same thread -- a reload has no
+    # conversation to resume into, only its own id to keep.
+    assert started == [thread_id, thread_id]
+    # Nothing was reported. The refusal used to go out from ``on_ready``,
+    # ahead of the greeting below it, so a frame list holding the greeting
+    # would be holding it too.
+    assert frames_of(replay, "error") == [], tags(replay)
+
+
+def _idle(plugin: ChainlitPlugin, session_id: str) -> bool:
+    entry = plugin.runner.registry.get(session_id)
+    return entry is not None and not entry.connected and not has_live_work(entry)
 
 
 def test_an_idle_reload_resumes_the_conversation_it_was_in(

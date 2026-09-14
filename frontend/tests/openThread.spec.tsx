@@ -44,7 +44,6 @@ describe('shouldRetireTransition', () => {
     transition: { threadId: 'parent', keepTranscript: true },
     currentThreadId: undefined,
     pathname: '/thread/parent',
-    resumeError: false,
     sessionError: false
   };
 
@@ -70,8 +69,7 @@ describe('shouldRetireTransition', () => {
     );
   });
 
-  it('retires on resume or session errors', () => {
-    expect(shouldRetireTransition({ ...base, resumeError: true })).toBe(true);
+  it('retires on a session error', () => {
     expect(shouldRetireTransition({ ...base, sessionError: true })).toBe(true);
   });
 
@@ -82,5 +80,21 @@ describe('shouldRetireTransition', () => {
     );
     // New chat
     expect(shouldRetireTransition({ ...base, pathname: '/' })).toBe(true);
+  });
+
+  it('retires when the server refused the thread and moved the address', () => {
+    // The whole failed-resume path since stage 1: there is no error frame
+    // any more. The server answers `session.ready` naming a thread of its
+    // own, the client writes it and ThreadAddressListener replaces the
+    // address with it -- so the transition's own route is gone, and this is
+    // what has to catch it or the in-flight guard swallows every future
+    // open until a reload.
+    expect(
+      shouldRetireTransition({
+        ...base,
+        currentThreadId: 'minted',
+        pathname: '/thread/minted'
+      })
+    ).toBe(true);
   });
 });

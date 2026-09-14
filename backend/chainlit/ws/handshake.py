@@ -91,15 +91,13 @@ class Arrival:
     """The outcome of one ``hello``, and everything decided about it.
 
     Also the handshake's own scratchpad. ``on_arrival`` decides what this
-    connection *is* -- a resume, a chat that has not started, a client
-    asking for a thread that is not there -- and both the replay and
-    ``on_ready`` need that answer; the two run on either side of
+    connection *is* -- a resume, a chat that has not started -- and both the
+    replay and ``on_ready`` need that answer; the two run on either side of
     ``session.ready``, so it has to be carried rather than recomputed. It
-    used to travel as ``session.state["__resumed_thread"]`` and
-    ``["__thread_not_found"]``: string keys in the dict the *application*
-    keeps its own state in, popped by whoever read them first, and
-    persisted into thread metadata unless something remembered to filter
-    them out.
+    used to travel as ``session.state["__resumed_thread"]``: a string key in
+    the dict the *application* keeps its own state in, popped by whoever
+    read it first, and persisted into thread metadata unless something
+    remembered to filter it out.
     """
 
     outcome: ClaimOutcome
@@ -111,9 +109,6 @@ class Arrival:
     #: The stored thread this arrival resumed, if it resumed one. Both the
     #: snapshot the replay sends and the dict the hooks receive.
     resumed_thread: Optional[Mapping[str, Any]] = None
-    #: The thread the client asked for and did not get, if it asked for one
-    #: that is not there or is not its own. Reported after ``session.ready``.
-    missing_thread: Optional[str] = None
     #: Whether this arrival begins a chat, and so owes it an ``on_chat_start``
     #: once the screen is ready. Decided with the rest; a reconnect is not a
     #: beginning and never carries it.

@@ -189,9 +189,11 @@ INTENTIONALLY_DROPPED: dict[str, str] = {
     # `session.handoff`; only the in-place switch had no user.
     "chat_profile_changed": "hot swap is off; no on_profile_start hook exists",
     "switch_chat_profile": "hot swap is off; the selector reconnects instead",
-    # Resume errors are errors. A second name for one failure meant the
-    # client kept a whole atom to distinguish it from `error`.
-    "resume_thread_error": "folded into `error` with a code",
+    # A resume that misses is not a failure at all: the server gives the
+    # session a thread of its own and names it in `session.ready`, and the
+    # client follows. There is nothing left for a second failure name -- or
+    # for the error code it was once folded into -- to say.
+    "resume_thread_error": "a failed resume is `session.ready` naming another thread",
 }
 
 # Tags with no counterpart in today's protocol — additions, not renames.

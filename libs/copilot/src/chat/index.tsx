@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 
 import {
   threadIdToResumeState,
   useChatInteract,
-  useChatSession
+  useChatSession,
+  useChatTransport
 } from '@chainlit/react-client';
 
 import { copilotThreadIdState } from '../state';
@@ -13,8 +14,30 @@ import ChatBody from './body';
 export default function ChatWrapper() {
   const { attach, descriptor } = useChatSession();
   const { sendMessage } = useChatInteract();
+  const transport = useChatTransport();
   const copilotThreadId = useRecoilValue(copilotThreadIdState);
+  const setCopilotThreadId = useSetRecoilState(copilotThreadIdState);
   const setThreadIdToResume = useSetRecoilState(threadIdToResumeState);
+
+  // The widget has no address bar, so localStorage is where its request
+  // lives — and it has to be corrected the same way the app's URL is. The
+  // server may refuse the thread the widget offered (deleted, or another
+  // user's) and continue in one of its own; left unwritten, every reload
+  // would re-offer the refused id forever and the conversation would
+  // restart each time.
+  const copilotThreadIdRef = useRef(copilotThreadId);
+  copilotThreadIdRef.current = copilotThreadId;
+  useEffect(() => {
+    return transport.onMessage((message) => {
+      if (message.t !== 'session.ready' || !message.threadId) return;
+      if (message.threadId === copilotThreadIdRef.current) return;
+      // One reconnect follows: the new id reaches the descriptor through
+      // the effect below, and a new thread is a new descriptor identity. It
+      // converges — the next `session.ready` names the same thread and this
+      // is a no-op.
+      setCopilotThreadId(message.threadId);
+    });
+  }, [transport, setCopilotThreadId]);
 
   // The widget always resumes a thread of its own, so the thread the host
   // page names is part of the descriptor rather than something bolted on

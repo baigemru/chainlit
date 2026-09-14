@@ -108,7 +108,6 @@ export const ErrorCode = {
   UNAUTHENTICATED: 'unauthenticated',
   UNAUTHORIZED: 'unauthorized',
   SESSION_NOT_FOUND: 'session_not_found',
-  THREAD_NOT_FOUND: 'thread_not_found',
   ASK_SLOT_BUSY: 'ask_slot_busy',
   ASK_UNKNOWN: 'ask_unknown',
   PROFILE_FORBIDDEN: 'profile_forbidden',

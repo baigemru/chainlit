@@ -1,11 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import { useRecoilValue } from 'recoil';
 import { toast } from 'sonner';
 
 import {
-  ErrorCode,
-  protocolErrorState,
   useChatData,
   useChatInteract,
   useChatSession,
@@ -26,7 +24,6 @@ export default function AutoResumeThread({ id }: Props) {
   const { clear } = useChatInteract();
   const { idToResume } = useChatSession();
   const { error } = useChatData();
-  const [protocolError, setProtocolError] = useRecoilState(protocolErrorState);
   const resetKeptTranscript = useResetKeptTranscript();
 
   // Read through a ref: the transition must not re-trigger the resume
@@ -73,27 +70,11 @@ export default function AutoResumeThread({ id }: Props) {
     }
   }, [error, idToResume, id]);
 
-  // The wire has one error channel now; a resume failure is the
-  // `thread_not_found` code on it.
-  useEffect(() => {
-    // Only once this thread is the one the session was opened for. On the
-    // commit that mounts this component the resume above has been issued
-    // but not yet rendered, and an error left over from the previous
-    // session -- which `clear()` is about to drop -- would be taken for
-    // this resume's answer and bounce the user straight back home.
-    if (id !== idToResume) return;
-    if (protocolError?.code !== ErrorCode.THREAD_NOT_FOUND) return;
-    toast.error(
-      protocolError.message
-        ? "Couldn't resume chat: " + protocolError.message
-        : "Couldn't resume chat"
-    );
-    // Same release as above: the thread this session was opened for turned
-    // out not to exist, and the next attempt at it must be a fresh one.
-    clear();
-    navigate('/');
-    setProtocolError(undefined);
-  }, [protocolError, idToResume, id]);
+  // There is no branch here for a thread the server will not resume. It no
+  // longer answers with an error: it moves the session to a thread of its
+  // own, names it in `session.ready`, and the address bar follows -- which
+  // unmounts this component instead of bouncing the user home with a toast
+  // about a conversation they can do nothing about.
 
   return null;
 }

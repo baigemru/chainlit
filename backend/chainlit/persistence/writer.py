@@ -90,6 +90,7 @@ from typing import (
 from chainlit.logger import logger
 from chainlit.persistence.config import Persistence, UnitOfWork
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
+from chainlit.persistence.storage.base import discard_blobs
 
 # A batch is capped so one burst cannot hold a transaction open indefinitely.
 BATCH_LIMIT = 256
@@ -486,12 +487,24 @@ class SessionWriter:
         rejected write would roll back every innocent write beside it. On
         failure the batch is replayed op by op so the damage is confined to
         the op that actually caused it.
+
+        The blobs of deleted rows go after the transaction commits, on both
+        paths. Inside it, a later failure would roll the row back and leave
+        it pointing at bytes that are no longer in the bucket -- which is
+        worse than the leak this exists to stop.
+
+        And awaited here, which is the one place a bucket does hold this
+        queue -- the header of this module says an upload never does. The
+        difference is that a delete has nothing left to order against: it
+        cannot be handed to a task without that task being cancelled by
+        ``aclose``, leaving the object behind for good, and a user deleting
+        a message is rare where an upload is not.
         """
+        orphaned: List[str] = []
         try:
             async with self.persistence.uow() as uow:
                 for op in ops:
-                    await self._dispatch(uow, op)
-            return
+                    orphaned.extend(await self._dispatch(uow, op))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -501,11 +514,14 @@ class SessionWriter:
                 self.thread_id,
                 exc_info=True,
             )
+        else:
+            await discard_blobs(self.persistence.storage, orphaned)
+            return
 
         for op in ops:
             try:
                 async with self.persistence.uow() as uow:
-                    await self._dispatch(uow, op)
+                    keys = await self._dispatch(uow, op)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -515,20 +531,24 @@ class SessionWriter:
                     self.thread_id,
                     exc_info=True,
                 )
+                continue
+            await discard_blobs(self.persistence.storage, keys)
 
-    async def _dispatch(self, uow: UnitOfWork, op: Op) -> None:
+    async def _dispatch(self, uow: UnitOfWork, op: Op) -> Sequence[str]:
+        """Apply one op, and hand back the object keys it orphaned."""
         if isinstance(op, SaveStep):
             await uow.steps.save(op.record)
         elif isinstance(op, DeleteStep):
-            await uow.steps.remove(op.step_id)
+            return await uow.steps.remove(op.step_id)
         elif isinstance(op, SaveElement):
             await uow.elements.save(op.record)
         elif isinstance(op, DeleteElement):
-            await uow.elements.remove(op.element_id, op.thread_id)
+            return await uow.elements.remove(op.element_id, op.thread_id)
         elif isinstance(op, PatchThread):
             await uow.threads.patch(op.thread_id, op.patch)
         else:  # pragma: no cover - the union is closed
             raise TypeError(f"Unknown write op: {op!r}")
+        return ()
 
 
 # --------------------------------------------------------------------- registry

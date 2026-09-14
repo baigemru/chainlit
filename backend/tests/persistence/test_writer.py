@@ -7,7 +7,8 @@ observing dispatch order, by recording each op as it is applied.
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from dataclasses import replace
+from typing import Any, Dict, List, Optional, Sequence
 
 import msgspec
 import pytest
@@ -17,8 +18,10 @@ from chainlit.persistence import Persistence, UnitOfWork
 from chainlit.persistence.models import ELEMENTS
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
 from chainlit.persistence.services import to_uuid
+from chainlit.persistence.storage.base import BaseStorageClient
 from chainlit.persistence.writer import (
     DeleteElement,
+    DeleteStep,
     Op,
     PatchThread,
     SaveElement,
@@ -38,9 +41,14 @@ class Recorder(SessionWriter):
         super().__init__(*args, **kwargs)
         self.applied: List[Op] = []
 
-    async def _dispatch(self, uow: UnitOfWork, op: Op) -> None:
-        await super()._dispatch(uow, op)
+    async def _dispatch(self, uow: UnitOfWork, op: Op) -> Sequence[str]:
+        orphaned = await super()._dispatch(uow, op)
         self.applied.append(op)
+        # Forwarded, not swallowed: the orphaned blobs of a delete travel
+        # back through this return, and a recorder that dropped them would
+        # make every blob-delete test pass against a writer that deletes
+        # nothing.
+        return orphaned
 
 
 @pytest.fixture
@@ -724,3 +732,213 @@ async def test_an_upload_that_starts_during_the_close_still_gets_its_row(
         "the blob was uploaded and the row was not written: an orphan in the "
         "bucket, which is exactly what the ordering is for"
     )
+
+
+# --------------------------------------------------------------- blob deletes
+
+
+class Bucket(BaseStorageClient):
+    """A store that remembers what it was asked to delete, and can refuse.
+
+    Refusing by raising rather than by returning ``False``: the real clients
+    swallow their own errors, so an exception is the failure mode nothing
+    *below* this writer has already handled.
+    """
+
+    def __init__(self, refuse: Sequence[str] = ()) -> None:
+        self.asked: List[str] = []
+        self.refuse = set(refuse)
+
+    async def delete_file(self, object_key: str) -> bool:
+        self.asked.append(object_key)
+        if object_key in self.refuse:
+            raise OSError("bucket unreachable")
+        return True
+
+    async def upload_file(
+        self,
+        object_key: str,
+        data: Any,
+        mime: str = "application/octet-stream",
+        overwrite: bool = True,
+        content_disposition: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {"object_key": object_key, "url": f"memory://{object_key}"}
+
+    async def get_read_url(self, object_key: str) -> str:
+        return f"memory://{object_key}"
+
+    async def read_file(self, object_key: str) -> Optional[bytes]:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def bucket() -> Bucket:
+    return Bucket()
+
+
+@pytest.fixture
+async def storing_writer(
+    persistence: Persistence,
+    registry: WriterRegistry,
+    thread_id: str,
+    bucket: Bucket,
+):
+    """A writer whose persistence has somewhere to put blobs."""
+    instance = Recorder(
+        replace(persistence, storage=bucket), thread_id, registry=registry
+    ).start()
+    yield instance
+    await instance.aclose(timeout=5.0)
+
+
+async def stored_element(
+    uow: UnitOfWork, thread_id: str, for_id: str, object_key: Optional[str]
+) -> str:
+    """An element row as an upload leaves it, blob or no blob."""
+    record = msgspec.structs.replace(
+        element(thread_id, for_id=for_id), object_key=object_key
+    )
+    await uow.elements.save(record)
+    await uow.session.commit()
+    return record.id
+
+
+async def test_deleting_an_element_deletes_its_blob(
+    storing_writer: Recorder, thread_id: str, uow: UnitOfWork, bucket: Bucket
+):
+    """The row is what points at the object; nothing else ever will.
+
+    Before this, ``delete_file`` existed on both clients and had no caller:
+    every attachment a user removed stayed in the bucket for good.
+    """
+    parent = step(thread_id, name="carrier")
+    await uow.steps.save(parent)
+    element_id = await stored_element(uow, thread_id, parent.id, "alice/report.xlsx")
+
+    storing_writer.submit(DeleteElement(element_id, thread_id))
+    await storing_writer.drain(timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, element_id) is None
+    assert bucket.asked == ["alice/report.xlsx"]
+
+
+async def test_deleting_a_step_deletes_the_blobs_of_its_elements(
+    storing_writer: Recorder, thread_id: str, uow: UnitOfWork, bucket: Bucket
+):
+    """The element rows go with the step, so their blobs have to as well."""
+    parent = step(thread_id, name="carrier")
+    await uow.steps.save(parent)
+    await stored_element(uow, thread_id, parent.id, "alice/one.png")
+    await stored_element(uow, thread_id, parent.id, "alice/two.png")
+
+    storing_writer.submit(DeleteStep(parent.id))
+    await storing_writer.drain(timeout=5.0)
+
+    assert await uow.steps.fetch(parent.id) is None
+    assert sorted(bucket.asked) == ["alice/one.png", "alice/two.png"]
+
+
+async def test_an_element_with_no_blob_asks_the_store_for_nothing(
+    storing_writer: Recorder, thread_id: str, uow: UnitOfWork, bucket: Bucket
+):
+    """``cl.Image(url=...)`` was never uploaded: there is nothing to delete.
+
+    Asserted on the log rather than on the response of a store, because a
+    delete of ``""`` or of ``None`` is a request a bucket answers -- with a
+    miss, one round trip later, and a warning in the application's log.
+    """
+    parent = step(thread_id, name="carrier")
+    await uow.steps.save(parent)
+    external = await stored_element(uow, thread_id, parent.id, None)
+    empty = await stored_element(uow, thread_id, parent.id, "")
+
+    storing_writer.submit(DeleteElement(external, thread_id))
+    storing_writer.submit(DeleteElement(empty, thread_id))
+    await storing_writer.drain(timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, external) is None
+    assert bucket.asked == []
+
+
+async def test_a_bucket_that_refuses_one_blob_still_loses_the_others(
+    persistence: Persistence,
+    registry: WriterRegistry,
+    thread_id: str,
+    uow: UnitOfWork,
+):
+    """The rows are already gone; a store that says no cannot undo that.
+
+    The second key is the assertion: a delete loop that let the failure out
+    would leave every blob after the first one in the bucket, and the batch
+    would be replayed as if the database had refused it.
+    """
+    bucket = Bucket(refuse=["alice/one.png"])
+    writer = Recorder(
+        replace(persistence, storage=bucket), thread_id, registry=registry
+    ).start()
+    parent = step(thread_id, name="carrier")
+    await uow.steps.save(parent)
+    await stored_element(uow, thread_id, parent.id, "alice/one.png")
+    await stored_element(uow, thread_id, parent.id, "alice/two.png")
+
+    try:
+        writer.submit(DeleteStep(parent.id))
+        await writer.drain(timeout=5.0)
+    finally:
+        await writer.aclose(timeout=5.0)
+
+    assert sorted(bucket.asked) == ["alice/one.png", "alice/two.png"]
+    assert await uow.steps.fetch(parent.id) is None
+    assert [type(op).__name__ for op in writer.applied] == ["DeleteStep"]
+
+
+async def test_a_delete_replayed_after_a_failed_batch_still_drops_its_blob(
+    storing_writer: Recorder, thread_id: str, uow: UnitOfWork, bucket: Bucket
+):
+    """The batch rolls back; the replay is where the row actually goes.
+
+    Both paths in ``_write`` commit, so both have to discard -- and only this
+    one runs when a neighbour in the batch is refused, which is the moment
+    the rest of the session is already going wrong.
+    """
+    parent = step(thread_id, name="carrier")
+    await uow.steps.save(parent)
+    element_id = await stored_element(uow, thread_id, parent.id, "alice/report.xlsx")
+    # No such thread: elements."threadId" is a real foreign key, so this is
+    # the write that takes the whole batch down with it.
+    orphan = element(new_id(), for_id=parent.id)
+
+    storing_writer.submit(SaveElement(orphan))
+    storing_writer.submit(DeleteElement(element_id, thread_id))
+    await storing_writer.drain(timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, element_id) is None
+    assert bucket.asked == ["alice/report.xlsx"]
+
+
+async def test_a_writer_with_no_storage_deletes_the_row_and_says_nothing(
+    writer: Recorder,
+    thread_id: str,
+    uow: UnitOfWork,
+    caplog: pytest.LogCaptureFixture,
+):
+    """An application with nowhere to put blobs has nothing to discard.
+
+    Silently: the row still carries a key -- the application had storage when
+    it was written and does not now -- and a warning per delete would be a
+    log nobody can act on.
+    """
+    parent = step(thread_id, name="carrier")
+    await uow.steps.save(parent)
+    element_id = await stored_element(uow, thread_id, parent.id, "alice/report.xlsx")
+
+    with caplog.at_level("WARNING", logger="chainlit"):
+        writer.submit(DeleteElement(element_id, thread_id))
+        await writer.drain(timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, element_id) is None
+    assert [r for r in caplog.records if "alice/report.xlsx" in r.getMessage()] == []

@@ -144,6 +144,20 @@ def _column_values(record: Struct, skip: Sequence[str] = ()) -> Dict[str, Any]:
     return values
 
 
+def deleted_object_keys(result: Result[Any]) -> List[str]:
+    """The blobs a ``DELETE ... RETURNING "objectKey"`` just orphaned.
+
+    ``RETURNING`` rather than a ``SELECT`` before the delete: PostgreSQL is
+    the only dialect here, and one statement leaves no window in which a
+    concurrent write could hand the caller a key whose row survived.
+
+    NULL and ``""`` both mean the element never had a blob -- it was given a
+    url it already had, or its upload failed -- and neither is something to
+    ask a bucket about; the file route refuses the same two values.
+    """
+    return [key for key in result.scalars().all() if key]
+
+
 class ChainlitService:
     """What the five services share: how a statement runs.
 
@@ -286,12 +300,23 @@ class StepService(
         row = await self.fetch_one_or_none(statements.step_query(identifier))
         return None if row is None else row_to_step(row)
 
-    async def remove(self, step_id: str) -> None:
-        """Remove a step and everything hanging off it."""
+    async def remove(self, step_id: str) -> List[str]:
+        """Remove a step and everything hanging off it.
+
+        Returns the object keys of the elements that went with it. Deleting
+        the blobs is the caller's job: a service has a database session and
+        no storage client, and the one that does -- the writer, or a route --
+        must not delete bytes a rolled-back transaction still has a row for.
+        """
         identifier = to_uuid(step_id)
         await self.execute(delete(FEEDBACKS).where(FEEDBACKS.c["forId"] == identifier))
-        await self.execute(delete(ELEMENTS).where(ELEMENTS.c["forId"] == identifier))
+        orphaned = await self.execute(
+            delete(ELEMENTS)
+            .where(ELEMENTS.c["forId"] == identifier)
+            .returning(ELEMENTS.c["objectKey"])
+        )
         await self.execute(delete(STEPS).where(STEPS.c["id"] == identifier))
+        return deleted_object_keys(orphaned)
 
 
 class ElementService(
@@ -316,12 +341,16 @@ class ElementService(
         )
         return None if row is None else row_to_element(row)
 
-    async def remove(self, element_id: str, thread_id: Optional[str] = None) -> None:
+    async def remove(
+        self, element_id: str, thread_id: Optional[str] = None
+    ) -> List[str]:
+        """Delete the row, and say which blob nothing points at any more."""
         table = ELEMENTS
         statement = delete(table).where(table.c["id"] == to_uuid(element_id))
         if thread_id is not None:
             statement = statement.where(table.c["threadId"] == to_uuid(thread_id))
-        await self.execute(statement)
+        result = await self.execute(statement.returning(table.c["objectKey"]))
+        return deleted_object_keys(result)
 
 
 class FeedbackService(
@@ -459,12 +488,16 @@ class ThreadService(
             data=[row_to_thread(row) for row in rows],
         )
 
-    async def remove(self, thread_id: str) -> None:
+    async def remove(self, thread_id: str) -> List[str]:
         """Delete a thread and its steps, elements and feedbacks.
 
         The children are deleted explicitly rather than left to ON DELETE
         CASCADE: the constraints in the deployed database were created by a
         different tool and cannot be assumed to cascade.
+
+        Returns every object key the thread was holding, for the caller to
+        drop from the store -- a deleted thread whose blobs stay in the
+        bucket is a user's files kept after the user asked for them to go.
         """
         identifier = to_uuid(thread_id)
         step_ids = select(STEPS.c["id"]).where(STEPS.c["threadId"] == identifier)
@@ -472,9 +505,14 @@ class ThreadService(
         await self.execute(
             delete(FEEDBACKS).where(FEEDBACKS.c["threadId"] == identifier)
         )
-        await self.execute(delete(ELEMENTS).where(ELEMENTS.c["threadId"] == identifier))
+        orphaned = await self.execute(
+            delete(ELEMENTS)
+            .where(ELEMENTS.c["threadId"] == identifier)
+            .returning(ELEMENTS.c["objectKey"])
+        )
         await self.execute(delete(STEPS).where(STEPS.c["threadId"] == identifier))
         await self.execute(delete(THREADS).where(THREADS.c["id"] == identifier))
+        return deleted_object_keys(orphaned)
 
 
 def row_to_user(row: Row[Any]) -> UserRecord:

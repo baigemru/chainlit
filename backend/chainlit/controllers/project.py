@@ -91,7 +91,7 @@ from chainlit.persistence.services import (
     from_datetime,
     now,
 )
-from chainlit.persistence.storage.base import BaseStorageClient
+from chainlit.persistence.storage.base import BaseStorageClient, discard_blobs
 
 # Re-exported: the upload path settles the same header at upload time, so the
 # rule lives where neither side of it has to import the other.
@@ -696,12 +696,19 @@ class ProjectController(Controller):
         sessions: NamedDependency[SessionRegistry],
         elements: NamedDependency[ElementService],
         threads: NamedDependency[ThreadService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
     ) -> Ok:
         """Remove a custom element the app rendered into the chat.
 
         The delete is scoped to the thread the *stored row* belongs to, not
         to the one the payload names: an unscoped delete by id alone is a
         delete of anybody's element.
+
+        The blob goes with the row. It runs before the before-send handler
+        commits, so a commit that then fails leaves a row whose bytes are
+        gone -- which the file route already answers with a 404, and which is
+        the direction to fail in: the other one keeps a user's file in the
+        bucket with nothing left in the database that knows it is there.
         """
         self._session_of(sessions, data.session_id, request)
         if data.element.get("type") != WRITABLE_ELEMENT_TYPE:
@@ -710,7 +717,7 @@ class ProjectController(Controller):
         element_id, thread_id = await authorize_element(
             elements, threads, data.element, request
         )
-        await elements.remove(str(element_id), thread_id)
+        await discard_blobs(storage, await elements.remove(str(element_id), thread_id))
         return Ok()
 
     @put("/project/thread")
@@ -753,10 +760,11 @@ class ProjectController(Controller):
         request: AuthedRequest,
         data: JSONBody[ThreadDelete],
         threads: NamedDependency[ThreadService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
     ) -> Ok:
-        """Delete a thread and its steps, elements and feedbacks."""
+        """Delete a thread, its steps, elements, feedbacks and their blobs."""
         await assert_thread_author(threads, data.thread_id, request)
-        await threads.remove(str(data.thread_id))
+        await discard_blobs(storage, await threads.remove(str(data.thread_id)))
         return Ok()
 
     @post("/project/action", status_code=200)

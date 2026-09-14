@@ -126,9 +126,16 @@ class TransitStore:
         """Take the record for ``thread_id``, or ``None``.
 
         ``None`` covers all four ways there is nothing to hand over: never
-        parked, already claimed, expired, or parked by a different owner. A
-        foreign record is dropped rather than left behind — the thread was
-        minted for this successor and nobody else will ever come for it.
+        parked, already claimed, expired, or parked by a different owner.
+        Only a claim that *succeeds* removes the record: the key is a thread
+        id, which now rides in the address bar, so anyone who reads one over
+        a shoulder could otherwise destroy a handover simply by saying hello
+        for it — the owner would arrive a moment later and be given a blank
+        chat where their switch should have been. A foreign claim therefore
+        leaves the record exactly where it was, and the TTL is what bounds
+        it. (It used to delete first and check after, on the reasoning that
+        nobody but the successor would ever come for the thread. The id was
+        a private uuid4 then; it is a URL now.)
 
         Claimed on every arrival into a conversation nobody is live in, so
         ``None`` is the ordinary answer: a hit means the thread was minted
@@ -139,10 +146,13 @@ class TransitStore:
             raw = await self.store.get(key)
             if raw is None:
                 return None
+            record = msgspec.json.decode(raw, type=TransitRecord)
+            if record.owner != owner:
+                return None
+            # Inside the lock, and only now: the delete is what makes the
+            # claim one-shot, and two concurrent claims by the owner must
+            # not both come back with the record.
             await self.store.delete(key)
-        record = msgspec.json.decode(raw, type=TransitRecord)
-        if record.owner != owner:
-            return None
         return record
 
     async def discard(self, thread_id: str) -> None:

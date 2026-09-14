@@ -1,3 +1,4 @@
+import { requiredEnvPresent } from '@/lib/userEnv';
 import { Navigate } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 
@@ -26,10 +27,8 @@ const Page = ({ children }: Props) => {
   const userEnv = useRecoilValue(userEnvState);
   const sideView = useRecoilValue(sideViewState);
 
-  if (config?.userEnv) {
-    for (const key of config.userEnv || []) {
-      if (!userEnv[key]) return <Navigate to="/env" />;
-    }
+  if (!requiredEnvPresent(config?.userEnv, userEnv)) {
+    return <Navigate to="/env" />;
   }
 
   const mainContent = (

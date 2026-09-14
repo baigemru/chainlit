@@ -376,15 +376,17 @@ user message.
 
 `libs/react-client/tests/chatTransport.spec.ts` stubs `WebSocket` with a
 test-driven `FakeWebSocket` via `vi.stubGlobal` and fake timers. Its tests guard, one
-each: one socket per descriptor however often attached; exactly one rebuild for a new
-descriptor, old one closed; a rebuild for the same session on a new thread; an attach
-overtaken during the sticky-cookie call neither opening nor closing; a `detach` during
-that call cancelling outright; queued work surviving a rebuild and flushing on
-`session.ready`; `superseded` staying sticky through a re-attach; a `closed` transport
-reopening on a fresh attach; a blip healing without a new attach; a new `chatProfile`
-reaching the next handshake without a reconnect; the payload `threadId` beating the
-descriptor's; sink-before-listeners ordering; listeners surviving a rebuild; and
-`onClose` reaching the sink so a refused session id can be replaced.
+each: one socket per thread however often attached; opening without any HTTP call
+first; a handshake naming the thread and nothing else; exactly one rebuild for a new
+thread, old one closed; a second connection for a second `clear()` with no thread on
+either side (`detach` forgets the descriptor); a `detach` cancelling a connection that
+has not opened yet; queued work surviving a rebuild and flushing on `session.ready`;
+`superseded` staying sticky through a re-attach; a 4403 being retried, not treated as
+terminal; a `closed` transport reopening on a fresh attach; a blip healing without a new
+attach; a new `chatProfile` reaching the next handshake without a reconnect; the device
+riding along without becoming identity; the payload `threadId` beating the descriptor's;
+sink-before-listeners ordering; listeners surviving a rebuild; and `onClose` reaching
+the sink.
 
 `frontend/tests/` runs under `frontend/vitest.config.ts` (jsdom,
 `tests/setup-tests.ts`) and, because its `include` is `./**`, also covers

@@ -102,11 +102,30 @@ class Given:
     """The state of the conversation before the frames arrive."""
 
     restored: bool = False
-    """The session outlived the previous socket and was handed back.
+    """The session outlived the previous socket and is handed back to this one.
 
-    Descriptive now rather than causal: the hand-back happens because the
-    hello names the conversation the held session is in, which the driver
-    does for any row that holds one.
+    Causal in neither direction and checked in one: the hand-back happens
+    because the hello names the conversation a held session is in, which the
+    driver does for any row that holds one -- but a row that *states* it is
+    held to its word, and the driver fails if ``session.ready`` comes back
+    with ``restored: false``.
+
+    It used to double as the flag for a profile switch's successor, which is
+    the opposite kind of arrival: nothing is held, nothing is handed back,
+    and the frame says ``restored: false``. That is ``switch_successor``
+    below. One field meaning both left rows asserting a hand-back that never
+    happened.
+    """
+
+    switch_successor: bool = False
+    """This arrival is the successor a profile switch minted a thread for.
+
+    Not a hand-back: the switch parks a record under a **new** thread and
+    tears its own session down, so nothing is live in the conversation the
+    successor names and the arrival creates a session like any other cold
+    open. What makes it a handover is the record waiting under the thread,
+    which is ``handover``; this only tells the driver not to build a held
+    session for a row that would otherwise get one.
     """
 
     chat_started: bool = False

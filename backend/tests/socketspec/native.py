@@ -18,16 +18,18 @@ that make them true and then lets the implementation decide everything else.
 * ``server_holds_session`` -- a ``Session`` registered under the id the
   client offers, carrying the transcript, the question, the running task and
   the parked reply the row describes. One exception, and it is a translation
-  rather than a shortcut: a row with ``restored=True`` and neither a started
-  chat nor a first interaction is the successor of a profile switch. The old
-  backend built that session ahead of the client; this one mints only the
-  id and builds the session on arrival, so nothing is held.
+  rather than a shortcut: ``switch_successor`` rows name the thread a profile
+  switch minted, and the old backend built that session ahead of the client.
+  This one mints only the thread and builds the session on arrival, so
+  nothing is held -- and the arrival is a *create*, which is why the flag is
+  its own and not read off ``restored``.
 * ``restored`` -- the session is *handed back*. Nothing is built for it and
   no ``Arrival`` is forged: every hello goes through the real ``arrive``,
   and the hand-back happens because the hello names the conversation the
   held session is in. That is the whole of the translation now -- a client
   offers a thread and only a thread, so "the server still holds my session"
-  and "I am in thread T" are the same sentence.
+  and "I am in thread T" are the same sentence. A row that states it is
+  checked against the frame: ``session.ready`` has to agree.
 * ``stored_thread`` -- a stub unit of work under the real
   ``ThreadStoreAdapter`` and the real ``ApplicationRunner._resume``, so the
   record-to-frame conversion under test is the implementation's.
@@ -392,13 +394,16 @@ class _Run:
 
     @property
     def _switch_successor(self) -> bool:
-        """A session handed its id by a switch: minted, never built."""
-        given = self.given
-        return (
-            given.restored
-            and not given.chat_started
-            and not given.has_first_interaction
-        )
+        """A session handed its thread by a switch: minted, never built.
+
+        One field, stated by the row. It used to be inferred from
+        ``restored and not chat_started and not has_first_interaction``,
+        which read a hand-back into an arrival that is the opposite of one:
+        nothing is held, the arrival creates, and the frame says
+        ``restored: false`` -- while the row it was inferred from claimed
+        the session had been handed back.
+        """
+        return self.given.switch_successor
 
     def _build_held(self) -> None:
         given = self.given
@@ -530,11 +535,20 @@ class _Run:
 
         session = arrival.session
         self.session = session
+        restored = arrival.outcome is ClaimOutcome.KEPT
+        if given.restored and not restored:
+            # The row and the wire have to say the same thing. They stopped
+            # agreeing once ``restored`` also stood for a profile switch's
+            # successor, whose arrival creates and whose frame says false.
+            raise AssertionError(
+                "the row says the session is handed back, but the arrival "
+                f"created one ({arrival.outcome.value})"
+            )
         await self.runner.on_arrival(arrival)
         session.send(
             ready_frame(
                 session,
-                restored=arrival.outcome is ClaimOutcome.KEPT,
+                restored=restored,
                 heartbeat_ms=HEARTBEAT_INTERVAL_MS,
             )
         )

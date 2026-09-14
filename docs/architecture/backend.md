@@ -52,7 +52,7 @@ called as `cl.*` by an application author. Everything else is internal.
 | `sidebar.py`, `mode.py`, `types.py`, `user.py`                                                    | `ElementSidebar`, `Mode`/`ModeOption`, `ThreadDict`/`ChatProfile`/`Starter`, `User`/`PersistedUser`.                                 | public                 |
 | `cli/__init__.py`                                                                                 | The `chainlit` command: `run`, `hello`, `init`, `create-secret`, `lint-translations`.                                                | public (CLI)           |
 | `utils.py`, `_utils.py`, `secret.py`, `markdown.py`, `logger.py`, `translations.py`, `version.py` | Helpers, secret generation, `chainlit.md` bootstrap, the `chainlit` logger, translation linting, `__version__`.                      | internal               |
-| `frontend/dist`, `copilot/dist`, `translations/*.json`, `sample/`                                 | Built JS artefacts (not in git), shipped UI translations, the `chainlit hello` demo apps.                                            | assets                 |
+| `frontend/dist`, `translations/*.json`, `sample/`                                                 | Built JS artefacts (not in git), shipped UI translations, the `chainlit hello` demo apps.                                            | assets                 |
 
 ---
 
@@ -122,6 +122,18 @@ opens.
 **Handshake.** Accept → `_first_hello` (10s deadline, must be a well-formed `hello`, else close
 4400/4413) → `arrive(...)` → `on_arrival` → `Connection` → `_take_over` → `_serve`.
 
+**One arrival at a time per conversation.** Everything from `arrive` to `_take_over` runs under
+a per-thread `asyncio.Lock` (`arrivals`, a `WeakValueDictionary` in the handler closure; a hello
+naming no thread takes none). `arrive` registers and returns, then `on_arrival` does database
+work — so without it two hellos for one thread resolved **backwards**: the second claimed the
+session the first had just registered, adopted it and started replaying, and then the first woke
+from its `_resume` and adopted it back. The tab the user opened last was the one closed 4409,
+and the frames it had queued drained onto the tab it replaced. The key is the thread the client
+_asked_ for, not the one its session ends up in — `_disown_thread` may move it, which leaves the
+requested thread free for whoever was waiting, exactly as it should. Not in the registry, which
+is lock-free and synchronous by design: this is the opposite concern, a stretch of the handshake
+that must await.
+
 **`_take_over` order** is load-bearing and must not be reordered:
 
 1. `session.adopt(connection)` — become current first, so the previous handler's loops are
@@ -160,7 +172,8 @@ consulted: a reload, a duplicated tab and a transport blip all say the same sent
 **`ApplicationRunner`** is the application half: `make_session` (mints a thread id and, with
 persistence, a `SessionWriter(hold_until_interaction=True)`), `on_arrival` — the **one** place
 that decides start / resume / nothing — `on_ready` (which only carries out what `on_arrival`
-decided), `on_disconnect`, `_reap`, `teardown`, `on_message`, `on_stop`, `call_action`.
+decided), `on_disconnect`, `_reap`, `relinquish`/`release`/`release_soon`, `teardown`,
+`on_message`, `on_stop`, `call_action`.
 `requested_thread_id` is what the client _asked_ to resume; `thread_id` may be the id the
 session was minted with, and only an asked-for thread can be reported missing.
 
@@ -213,11 +226,35 @@ leave without touching the session — its `finally` block is entirely condition
 `connection.current`. There is no sweep: a thread holds one session, so there is nothing to
 evict.
 
-**"New chat" (`session.clear`).** `runner.release`: discard the entry, **then** `teardown`
-(cancel work, end any ask and write the interrupted-ask row, close the writer, discard files,
-`outbound.abort()`). Discarding first frees the thread in the same turn, so reopening it from
-the history resumes it from the database instead of being handed the blank session that was
-sitting on it. `on_disconnect` schedules no reaper for a session the registry no longer holds.
+**"New chat" (`session.clear`), and the end of a chat.** `runner.release`: `relinquish`
+(discard the entry) → **the end-of-chat step** — `on_chat_end`, then the `PatchThread` carrying
+`persist.thread_state` — → `teardown` (cancel work, end any ask and write the interrupted-ask
+row, close the writer, discard files, `outbound.abort(1000, "released")`). Discarding first
+frees the thread in the same turn, so reopening it from the history resumes it from the database
+instead of being handed the blank session that was sitting on it, and the boolean `relinquish`
+returns is the guard that makes the end-of-chat step happen **exactly once** across the reaper,
+`session.clear` and a deleted thread. `on_disconnect` schedules no reaper for a session the
+registry no longer holds.
+
+Three consequences worth stating plainly. `on_chat_end` is about the **conversation**, not the
+socket: it does not run on an F5, a blip or a second tab, and an abandoned chat hears it at the
+reaper (+300s) rather than at the drop. The metadata patch is the **only** write of
+end-of-session `user_session` state — `persist.open_thread`'s patch fires once, at the first
+interaction — so it has to happen before `teardown` clears `session.writer`; in `on_disconnect`
+it ran after and was silently skipped. And `on_disconnect` keeps a copy of the patch as
+insurance on any drop, which is cheap and costs a session nothing.
+
+The release from `session.clear` is **scheduled, not awaited** (`Session.release_soon` →
+`ApplicationRunner.release_soon`): the reader is a child of `_serve`'s task group, and a
+teardown awaited there drains the database writer inside a scope the heartbeat can cancel — one
+unanswered probe and `aclose` dies mid-flush with rows still in it, and `discard_files` and the
+abort never run. Only the `relinquish` happens in the reader's own breath. `_reap` and
+`DELETE /project/thread` keep the awaitable `release`: the second needs the drain finished
+before it removes the rows.
+
+The close code is **1000**, not `CloseCode.INTERNAL`: nothing failed, the conversation was given
+up on purpose, and a client still listening should be free to reconnect into a fresh chat rather
+than be told the server broke. `CloseCode` stays private-use (4000–4999) and gains nothing.
 
 **Deleting a thread.** `DELETE /project/thread` releases the live session in that thread before
 removing the rows — the teardown drains a writer that may still have something to file, and a
@@ -278,8 +315,9 @@ the OAuth callback answers 302 and its user row must still commit.
 
 **`SessionWriter`** (`persistence/writer.py`) is **one ordered writer per session**, not per
 thread. A thread holds one session, but a successor can start on it while its predecessor's
-writer is still draining (the window between `release`'s discard and its `aclose`), so
-`WriterRegistry` keeps a _set_ per thread and FIFO stays a per-writer promise. It queues
+writer is still draining (the window between `release`'s discard and its `aclose` — wider now
+that `session.clear` schedules the release instead of awaiting it), so `WriterRegistry` keeps a
+_set_ per thread and FIFO stays a per-writer promise. It queues
 `SaveStep`, `DeleteStep`, `SaveElement`, `DeleteElement`, `PatchThread`; the consumer takes up
 to `BATCH_LIMIT = 256` ops per transaction and replays op-by-op if the batch fails.
 `hold_until_interaction=True` keeps ops (and _un-started_ uploads) in an ordered held list;
@@ -418,6 +456,13 @@ profile change. **Rule: any transport change needs at least one live-server test
 - **The registry decides; the caller does.** Nothing in `ws/registry.py` tears a session down.
   `ApplicationRunner.release` is the one place that discards an entry and tears down what was in
   it, and it discards **first** so the thread is free in the same turn.
+- **A teardown never runs inside a connection's task group.** `_serve`'s group cancels every
+  child when one fails, and a cancelled `SessionWriter.aclose` loses the rows it was flushing.
+  The reaper has always been a plain `asyncio` task; `session.clear` schedules one too
+  (`release_soon`).
+- **The chat ends once, in `release`.** `relinquish` returning `True` is the guard — the
+  registry entry _is_ the fact "this conversation is still going", so no separate flag exists to
+  fall out of step. `on_chat_end` is never driven by a socket closing.
 - **One session per thread, enforced by the key.** `register` raises `ThreadHeld` rather than
   overwriting, and nothing may `await` between `claim` and the `register` that acts on it.
 - **There is no fan-out.** Both protection queries are a single lookup by thread.

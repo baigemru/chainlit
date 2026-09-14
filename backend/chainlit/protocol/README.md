@@ -195,12 +195,20 @@ cannot be made additively.
 
 | Code | Meaning                                                       |
 | ---- | ------------------------------------------------------------- |
+| 1000 | released — the session was given up on purpose                |
 | 4400 | bad handshake — the first frame was not a well-formed `hello` |
 | 4401 | unauthenticated                                               |
 | 4408 | heartbeat timeout — no `hb.ack` within the deadline           |
 | 4409 | superseded — another connection took this session over        |
 | 4413 | frame too large                                               |
 | 4500 | internal                                                      |
+
+1000 is RFC 6455's ordinary closure and the only code here outside the
+private-use range, which is why it is not in `CloseCode`. It is what
+`runner.teardown` closes with: New chat, a profile switch, or a thread
+deleted underneath a live session. Nothing failed, so `internal` was a lie —
+and it is deliberately **not** terminal for the client, which reconnects,
+finds nobody in that conversation and lands on a fresh chat.
 
 4403 (session forbidden) and 4404 (thread forbidden) are **retired**, and the
 range they sat in is deliberately left empty. Both said "that exists and is

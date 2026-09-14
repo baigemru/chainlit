@@ -19,11 +19,11 @@ import {
   messagesState,
   sessionIdState,
   sideViewState,
-  threadIdToResumeState,
   updateMessageById,
   useChatData,
   useChatInteract,
   useChatMessages,
+  useChatTransport,
   useConfig
 } from '@chainlit/react-client';
 
@@ -250,13 +250,18 @@ const MessagesContainer = ({ navigate }: Props) => {
   // Boundaries describe the live transcript only. Opening a thread from the
   // history replays persisted steps, and one of them can carry the id a
   // boundary points at — which would draw a divider inside a conversation
-  // that never had a profile switch. A soft switch clears idToResume, so it
-  // is not affected.
-  const idToResume = useRecoilValue(threadIdToResumeState);
+  // that never had a profile switch. Keyed on the replay frame itself, not
+  // on the descriptor asking for a thread: a profile hand-off asks for its
+  // successor thread too, and the divider it has just drawn must survive.
+  const transport = useChatTransport();
   const setBoundaries = useSetRecoilState(chatBoundariesState);
-  useEffect(() => {
-    if (idToResume) setBoundaries([]);
-  }, [idToResume, setBoundaries]);
+  useEffect(
+    () =>
+      transport.onMessage((message) => {
+        if (message.t === 'thread.resume') setBoundaries([]);
+      }),
+    [transport, setBoundaries]
+  );
 
   // Bring a freshly drawn divider into view once. Autoscroll pins the last
   // user message to the top, and that message belongs to the new chat, so

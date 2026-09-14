@@ -236,9 +236,17 @@ def test_stop_cancels_the_running_task_and_calls_on_stop(
     assert frames[-1]["running"] is False
 
 
-def test_a_closed_socket_runs_on_chat_end_and_schedules_the_reaper(
+def test_a_closed_socket_schedules_the_reaper_which_ends_the_chat(
     plugin: ChainlitPlugin, test_config: Any
 ) -> None:
+    """The drop schedules; the reaper ends.
+
+    ``on_chat_end`` used to fire the instant the socket went, which is a
+    reload as often as it is a goodbye. It belongs to ``release`` now, so
+    the grace period below is not just when the session dies -- it is when
+    the application is told its conversation is over. Compressed to 50ms
+    here; it is five minutes in production.
+    """
     ended: List[str] = []
 
     async def on_chat_end() -> None:

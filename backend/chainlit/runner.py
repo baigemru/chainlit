@@ -59,6 +59,12 @@ __all__ = ["ApplicationRunner", "ThreadStoreAdapter"]
 # well under it and a closed tab is gone for good after it.
 DEFAULT_SESSION_TIMEOUT = 300.0
 
+NORMAL_CLOSURE = 1000
+"""RFC 6455's ordinary goodbye, for a socket closed because its session was
+released rather than because anything went wrong. Not in ``CloseCode``, which
+is the private-use 4000-4999 range by definition and carries only the codes
+this protocol invented."""
+
 DEFAULT_INTERRUPTED_ASK_MESSAGE = (
     "The action was interrupted and has to be started again."
 )
@@ -411,21 +417,22 @@ class ApplicationRunner:
     # ------------------------------------------------------------- lifecycle
 
     async def on_disconnect(self, session: Session) -> None:
-        """The socket is gone. Persist what the thread remembers, then wait."""
-        self._bind(session)
-        if self.code.on_chat_end:
-            try:
-                await self.code.on_chat_end()
-            except Exception:
-                logger.exception("on_chat_end failed in session %s", session.id)
+        """The socket is gone. Persist what the thread remembers, then wait.
 
-        if session.first_interaction and session.thread_id and session.writer:
-            session.writer.submit(
-                PatchThread(
-                    session.thread_id,
-                    ThreadPatch(metadata=persist.thread_state(session)),
-                )
-            )
+        Deliberately **not** the end of the chat. A socket drops on every
+        reload, every tunnel blip and every profile handoff, and the session
+        survives all three -- so ``on_chat_end`` here fired on conversations
+        that were about to be handed straight back, which is what an F5 is.
+        The hook belongs to ``release``, the one place whose whole meaning is
+        that the conversation is over.
+
+        The metadata patch stays, as insurance rather than as the record: it
+        is one queued row and it costs a session nothing, and a process that
+        dies between here and the reaper has at least written down what the
+        application last put in ``user_session``.
+        """
+        self._bind(session)
+        self._patch_thread_state(session)
 
         if session.reaper is not None and not session.reaper.done():
             session.reaper.cancel()
@@ -444,23 +451,114 @@ class ApplicationRunner:
             return
         await self.release(session)
 
-    async def release(self, session: Session) -> None:
-        """Give up the conversation: out of the registry, then torn down.
+    def relinquish(self, session: Session) -> bool:
+        """Take the conversation out of the registry. Synchronous, and once.
 
-        Two callers and the same fact behind both -- as far as the user is
-        concerned this conversation is over. The reaper says it after the
-        grace period; ``session.clear`` ("New chat") says it outright.
+        Returns whether *this* call was the one that did it, which is the
+        whole of the end-of-chat guard: the reaper, ``session.clear`` and a
+        thread deleted underneath a live session can all arrive at a release
+        of the same conversation, and ``on_chat_end`` is a thing that
+        happens to a chat rather than to a call. No flag was invented for
+        it -- the registry entry already is the fact "this conversation is
+        still going", and a flag would be a second copy of it to keep
+        honest.
 
-        Out of the registry *first*, and in the same turn: the thread has
-        to be free before anything can ask for it again. Pressing New chat
-        and then reopening the same thread from the history must find the
-        conversation in the database, not the empty live session that was
-        still sitting on it.
+        Synchronous on purpose: the thread has to be free in the same turn.
+        Pressing New chat and reopening the conversation from the history a
+        moment later must find it in the database, not find the emptied live
+        session still sitting on it.
         """
         entry = self.registry.get(session.id)
-        if entry is not None and entry.session is session:
-            self.registry.discard(entry)
-        await self.teardown(session)
+        if entry is None or entry.session is not session:
+            return False
+        return self.registry.discard(entry)
+
+    async def release(self, session: Session) -> None:
+        """Give up the conversation: out of the registry, ended, torn down.
+
+        Three callers and the same fact behind all of them -- as far as the
+        user is concerned this conversation is over. The reaper says it
+        after the grace period; ``session.clear`` ("New chat", and the
+        profile switch, which the client sends one for) says it outright;
+        deleting the thread says it on the session's behalf.
+
+        So this is where the chat *ends*, in the order the three steps have
+        to happen in. ``on_chat_end`` first, because the application may
+        still want to write something and its writer is alive until the
+        teardown closes it. Then the metadata patch, which is the only
+        write of end-of-session ``user_session`` state there is: the patch
+        in ``open_thread`` fires once, at the first interaction, so
+        everything the application stored after that lives nowhere but in
+        memory until this line. It used to sit in ``on_disconnect`` only,
+        where the reaper's path reached it -- the socket drops with the
+        writer still alive -- but the two *deliberate* ends did not: there
+        the teardown had already set ``writer`` to ``None`` and the submit
+        was a silent no-op. So New chat and every profile switch threw the
+        conversation's state away, which is the pair that happens daily.
+        """
+        await self._finish_release(session, ended=self.relinquish(session))
+
+    def release_soon(self, session: Session) -> None:
+        """Release as a task the runner owns, not inside a socket's group.
+
+        ``session.clear`` is read by ``_read_loop``, which lives in
+        ``_serve``'s ``anyio`` task group alongside the heartbeat. Awaiting
+        the release there put the writer's drain -- up to ``DRAIN_TIMEOUT``
+        of real database work -- inside a scope any sibling can cancel: one
+        unanswered heartbeat during it and ``aclose`` dies mid-flush, taking
+        the rows with it and skipping ``discard_files`` and the abort. The
+        reaper has never had that problem because it is a plain
+        ``asyncio`` task; this makes the other caller one too.
+
+        The registry entry goes *before* the task is scheduled, so the
+        thread is free in the same turn the frame was read -- and so the
+        handler unwinding behind this schedules no reaper for a session that
+        is already being torn down.
+        """
+        ended = self.relinquish(session)
+        task = asyncio.create_task(self._finish_release(session, ended=ended))
+        # Held, or the loop may collect it before it runs.
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def _finish_release(self, session: Session, *, ended: bool) -> None:
+        # One guard around both halves: on the ``release_soon`` path this is
+        # a detached task, so anything that escaped would surface nowhere
+        # but a garbage-collector warning -- and a failure in the end-of-chat
+        # step must not cost the session its teardown.
+        try:
+            if ended:
+                await self._end_chat(session)
+        except Exception:
+            logger.exception("Ending the chat of session %s failed", session.id)
+        try:
+            await self.teardown(session)
+        except Exception:
+            logger.exception("Releasing session %s failed", session.id)
+
+    async def _end_chat(self, session: Session) -> None:
+        """The chat is over: tell the application, then write down its state."""
+        self._bind(session)
+        if self.code.on_chat_end:
+            try:
+                await self.code.on_chat_end()
+            except Exception:
+                logger.exception("on_chat_end failed in session %s", session.id)
+        self._patch_thread_state(session)
+
+    def _patch_thread_state(self, session: Session) -> None:
+        """Queue what the thread remembers of ``user_session``, if anything.
+
+        A session with no first interaction has no row to patch -- the
+        writer is still holding everything it was given.
+        """
+        if session.first_interaction and session.thread_id and session.writer:
+            session.writer.submit(
+                PatchThread(
+                    session.thread_id,
+                    ThreadPatch(metadata=persist.thread_state(session)),
+                )
+            )
 
     async def teardown(self, session: Session) -> None:
         """Stop the session's work and release what it holds. Idempotent."""
@@ -482,7 +580,13 @@ class ApplicationRunner:
                     "Writer for thread %s did not close cleanly", session.thread_id
                 )
         session.discard_files()
-        session.outbound.abort()
+        # Not ``INTERNAL``: nothing failed. The session was given up on
+        # purpose -- New chat, a profile switch, a thread deleted -- and the
+        # only honest thing to say to a socket that is somehow still there
+        # is the ordinary goodbye. The client treats a non-terminal code as
+        # "come back", which lands it on a conversation nobody is in and so
+        # on a fresh chat: exactly where the release left it.
+        session.outbound.abort(NORMAL_CLOSURE, "released")
 
     def _record_interrupted_ask(self, session: Session, ask: PendingAsk) -> None:
         """Leave a line in the thread where the question used to be.

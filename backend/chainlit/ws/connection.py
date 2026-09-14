@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Mapping, Optional
+import weakref
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Optional
 
 import anyio
 import msgspec
@@ -204,6 +206,41 @@ def make_websocket_handler(
     have to land on top of the rebuilt feed, not under it.
     """
 
+    arrivals: "weakref.WeakValueDictionary[str, asyncio.Lock]" = (
+        weakref.WeakValueDictionary()
+    )
+    """One arrival at a time per conversation.
+
+    ``arrive`` registers a new session and returns; ``on_arrival`` then does
+    database work -- claiming a handover, reading a thread back -- and only
+    after that does ``_take_over`` decide who speaks. Two hellos for the same
+    thread inside that window resolved backwards: the second claimed the
+    session the first had just registered, took it over, sent its client
+    ``session.ready`` and started replaying -- and then the first woke from
+    its own ``_resume`` and took the session back. The *first* tab won, the
+    second was closed 4409 "opened in another window", the frames the second
+    had queued drained onto the first one's socket, and a resume miss in the
+    first re-keyed the registry entry out from under a client that believed
+    it was in that thread.
+
+    So the whole of ``arrive -> on_arrival -> _take_over`` is serialised on
+    the thread the client *asked* for -- not on the one its session ends up
+    in, which ``_disown_thread`` may change while the next arrival waits.
+    That is still the right key: what two hellos race over is the
+    conversation named in the address bar, and an arrival that is disowned
+    off it leaves it free for the one behind, which then makes its own
+    decision about a thread nobody holds.
+
+    Not in the registry, which documents itself lock-free and synchronous
+    precisely so that nothing can await between a claim and the register
+    that acts on it. This is the opposite concern -- a stretch of the
+    handshake that must await -- and it belongs to the handler that owns it.
+    A hello naming no thread races with nothing and takes no lock.
+
+    Weak values, so a conversation nobody is arriving in costs nothing: the
+    entry lives exactly as long as some handler below holds the lock object.
+    """
+
     @websocket("/ws")
     async def chainlit_websocket(socket: WebSocket[Any, Any, Any]) -> None:
         # Guards and the authentication middleware have already run: their
@@ -221,29 +258,30 @@ def make_websocket_handler(
             await socket.close(code=refusal.code, reason=refusal.reason)
             return
 
-        arrival = await arrive(
-            registry=registry,
-            user_identifier=_identifier(user),
-            page_load=hello.page_load,
-            thread_id=hello.thread_id,
-            make_session=lambda thread_id: make_session(thread_id, hello, user),
-        )
-        # No refusal exists any more. A thread somebody else is in is
-        # answered with a conversation of this user's own, because a close
-        # code that meant "not yours" was an answer about a row.
-        session = arrival.session
-        if on_arrival is not None:
-            await on_arrival(arrival)
+        async with _arrival_lock(arrivals, hello.thread_id):
+            arrival = await arrive(
+                registry=registry,
+                user_identifier=_identifier(user),
+                page_load=hello.page_load,
+                thread_id=hello.thread_id,
+                make_session=lambda thread_id: make_session(thread_id, hello, user),
+            )
+            # No refusal exists any more. A thread somebody else is in is
+            # answered with a conversation of this user's own, because a close
+            # code that meant "not yours" was an answer about a row.
+            session = arrival.session
+            if on_arrival is not None:
+                await on_arrival(arrival)
 
-        connection = Connection(session, socket)
-        previous = await _take_over(
-            connection,
-            ready_frame(
-                session,
-                restored=arrival.outcome.value == "kept",
-                heartbeat_ms=heartbeat_ms,
-            ),
-        )
+            connection = Connection(session, socket)
+            previous = await _take_over(
+                connection,
+                ready_frame(
+                    session,
+                    restored=arrival.outcome.value == "kept",
+                    heartbeat_ms=heartbeat_ms,
+                ),
+            )
 
         try:
             await _serve(
@@ -260,10 +298,9 @@ def make_websocket_handler(
             # one is a handler whose socket happened to notice its own death
             # after a newer one had already taken the session over, and every
             # line below would be aimed at the wrong connection: marking the
-            # session disconnected starts a reaper against a live client,
-            # detaching takes the writer out from under it, and
-            # ``on_disconnect`` runs ``on_chat_end`` on a chat that has not
-            # ended. Otherwise the socket is gone and the session is not: it
+            # session disconnected starts a reaper against a live client, and
+            # detaching takes the writer out from under it. Otherwise the
+            # socket is gone and the session is not: it
             # keeps its queue, its question and its work, and the registry
             # keeps it until something decides otherwise.
             if connection.current:
@@ -275,6 +312,28 @@ def make_websocket_handler(
                     await on_disconnect(session)
 
     return chainlit_websocket
+
+
+@asynccontextmanager
+async def _arrival_lock(
+    locks: "weakref.WeakValueDictionary[str, asyncio.Lock]", thread_id: Optional[str]
+) -> AsyncIterator[None]:
+    """Hold the conversation's arrival lock for the body. See ``arrivals``.
+
+    Get-or-create with no ``await`` between the two, which is what makes it
+    safe on one loop: two hellos for the same thread cannot both find the
+    map empty. The strong reference is this frame's local -- the map keeps
+    only a weak one, so the entry disappears when the last waiter leaves.
+    """
+    if thread_id is None:
+        yield
+        return
+    lock = locks.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[thread_id] = lock
+    async with lock:
+        yield
 
 
 async def _take_over(connection: Connection, ready: Any) -> Optional[Connection]:
@@ -420,12 +479,16 @@ async def _dispatch(session: Session, message: ClientMsg) -> None:
 
     ``session.clear`` is the one that ends things. "New chat" is the user
     giving the conversation up, so the session is released outright --
-    out of the registry and torn down -- rather than merely emptied. Two
-    consequences worth naming: the thread becomes free in the same turn,
-    so reopening it from the history resumes it from the database instead
-    of finding a blank live session on it; and a question that was on
-    screen when the button was pressed gets the interrupted-ask row
-    ``teardown`` writes, which ``cancel_work`` alone never did.
+    out of the registry, ``on_chat_end`` run, its state written down and
+    torn down -- rather than merely emptied. Three consequences worth
+    naming: the thread becomes free in the same turn, so reopening it from
+    the history resumes it from the database instead of finding a blank
+    live session on it; a question that was on screen when the button was
+    pressed gets the interrupted-ask row ``teardown`` writes, which
+    ``cancel_work`` alone never did; and the release is *scheduled*, not
+    awaited. This is the reader, and the reader is a child of ``_serve``'s
+    task group: a teardown awaited here drains the database writer inside a
+    scope the heartbeat can cancel out from under it.
     """
     if isinstance(message, Hello):
         # A second hello on an established socket. The handshake is not
@@ -455,9 +518,11 @@ async def _dispatch(session: Session, message: ClientMsg) -> None:
         return
 
     if isinstance(message, SessionClear):
-        # The client detached before it sent this, so the abort inside the
-        # release closes a socket nobody is listening on any more.
-        await session.release()
+        # The client detached before it sent this, so the close the release
+        # ends with reaches a socket nobody is listening on any more. The
+        # thread is given up synchronously inside this call; everything that
+        # awaits happens on a task of the runner's.
+        session.release_soon()
         return
 
 

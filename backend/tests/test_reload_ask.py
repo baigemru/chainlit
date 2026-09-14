@@ -53,6 +53,7 @@ from tests.test_runner_persistence import (  # noqa: F401 - fixture re-export
     reap_soon,
     reaped,
     seed_user,
+    settle,
     tags,
     thread_detail,
     wait_for_thread,
@@ -834,3 +835,225 @@ def test_new_chat_on_an_open_question_leaves_the_interruption_trace(
     trace = [step for step in detail.steps if step.output == TRACE]
     assert len(trace) == 1
     assert trace[0].name == ASK_AUTHOR
+
+
+# ------------------------------- 6. the end of a chat, and what it writes down
+
+BASKET = ["one free report", "one paid"]
+"""Something the application puts in ``user_session`` *after* the thread's
+first interaction -- which is the only interesting case, because the patch in
+``persist.open_thread`` has already fired by then and never fires again."""
+
+
+def _basket_app(test_config: Any, *, switch_to: Optional[str] = None) -> None:
+    """An app that remembers something per conversation, and maybe switches.
+
+    The value is written from ``on_message``, so the thread row exists and
+    has already been named by the time it is set. Nothing else will write
+    the metadata again: whatever the end of the chat does not persist is
+    lost.
+    """
+
+    async def on_message(msg: cl.Message) -> None:
+        cl.user_session.set("basket", BASKET)
+        if switch_to is not None:
+            await cl.context.emitter.set_chat_profile(
+                switch_to, transit_message="carry on"
+            )
+            return
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = _noop_resume
+
+
+def _basket_of(url: str, thread_id: str) -> Any:
+    detail = thread_detail(url, thread_id)
+    return None if detail is None else (detail.metadata or {}).get("basket")
+
+
+def test_new_chat_writes_down_what_the_app_stored_after_the_first_message(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """``user_session`` has to reach the thread, and only the release can put it there.
+
+    There are exactly two writes of thread metadata. ``persist.open_thread``
+    fires once, at the first interaction, with whatever the state held *then*
+    -- so everything the application stores afterwards lives only in memory.
+    The other used to sit in ``on_disconnect``, which runs after the teardown
+    has already set ``session.writer`` to ``None``: the submit was a no-op
+    every single time, and pressing New chat threw the conversation's state
+    away. It belongs to the release, which is the one place that means the
+    chat is over.
+    """
+    seed_user(db_url, ALICE)
+    _basket_app(test_config)
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            thread_id = handshake[0]["threadId"]
+            ws.send_text(message("keep this"))
+            read_until(ws, "step.upsert", limit=40)
+            wait_for_thread(db_url, thread_id, lambda d: len(d.steps) >= 2)
+            # The premise: the only patch so far is the one that named the
+            # row, and it ran before ``on_message`` filled the basket.
+            assert _basket_of(db_url, thread_id) is None, "written too early to count"
+            ws.send_text(CLEAR)
+
+        detail = wait_for_thread(
+            db_url, thread_id, lambda d: (d.metadata or {}).get("basket") is not None
+        )
+
+    assert detail.metadata is not None
+    assert detail.metadata["basket"] == BASKET
+
+
+def test_a_profile_handoff_writes_down_the_state_of_the_chat_it_leaves(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The same rule, on the path the consumer actually takes every day.
+
+    A profile switch is a release: the client answers ``session.handoff`` by
+    sending ``session.clear`` on the old socket and opening the successor's
+    thread. So the predecessor's conversation ends here, and what the
+    application stored in it has to be in *its* row -- not in the
+    successor's, and not nowhere.
+    """
+    seed_user(db_url, ALICE)
+    _basket_app(test_config, switch_to="B")
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws, chatProfile="A")
+            thread_id = handshake[0]["threadId"]
+            ws.send_text(message("switch me"))
+            handoff = read_until(ws, "session.handoff", limit=40)[-1]
+            next_id = handoff["nextThreadId"]
+            assert next_id, handoff
+            assert next_id != thread_id, "the successor got the predecessor's thread"
+            # What the client does with a handoff: give the old conversation
+            # up, then open the one it was handed.
+            ws.send_text(CLEAR)
+
+        detail = wait_for_thread(
+            db_url, thread_id, lambda d: (d.metadata or {}).get("basket") is not None
+        )
+        assert detail.metadata is not None
+        assert detail.metadata["basket"] == BASKET
+        assert detail.metadata["chat_profile"] == "A"
+
+        with client.websocket_connect("/ws") as ws:
+            successor = open_session(ws, threadId=next_id, chatProfile="B")
+
+    # And the successor is a different conversation, carrying none of it.
+    assert successor[0]["threadId"] == next_id
+    assert _basket_of(db_url, next_id) is None
+
+
+def _ends(test_config: Any) -> List[str]:
+    """Count ``on_chat_end`` runs, and say which conversation each was for."""
+    ended: List[str] = []
+
+    async def on_chat_end() -> None:
+        ended.append(str(cl.context.session.thread_id))
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    test_config.code.on_chat_end = on_chat_end
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = _noop_resume
+    return ended
+
+
+def test_a_reload_does_not_end_the_chat_and_new_chat_ends_it_once(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """``on_chat_end`` is about the conversation, not about the socket.
+
+    It used to run in ``on_disconnect``, which fires on every drop: an F5, a
+    tunnel blip and a second tab all told the application its chat had ended
+    -- and then handed the very same session back, hooks unrun, on the next
+    hello. An app that closed a cart or released a lock there did it under a
+    conversation that was still going.
+    """
+    seed_user(db_url, ALICE)
+    ended = _ends(test_config)
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            thread_id = handshake[0]["threadId"]
+            ws.send_text(message("keep this"))
+            read_until(ws, "step.upsert", limit=40)
+        # The socket is gone and the session is not: the reaper has not run
+        # and the thread is still held, which is exactly what a reload finds.
+        wait_until(lambda: _disconnected(plugin, thread_id))
+        assert ended == [], "the chat ended when only the socket did"
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, threadId=thread_id)
+            assert replay[0]["restored"] is True, "the premise: the same session"
+            ws.send_text(message("and again"))
+            read_until(ws, "step.upsert", limit=40)
+            assert ended == [], "the reload ended the chat it was handed back"
+            ws.send_text(CLEAR)
+
+        wait_until(lambda: _gone(plugin, thread_id))
+        # Once, for this conversation, and not again when the socket behind
+        # it finally unwinds.
+        wait_until(lambda: ended == [thread_id])
+        settle()
+
+    assert ended == [thread_id]
+
+
+def test_the_reaper_ends_the_chat_exactly_once(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The abandoned conversation still ends -- at the reaper, not at the drop.
+
+    Which is the behaviour change: an app whose ``on_chat_end`` used to fire
+    the instant a tab closed now hears about it once the grace period is
+    over. Exactly once either way, and the guard for that is the registry
+    entry rather than a flag: the reaper and a release racing it must not
+    both end the same chat.
+    """
+    seed_user(db_url, ALICE)
+    ended = _ends(test_config)
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            thread_id = handshake[0]["threadId"]
+            ws.send_text(message("keep this"))
+            read_until(ws, "step.upsert", limit=40)
+            wait_for_thread(db_url, thread_id, lambda d: len(d.steps) >= 2)
+            reap_soon(plugin)
+
+        reaped(plugin, thread_id)
+        wait_until(lambda: ended == [thread_id])
+        settle()
+
+    assert ended == [thread_id]

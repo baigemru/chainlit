@@ -52,11 +52,23 @@ async def test_concurrent_claims_do_not_both_win():
     assert len([r for r in results if r is not None]) == 1
 
 
-async def test_a_foreign_owner_gets_nothing():
+async def test_a_foreign_owner_gets_nothing_and_destroys_nothing():
+    """A stranger's claim is answered with ``None`` and changes nothing.
+
+    The key is a thread id, and a thread id is in the address bar. Deleting
+    the record before checking the owner turned "I read your URL" into "your
+    profile switch is gone": the owner arrives a moment later, finds no
+    record, and is given a blank chat instead of the conversation the switch
+    was handing them.
+    """
     transit = TransitStore()
     await transit.park("successor", "message", owner="user-1")
 
     assert await transit.claim("successor", owner="user-2") is None
+    # Still there for the one it was parked for.
+    record = await transit.claim("successor", owner="user-1")
+    assert record is not None
+    assert record.value == "message"
 
 
 async def test_a_record_carrying_only_a_parent_is_still_a_record():

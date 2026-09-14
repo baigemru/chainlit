@@ -88,6 +88,7 @@ def build(
     *,
     user: Optional[_Identity] = None,
     heartbeat_ms: int = 20_000,
+    on_arrival: Optional[Callable[[Any], Awaitable[None]]] = None,
     on_disconnect: Optional[Callable[[Session], Awaitable[None]]] = None,
 ) -> Any:
     """The route and its registry, plus whatever middleware the case needs.
@@ -110,6 +111,7 @@ def build(
             user=u,
         ),
         heartbeat_ms=heartbeat_ms,
+        on_arrival=on_arrival,
         on_disconnect=on_disconnect,
     )
     middleware = [_PutUser(user)] if user is not None else []
@@ -457,6 +459,68 @@ def test_a_session_whose_socket_timed_out_takes_a_new_one() -> None:
             assert 99 in [frame.get("seq") for frame in _read(ws, "hb")]
 
 
+def test_a_release_outlives_the_connection_that_asked_for_it(
+    test_config: Any,
+) -> None:
+    """A dying socket must not take the teardown down with it.
+
+    ``session.clear`` is read by ``_read_loop``, which is a child of
+    ``_serve``'s task group. Awaited there, the whole release ran inside a
+    scope any sibling could cancel -- and the heartbeat is a sibling that
+    cancels on a peer that stops answering, which is precisely the peer that
+    just said "New chat" and detached. The end-of-chat hook died halfway,
+    the metadata patch was never queued, the writer's drain was cut off with
+    rows still in it, and ``discard_files`` never ran.
+
+    So the release is a task of the runner's, and the only thing the reader
+    still does in the same breath is give the thread up.
+    """
+    ending: List[str] = []
+
+    async def on_chat_end() -> None:
+        # Comfortably longer than the two heartbeat intervals below, so the
+        # cancellation lands in the middle of it rather than around it.
+        await asyncio.sleep(0.4)
+        ending.append("ran to the end")
+
+    test_config.code.on_chat_end = on_chat_end
+
+    registry = SessionRegistry()
+    runner = ApplicationRunner(test_config, registry=registry)
+    handler = make_websocket_handler(
+        registry=registry,
+        make_session=runner.make_session,
+        on_arrival=runner.on_arrival,
+        on_ready=runner.on_ready,
+        on_disconnect=runner.on_disconnect,
+        heartbeat_ms=40,
+    )
+
+    with create_test_client(route_handlers=[handler]) as client:
+        with client.websocket_connect("/ws") as ws:
+            open_session(ws)
+            session = live(held(registry))
+            ws.send_text(json.dumps({"t": "session.clear"}))
+            # The thread is free in the same breath, before anything awaits.
+            deadline = time.monotonic() + 2
+            while registry.entry_of_thread(THREAD) is not None:
+                assert time.monotonic() < deadline, "the thread was never given up"
+                time.sleep(0.01)
+            # And nothing here answers a probe, so the heartbeat closes this
+            # socket and cancels its group while the release is still going.
+            assert close_code_of(ws) == CloseCode.HEARTBEAT_TIMEOUT
+            assert ending == [], "the premise: the release is not finished yet"
+
+        deadline = time.monotonic() + 3
+        while not ending:
+            assert time.monotonic() < deadline, "the release died with the socket"
+            time.sleep(0.02)
+        # And it got all the way to the end, not merely past the hook.
+        while not session.outbound.closed:
+            assert time.monotonic() < deadline, "the teardown never finished"
+            time.sleep(0.02)
+
+
 # --------------------------------------------------------------------------
 # Live uvicorn: the takeover
 # --------------------------------------------------------------------------
@@ -657,10 +721,9 @@ async def test_live_a_takeover_leaves_the_session_connected(ws_impl: str) -> Non
 
     Everything that teardown used to do was aimed at the wrong connection.
     It marked the session disconnected and called ``on_disconnect`` -- in
-    the real runner: ``on_chat_end``, then the reaper -- so a session with
-    work in flight, a client attached and a question on screen was torn
-    down ``session_timeout`` later, and nothing ever set ``connected``
-    back. The old goodbye also came *before* the arriving client's
+    the real runner: the reaper -- so a session with work in flight, a
+    client attached and a question on screen was torn down
+    ``session_timeout`` later, and nothing ever set ``connected`` back. The old goodbye also came *before* the arriving client's
     ``session.ready``, which is the same ten seconds of nothing seen from
     the browser. In memory neither is reachable: ``close`` there is a queue
     write that awaits nobody.
@@ -724,6 +787,82 @@ async def test_live_a_takeover_leaves_the_session_connected(ws_impl: str) -> Non
             writer.close()
 
     assert disconnected == [session.id], "the last socket to go owns the teardown"
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_second_tab_arriving_mid_handshake_still_wins(
+    ws_impl: str,
+) -> None:
+    """Two hellos for one thread, overlapping, and the later one must win.
+
+    ``arrive`` registers the session and returns; ``on_arrival`` then does
+    the slow part -- claiming a handover, reading a thread back out of the
+    database -- and only then does ``_take_over`` decide who speaks. A
+    second tab landing inside that window used to resolve the race
+    backwards: it claimed the session the first had just registered, adopted
+    it, sent *its* client ``session.ready`` and began replaying, and then the
+    first woke up from its own ``on_arrival`` and adopted the session back.
+    The tab the user had just opened was closed 4409 "opened in another
+    window", and the frames it had queued drained onto the tab it replaced.
+
+    The rule is one arrival at a time per conversation, so the second hello
+    is not answered until the first has finished being one. Live, because
+    the loser is told by a close code and in-process ``close`` is a queue
+    write that awaits nobody.
+    """
+    gate = asyncio.Event()
+    arrivals: List[Any] = []
+
+    async def slow_arrival(arrival: Any) -> None:
+        arrivals.append(arrival)
+        if len(arrivals) == 1:
+            # The first arrival is still deciding what its hello meant.
+            await gate.wait()
+
+    handler, _middleware, registry = build(on_arrival=slow_arrival)
+
+    async with live_server(Litestar([handler]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        try:
+            async with connect(url) as first:
+                await first.send(hello(pageLoad=True))
+                deadline = time.monotonic() + 5
+                while not arrivals:
+                    assert time.monotonic() < deadline, "the first hello never arrived"
+                    await asyncio.sleep(0.01)
+
+                async with connect(url) as second:
+                    await second.send(hello(pageLoad=True))
+                    # Long enough that an unserialised handshake would be
+                    # well past its own ``on_arrival`` and its takeover.
+                    await asyncio.sleep(0.3)
+                    assert len(arrivals) == 1, (
+                        "the second hello was let into the handshake while "
+                        "the first was still in it"
+                    )
+
+                    gate.set()
+                    replay = await open_live(second)
+                    assert replay[0]["t"] == "session.ready"
+                    assert replay[0]["threadId"] == THREAD
+                    # The session the first arrival registered, handed over
+                    # -- not a second one built on the same conversation.
+                    assert replay[0]["restored"] is True, replay[0]
+                    assert arrivals[1].outcome.value == "kept"
+
+                    # The tab the user opened last is the one holding the
+                    # conversation, and the one it replaced is told so.
+                    assert await live_close_code(first) == CloseCode.SUPERSEDED
+                    entry = held(registry)
+                    assert entry.connected is True
+                    live(entry).send(Heartbeat(seq=77))
+                    assert 77 in [f.get("seq") for f in await read_live(second, "hb")]
+        finally:
+            # Or the handler parked on it outlives the assertion that failed,
+            # and the server's shutdown timeout reports itself instead.
+            gate.set()
+
+    assert len(arrivals) == 2
 
 
 @pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
@@ -1111,9 +1250,13 @@ async def test_live_new_chat_gives_the_conversation_up(
             handle = (await open_live(first, pageLoad=True))[0]["sessionId"]
             session = await wait_for_session(registry)
             await first.send(json.dumps({"t": "session.clear"}))
-            # The server aborts the socket: the real client has detached by
-            # the time it sends this, so nothing is owed to this peer.
-            await live_close_code(first)
+            # The server closes the socket: the real client has detached by
+            # the time it sends this, so nothing is owed to this peer. 1000,
+            # not 4500 -- nothing failed, the conversation was given up on
+            # purpose, and a client that is somehow still listening should
+            # hear the ordinary goodbye and be free to come back to a fresh
+            # chat rather than be told the server broke.
+            assert await live_close_code(first) == 1000
 
         deadline = time.monotonic() + 5
         while registry.entry_of_thread(THREAD) is not None:

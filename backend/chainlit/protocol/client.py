@@ -45,8 +45,9 @@ class Hello(_Msg, tag="hello"):
     half-initialised session.
     """
 
-    session_id: str
-    client_type: Literal["webapp", "copilot", "teams", "slack", "discord"] = "webapp"
+    # No session id: the server mints it and names it in ``session.ready``.
+    # The thread is the identity a client may offer, and only a thread.
+    client_type: Literal["webapp", "teams", "slack", "discord"] = "webapp"
     #: The screen class the client computed for itself, for cutting the
     #: funnel by device. Analytics only: nothing on the server branches on
     #: it, and a client that never sends it is a client with no funnel, not
@@ -55,8 +56,9 @@ class Hello(_Msg, tag="hello"):
     thread_id: str | None = None
     chat_profile: str | None = None
     user_env: dict[str, str] = {}
-    # True only on the first connect after a full page load. A reload means
-    # a fresh chat unless the old session still has live work to rescue.
+    # True only on the first connect after a full page load: the browser is
+    # holding nothing, so the replay must rebuild the whole screen. The
+    # session itself survives a reload either way -- it is keyed by thread.
     page_load: bool = False
     protocol_version: int = 1
 

@@ -160,6 +160,12 @@ describe('Programmatic chat profile switch', () => {
 
     cy.reload();
 
+    // Still a fresh chat, and deliberately so: this app declares no resume
+    // hook, so `threadResumable` is false and nothing ever writes a thread
+    // into the address bar -- not the hand-off and not `session.ready`. F5
+    // therefore asks for no thread and gets a new session. An app that can
+    // resume keeps its session across the reload instead; see
+    // `docs/architecture/client.md` §6.
     cy.get('#chat-input').should('exist');
     cy.get('.chat-boundary').should('not.exist');
     cy.get('.step').should('not.exist');

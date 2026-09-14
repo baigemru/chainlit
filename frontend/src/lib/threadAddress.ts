@@ -5,9 +5,9 @@
  * before the router exists at all -- to seed the session descriptor, and
  * `threadAddressFor` runs inside a socket callback. Neither may reach for a
  * hook, and both have to agree with react-router about what the path means:
- * if the seeded thread and `useParams().id` ever disagree on the first
- * commit, `AutoResumeThread` reads that as "this tab asked for a different
- * thread" and clears the session the server had just kept.
+ * if the seeded thread and the route ever disagree on the first commit,
+ * `ThreadAddressSync` reads that as "this tab asked for a different thread"
+ * and clears the session the server had just kept.
  */
 
 const THREAD_PREFIX = '/thread/';

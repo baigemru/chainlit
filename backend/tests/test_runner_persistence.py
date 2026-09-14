@@ -162,6 +162,36 @@ def settle(seconds: float = 0.3) -> None:
     time.sleep(seconds)
 
 
+def reap_soon(plugin: ChainlitPlugin) -> None:
+    """Shorten the disconnect grace, while the socket is still open.
+
+    The reaper task is created when the socket goes and reads the timeout
+    then, so saying this afterwards changes nothing.
+    """
+    plugin.runner.session_timeout = 0.05
+
+
+def reaped(plugin: ChainlitPlugin, thread_id: str, *, timeout: float = 5.0) -> None:
+    """Wait for the session in this thread to be reaped, and say why.
+
+    A thread somebody is in is *handed over*, not read back from storage:
+    the session survives the socket, keeps its ``user_session`` dict and
+    re-runs no hooks. So a resume is the cold path, and reaching it in a
+    test means waiting the session out -- which is what the 300-second
+    reaper does in production, shortened to a blink here.
+
+    Called with the socket already closed, from the test's own thread: the
+    reaper runs on the application's loop, which is the only loop its
+    writer's connection belongs to.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if plugin.runner.registry.entry_of_thread(thread_id) is None:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"the session in thread {thread_id} was never reaped")
+
+
 def wait_until(predicate: Callable[[], bool], *, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -366,11 +396,13 @@ def test_a_hello_without_a_device_leaves_no_device_and_still_resumes(
         with client.websocket_connect("/ws") as ws:
             handshake = open_session(ws)
             send_and_read_reply(ws, "from something")
+            reap_soon(plugin)
         thread_id = handshake[0]["threadId"]
         stored = wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+        reaped(plugin, thread_id)
 
         with client.websocket_connect("/ws") as ws:
-            replay = open_session(ws, sessionId="s2", threadId=thread_id)
+            replay = open_session(ws, threadId=thread_id)
             wait_until(lambda: len(seen) == 2)
 
     assert seen == [("message", None), ("resume", None)]
@@ -409,11 +441,13 @@ def test_a_resume_replays_the_thread_then_runs_the_hooks_in_order(
         with client.websocket_connect("/ws") as ws:
             handshake = open_session(ws)
             send_and_read_reply(ws, "first words")
+            reap_soon(plugin)
         thread_id = handshake[0]["threadId"]
         wait_for_thread(db_url, thread_id, lambda d: "counter" in (d.metadata or {}))
+        reaped(plugin, thread_id)
 
         with client.websocket_connect("/ws") as ws:
-            replay = open_session(ws, sessionId="s2", threadId=thread_id)
+            replay = open_session(ws, threadId=thread_id)
             greeting = read_until(ws, "step.upsert")
             wait_until(lambda: len(hooks) == 2)
             send_and_read_reply(ws, "second words")
@@ -422,7 +456,9 @@ def test_a_resume_replays_the_thread_then_runs_the_hooks_in_order(
 
     assert replay[0]["t"] == "session.ready"
     assert replay[0]["threadId"] == thread_id
-    assert replay[0]["sessionId"] == "s2"
+    # A new session on the same conversation: the handle is minted per
+    # session and the thread is what carries across.
+    assert replay[0]["sessionId"] != handshake[0]["sessionId"]
     assert first(replay, "thread.first_interaction")["interaction"] == "resume"
     # The stored thread arrives as one snapshot inside the handshake, before
     # the hooks have said a word -- a resume replaces the client's feed.
@@ -599,28 +635,33 @@ def test_a_handoff_before_any_interaction_opens_an_orphan_thread(
     with create_test_client(plugins=[plugin]) as client:
         login(client, auth, ALICE)
         with client.websocket_connect("/ws") as ws:
-            open_session(ws, chatProfile="A")
+            handshake = open_session(ws, chatProfile="A")
             handoff = read_until(ws, "session.handoff")[-1]
-        next_id = handoff["nextSessionId"]
+            reap_soon(plugin)
+        next_id = handoff["nextThreadId"]
         assert next_id
-        assert next_id != "s1"
+        assert next_id != handshake[0]["threadId"]
         assert handoff["hasTransitMessage"] is True
         assert handoff["chatProfile"] == "B"
 
         with client.websocket_connect("/ws") as ws:
-            successor = open_session(ws, sessionId=next_id, chatProfile="B")
+            successor = open_session(ws, threadId=next_id, chatProfile="B")
             wait_until(lambda: len(starts) == 2)
         new_thread = successor[0]["threadId"]
+        assert new_thread == next_id
         detail = wait_for_thread(db_url, new_thread, lambda d: d.name is not None)
+        # The record is consumed, so the next arrival into that thread is an
+        # ordinary one -- and it has to be a *new* session, or the live one
+        # would simply be handed back and no start hook would run at all.
+        reaped(plugin, new_thread)
 
-        # The record is consumed: a third hello on the same id gets nothing.
         with client.websocket_connect("/ws") as ws:
-            third = open_session(ws, sessionId=next_id, chatProfile="B")
+            third = open_session(ws, threadId=next_id, chatProfile="B")
             wait_until(lambda: len(starts) == 3)
 
     assert starts[0][1:] == ("A", None)
-    assert starts[1] == (next_id, "B", {"k": 1})
-    assert starts[2] == (next_id, "B", None)
+    assert starts[1][1:] == ("B", {"k": 1})
+    assert starts[2][1:] == ("B", None)
     assert "thread.first_interaction" not in tags(third)
     assert "thread.parent" not in tags(successor)
 
@@ -649,18 +690,18 @@ def test_a_handoff_after_an_interaction_links_the_successor_to_its_parent(
             ws.send_text(message("switch me"))
             handoff = read_until(ws, "session.handoff")[-1]
         parent = handshake[0]["threadId"]
-        next_id = handoff["nextSessionId"]
+        next_id = handoff["nextThreadId"]
         wait_for_thread(db_url, parent, lambda d: d.name == "switch me")
 
         with client.websocket_connect("/ws") as ws:
-            successor = open_session(ws, sessionId=next_id, chatProfile="B")
+            successor = open_session(ws, threadId=next_id, chatProfile="B")
             wait_until(lambda: len(starts) == 2)
             send_and_read_reply(ws, "in B")
         new_thread = successor[0]["threadId"]
         detail = wait_for_thread(db_url, new_thread, lambda d: len(d.steps) == 2)
 
-    assert new_thread != parent
-    assert starts[1] == (next_id, "B", {"k": 1})
+    assert new_thread == next_id != parent
+    assert starts[1][1:] == ("B", {"k": 1})
     assert first(successor, "thread.parent")["parentThreadId"] == parent
     assert first(successor, "thread.first_interaction")["interaction"] == "B"
     assert detail.parent_thread_id == parent
@@ -788,7 +829,8 @@ def test_without_storage_the_row_has_no_url_and_the_spool_serves_the_key(
             detail = wait_for_thread(db_url, thread_id, lambda d: len(d.elements) == 1)
             element = first(frames, "element.upsert")["element"]
             served = client.get(
-                f"/project/file/{element['chainlitKey']}", params={"session_id": "s1"}
+                f"/project/file/{element['chainlitKey']}",
+                params={"session_id": handshake[0]["sessionId"]},
             )
 
     row = detail.elements[0]
@@ -857,7 +899,7 @@ def test_a_disconnect_persists_state_and_a_reconnect_keeps_the_writer(
             handshake = open_session(ws)
             send_and_read_reply(ws, "one")
         thread_id = handshake[0]["threadId"]
-        entry = plugin.runner.registry.get("s1")
+        entry = plugin.runner.registry.entry_of_thread(thread_id)
         assert entry is not None
         writer = entry.session.writer  # type: ignore[attr-defined]
         assert writer is not None
@@ -867,10 +909,10 @@ def test_a_disconnect_persists_state_and_a_reconnect_keeps_the_writer(
         )
 
         with client.websocket_connect("/ws") as ws:
-            frames = open_session(ws, pageLoad=False)
+            frames = open_session(ws, pageLoad=False, threadId=thread_id)
             assert first(frames, "session.ready")["restored"] is True
             assert frames[0]["threadId"] == thread_id
-            entry = plugin.runner.registry.get("s1")
+            entry = plugin.runner.registry.entry_of_thread(thread_id)
             assert entry is not None
             assert entry.session.writer is writer  # type: ignore[attr-defined]
             send_and_read_reply(ws, "two")
@@ -918,11 +960,13 @@ def test_an_offer_after_a_resume_leaves_the_composer_open(
         with client.websocket_connect("/ws") as ws:
             handshake = open_session(ws)
             send_and_read_reply(ws, "first words")
+            reap_soon(plugin)
         thread_id = handshake[0]["threadId"]
         wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+        reaped(plugin, thread_id)
 
         with client.websocket_connect("/ws") as ws:
-            open_session(ws, sessionId="s2", threadId=thread_id)
+            open_session(ws, threadId=thread_id)
             read_until(ws, "ask.start")
             after: List[dict] = []
             for _ in range(6):
@@ -968,16 +1012,18 @@ def test_a_reconnect_of_a_resumed_session_does_not_start_the_chat_again(
         with client.websocket_connect("/ws") as ws:
             handshake = open_session(ws)
             send_and_read_reply(ws, "first words")
+            reap_soon(plugin)
         thread_id = handshake[0]["threadId"]
         wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+        reaped(plugin, thread_id)
         assert started == 1
 
         with client.websocket_connect("/ws") as ws:
-            frames = open_session(ws, sessionId="s2", threadId=thread_id)
+            frames = open_session(ws, threadId=thread_id)
             assert not first(frames, "session.ready").get("restored")
             assert "thread.resume" in [f["t"] for f in frames]
         with client.websocket_connect("/ws") as ws:
-            frames = open_session(ws, sessionId="s2", pageLoad=False)
+            frames = open_session(ws, pageLoad=False, threadId=thread_id)
             assert first(frames, "session.ready")["restored"] is True
             time.sleep(0.3)
 
@@ -1019,7 +1065,7 @@ def test_opening_an_unknown_thread_starts_a_fresh_chat_silently(
     with create_test_client(plugins=[plugin]) as client:
         login(client, auth, ALICE)
         with client.websocket_connect("/ws") as ws:
-            frames = open_session(ws, sessionId="s-unknown", threadId=requested)
+            frames = open_session(ws, threadId=requested)
             ready = frames[0]
             assert ready["t"] == "session.ready"
             assert ready["threadId"] != requested, ready

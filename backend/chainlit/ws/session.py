@@ -101,6 +101,25 @@ class CallbackRunner(Protocol):
         """The user asked for the running task to stop."""
         ...
 
+    async def release(self, session: "Session") -> None:
+        """Give the conversation up: out of the registry, ended, torn down.
+
+        The awaitable form, for a caller that has to know the teardown is
+        finished before it does the next thing -- deleting the thread's rows
+        is the one that does. The transport calls it rather than doing it
+        itself because the registry belongs to the application half.
+        """
+        ...
+
+    def release_soon(self, session: "Session") -> None:
+        """The same, scheduled: free the thread now, tear down off to one side.
+
+        What the socket's reader calls. It runs inside the connection's task
+        group, where a sibling's failure cancels whatever is awaiting -- and
+        a teardown cancelled halfway is rows lost and files left behind.
+        """
+        ...
+
     async def record_user_message(
         self, session: "Session", message: StepPayload
     ) -> Any:
@@ -247,7 +266,7 @@ class Session:
         #: The connection that speaks for this session, and the counter it
         #: numbers itself from. One owner, named: everything a handler does
         #: on its way out -- marking the session disconnected, stopping the
-        #: writer, running ``on_chat_end`` -- is conditional on still being
+        #: writer, scheduling the reaper -- is conditional on still being
         #: this one, and the question used to be answered by comparing
         #: socket objects through the queue, which the takeover had already
         #: cleared. A live session was reaped on that answer.
@@ -256,11 +275,16 @@ class Session:
 
         self.first_interaction: Optional[str] = None
         self.parent_thread_id: Optional[str] = None
+        #: The *thread* a profile switch minted for this session's successor,
+        #: and the key its transit record is parked under. Held so a second
+        #: switch can revoke the first one's record.
         self.pending_transit_id: Optional[str] = None
 
         #: The writer batching this session's rows, when there is a database.
-        #: Owned here rather than looked up by thread: two tabs on one
-        #: thread are two writers, and FIFO is a per-writer promise.
+        #: Owned here rather than looked up by thread: a thread holds one
+        #: session at a time, but a successor can start on it while its
+        #: predecessor's writer is still draining, and FIFO is a per-writer
+        #: promise rather than a per-thread one.
         self.writer: Optional[Any] = None
 
         #: Whether this session's chat has begun. Written and read in one
@@ -353,6 +377,23 @@ class Session:
         if self.runner is None:
             raise LookupError(action.get("name", ""))
         return await self.runner.call_action(self, action)
+
+    async def release(self) -> None:
+        """Give this conversation up: out of the registry, ended, torn down.
+
+        Delegated, because the registry belongs to the application half and
+        a session has no business knowing which one is holding it. With no
+        application there is no registry either, and nothing to do.
+        """
+        if self.runner is None:
+            return
+        await self.runner.release(self)
+
+    def release_soon(self) -> None:
+        """Release without waiting for it. See ``CallbackRunner.release_soon``."""
+        if self.runner is None:
+            return
+        self.runner.release_soon(self)
 
     # ----------------------------------------------------------------- files
 

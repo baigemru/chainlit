@@ -6,9 +6,16 @@ that way is stripped from the resumed conversation, deleted from storage
 together with what hangs off it, and taken off the client's screen.
 
 Deleting anything on a reconnect is the dangerous end of the protocol, so
-every row here is as much about what must *not* be deleted: a thread whose
-question is still being waited on, and a reconnect of a session that already
-did the deletion once.
+every row here is as much about what must *not* be hidden: a message the
+conversation produced *after* the resume, which a later reconnect must not
+take away.
+
+Every row here is a cold open. A conversation somebody is live in is never
+resumed -- it is handed over -- so the resume path only ever sees a thread
+nobody is holding, and the protection queries it consults can only answer
+"nobody". What protects a live conversation's flagged messages from the
+history list is the same filter on the HTTP read path, pinned in
+``tests/controllers/test_project.py``.
 """
 
 from typing import Any, Dict, Mapping, Tuple
@@ -44,7 +51,14 @@ def _thread(
 
 
 def _resuming(thread: Dict[str, Any], **kwargs: Any) -> Given:
+    """A conversation nobody is in, opened from the history.
+
+    ``server_holds_session=False`` is what makes it a resume at all: a
+    thread somebody is live in is handed over, not read back from storage,
+    so the cold path is reachable only when the thread is free.
+    """
     return Given(
+        server_holds_session=False,
         resuming_thread=THREAD,
         hooks=("chat_resume",),
         stored_thread=thread,

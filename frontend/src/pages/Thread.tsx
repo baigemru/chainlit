@@ -10,7 +10,6 @@ import {
   useConfig
 } from '@chainlit/react-client';
 
-import AutoResumeThread from '@/components/AutoResumeThread';
 import { Loader } from '@/components/Loader';
 import { ReadOnlyThread } from '@/components/ReadOnlyThread';
 import Chat from '@/components/chat';
@@ -47,9 +46,6 @@ export default function ThreadPage() {
     <Page>
       <>
         {isSharedRoute ? <ReadOnlyThread id={id!} /> : null}
-        {config?.threadResumable && !isCurrentThread && !isSharedRoute ? (
-          <AutoResumeThread id={id!} />
-        ) : null}
         {config?.threadResumable && !isSharedRoute ? (
           keepChatMounted ? (
             <Chat />

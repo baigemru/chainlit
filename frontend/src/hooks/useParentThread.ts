@@ -14,8 +14,7 @@ import {
  * The stored entry is scoped to the session or thread it was learned for, so
  * anything that starts another chat (clear() resets both scopes) hides the
  * parent without explicit cleanup — a stale parent never leaks into an
- * unrelated chat. Router-free on purpose: the composer renders inside the
- * copilot widget too.
+ * unrelated chat.
  */
 export const useParentThreadId = (): string | undefined => {
   const entry = useRecoilValue(parentThreadEntryState);

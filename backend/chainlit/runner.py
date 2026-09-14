@@ -44,7 +44,7 @@ from chainlit.protocol.payloads import (
     Step,
 )
 from chainlit.utils import utc_now
-from chainlit.ws.handshake import Arrival, sweep_superseded
+from chainlit.ws.handshake import Arrival
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 
@@ -58,6 +58,12 @@ __all__ = ["ApplicationRunner", "ThreadStoreAdapter"]
 # How long a session survives its socket. The old default; a reload takes
 # well under it and a closed tab is gone for good after it.
 DEFAULT_SESSION_TIMEOUT = 300.0
+
+NORMAL_CLOSURE = 1000
+"""RFC 6455's ordinary goodbye, for a socket closed because its session was
+released rather than because anything went wrong. Not in ``CloseCode``, which
+is the private-use 4000-4999 range by definition and carries only the codes
+this protocol invented."""
 
 DEFAULT_INTERRUPTED_ASK_MESSAGE = (
     "The action was interrupted and has to be started again."
@@ -158,11 +164,21 @@ class ApplicationRunner:
 
     # ---------------------------------------------------------- construction
 
-    def make_session(self, session_id: str, hello: "Hello", user: Any) -> Session:
-        """A session for an id the registry has decided is new."""
-        thread_id = hello.thread_id or str(uuid.uuid4())
+    def make_session(
+        self, thread_id: Optional[str], hello: "Hello", user: Any
+    ) -> Session:
+        """A session for a conversation the registry has decided is free.
+
+        The handle is minted here and nowhere else: the client offers a
+        thread, never a session id, so nothing it says can name an object
+        the server is holding. With no thread to go into -- a first visit,
+        or a thread that turned out to be somebody else's -- the
+        conversation is minted too, and ``session.ready`` is what tells the
+        browser which address it ended up at.
+        """
+        thread_id = thread_id or str(uuid.uuid4())
         session = Session(
-            id=session_id,
+            id=str(uuid.uuid4()),
             runner=self,
             user=user,
             thread_id=thread_id,
@@ -210,18 +226,18 @@ class ApplicationRunner:
         conversation that was already restored.
         """
         session = arrival.session
-        assert session is not None
         if arrival.outcome.value == "kept":
             return
 
-        for entry in arrival.superseded:
-            await self.teardown(entry.session)  # type: ignore[arg-type]
-        for entry in sweep_superseded(self.registry, session.thread_id, session):
-            await self.teardown(entry.session)  # type: ignore[arg-type]
-
-        if await self._resume(session, arrival):
-            return
-        await self._claim_transit(session)
+        # The handover is read first, and its presence is the answer to
+        # "what is this connection?". A record parked under this thread was
+        # minted by the switch the user just made, so the thread is theirs
+        # by construction and there is nothing in the database to resume:
+        # going to storage would find no rows and disown the conversation
+        # the switch created a second ago.
+        if not await self._claim_transit(session):
+            if await self._resume(session, arrival):
+                return
         if not session.chat_started and self.code.on_chat_start:
             # The flag is read as well as written: a session can reach this
             # branch already started -- one minted for a handover carries
@@ -230,15 +246,21 @@ class ApplicationRunner:
             session.chat_started = True
             arrival.start_chat = True
 
-    async def _claim_transit(self, session: Session) -> None:
-        if self.transit is None or session.first_interaction:
-            return
-        record = await self.transit.claim(session.id, _identifier(session.user))
+    async def _claim_transit(self, session: Session) -> bool:
+        """Take the record a profile switch parked under this thread.
+
+        Returns whether there was one, which is how ``on_arrival`` tells a
+        handover from a resume: the thread was minted by the switch, so it
+        exists nowhere but here.
+        """
+        if self.transit is None or session.first_interaction or not session.thread_id:
+            return False
+        record = await self.transit.claim(session.thread_id, _identifier(session.user))
         if record is None:
-            return
+            return False
         session.parent_thread_id = record.parent
         if record.value is None:
-            return
+            return True
         session.state["transit_message"] = record.value
         name = record.value if isinstance(record.value, str) and record.value else None
         # Silently: this runs before ``session.ready``, and the replay
@@ -246,9 +268,15 @@ class ApplicationRunner:
         await persist.open_thread(
             session, name or session.chat_profile or "transit", announce=False
         )
+        return True
 
     async def _resume(self, session: Session, arrival: Arrival) -> bool:
         """Load the thread this session was opened on, if it is the user's.
+
+        Only ever reached for a conversation nobody is live in: one that is
+        held is ``kept`` in the handshake and never gets here. So this is
+        the cold path -- the reaper came and went, or the thread was opened
+        from the history -- and every miss is final.
 
         Ownership is checked before anything else and regardless of which
         hooks the application registered: a session that keeps a thread id
@@ -257,10 +285,9 @@ class ApplicationRunner:
         fresh id and a fresh writer -- not merely left unreplayed.
 
         Nothing here refuses out loud. A thread that is not in the database
-        is either the user's own conversation before its first row or a name
-        this connection has no business knowing about, and neither is worth
-        an error frame: one keeps its id, the other is disowned, and
-        ``session.ready`` names whichever it ended up with.
+        is a stale address or a name this connection has no business
+        knowing about, and neither is worth an error frame: the session is
+        disowned and ``session.ready`` names the thread it ended up with.
         """
         if self.persistence is None or session.first_interaction:
             return False
@@ -274,22 +301,13 @@ class ApplicationRunner:
         async with self.persistence.uow() as unit:
             detail = await unit.threads.get_detail(thread_id)
         if detail is None:
-            if any(entry.thread_id == thread_id for entry in arrival.superseded):
-                # Not a stranger's id: this very session id was holding that
-                # conversation a moment ago, and it has no rows only because
-                # nobody had spoken in it yet -- the writer holds them until
-                # the first interaction. The user pressed F5 on a greeting.
-                # ``arrival.superseded`` is the only record of it left, since
-                # ``arrive`` takes the entry out of the registry before this
-                # runs, so a lookup there would find nothing and hand the
-                # user a new address for the chat they are looking at. The
-                # session keeps the thread it was minted with and the row
-                # appears on the first interaction, as it always would.
-                return False
-            # A conversation that is not there and not this connection's to
-            # miss. Nothing is said about it: the session is given a thread
-            # of its own and ``session.ready`` names it, which is how the
-            # client learns the address it asked for is not the one it got.
+            # A conversation that is not there, and not one this connection
+            # could be in the middle of: a live thread of this user's is
+            # ``kept`` and never reaches here, so a miss is either a stale
+            # address or a stranger's. Nothing is said about it: the session
+            # is given a thread of its own and ``session.ready`` names it,
+            # which is how the client learns the address it asked for is
+            # not the one it got.
             # The error frame that used to go out instead told the client
             # something it could not act on and left it on a loader for a
             # thread that would never become current.
@@ -311,10 +329,9 @@ class ApplicationRunner:
             await self._disown_thread(session)
             return False
 
-        if self.transit is not None:
-            # A record parked for this id would outlive a resume, which
-            # never reads it, and leak into an unrelated chat later.
-            await self.transit.claim(session.id, identifier)
+        # No record can be parked under this thread: transit keys are
+        # threads now, ``on_arrival`` claims before it resumes, and a
+        # claim that found something never reaches this method at all.
 
         # Filtered before anything reads it: the hooks and the client both
         # get a thread already free of the steps a resume takes away.
@@ -400,14 +417,141 @@ class ApplicationRunner:
     # ------------------------------------------------------------- lifecycle
 
     async def on_disconnect(self, session: Session) -> None:
-        """The socket is gone. Persist what the thread remembers, then wait."""
+        """The socket is gone. Persist what the thread remembers, then wait.
+
+        Deliberately **not** the end of the chat. A socket drops on every
+        reload, every tunnel blip and every profile handoff, and the session
+        survives all three -- so ``on_chat_end`` here fired on conversations
+        that were about to be handed straight back, which is what an F5 is.
+        The hook belongs to ``release``, the one place whose whole meaning is
+        that the conversation is over.
+
+        The metadata patch stays, as insurance rather than as the record: it
+        is one queued row and it costs a session nothing, and a process that
+        dies between here and the reaper has at least written down what the
+        application last put in ``user_session``.
+        """
+        self._bind(session)
+        self._patch_thread_state(session)
+
+        if session.reaper is not None and not session.reaper.done():
+            session.reaper.cancel()
+        if self.registry.get(session.id) is None:
+            # Already released -- "New chat", or the thread deleted from
+            # under it. The socket unwinding is the last thing that happens
+            # to this session; there is nothing left to wait for, and a
+            # reaper scheduled here would tear it down a second time five
+            # minutes after it stopped existing.
+            return
+        session.reaper = asyncio.create_task(self._reap(session))
+
+    async def _reap(self, session: Session) -> None:
+        await asyncio.sleep(self.session_timeout)
+        if session.connected:
+            return
+        await self.release(session)
+
+    def relinquish(self, session: Session) -> bool:
+        """Take the conversation out of the registry. Synchronous, and once.
+
+        Returns whether *this* call was the one that did it, which is the
+        whole of the end-of-chat guard: the reaper, ``session.clear`` and a
+        thread deleted underneath a live session can all arrive at a release
+        of the same conversation, and ``on_chat_end`` is a thing that
+        happens to a chat rather than to a call. No flag was invented for
+        it -- the registry entry already is the fact "this conversation is
+        still going", and a flag would be a second copy of it to keep
+        honest.
+
+        Synchronous on purpose: the thread has to be free in the same turn.
+        Pressing New chat and reopening the conversation from the history a
+        moment later must find it in the database, not find the emptied live
+        session still sitting on it.
+        """
+        entry = self.registry.get(session.id)
+        if entry is None or entry.session is not session:
+            return False
+        return self.registry.discard(entry)
+
+    async def release(self, session: Session) -> None:
+        """Give up the conversation: out of the registry, ended, torn down.
+
+        Three callers and the same fact behind all of them -- as far as the
+        user is concerned this conversation is over. The reaper says it
+        after the grace period; ``session.clear`` ("New chat", and the
+        profile switch, which the client sends one for) says it outright;
+        deleting the thread says it on the session's behalf.
+
+        So this is where the chat *ends*, in the order the three steps have
+        to happen in. ``on_chat_end`` first, because the application may
+        still want to write something and its writer is alive until the
+        teardown closes it. Then the metadata patch, which is the only
+        write of end-of-session ``user_session`` state there is: the patch
+        in ``open_thread`` fires once, at the first interaction, so
+        everything the application stored after that lives nowhere but in
+        memory until this line. It used to sit in ``on_disconnect`` only,
+        where the reaper's path reached it -- the socket drops with the
+        writer still alive -- but the two *deliberate* ends did not: there
+        the teardown had already set ``writer`` to ``None`` and the submit
+        was a silent no-op. So New chat and every profile switch threw the
+        conversation's state away, which is the pair that happens daily.
+        """
+        await self._finish_release(session, ended=self.relinquish(session))
+
+    def release_soon(self, session: Session) -> None:
+        """Release as a task the runner owns, not inside a socket's group.
+
+        ``session.clear`` is read by ``_read_loop``, which lives in
+        ``_serve``'s ``anyio`` task group alongside the heartbeat. Awaiting
+        the release there put the writer's drain -- up to ``DRAIN_TIMEOUT``
+        of real database work -- inside a scope any sibling can cancel: one
+        unanswered heartbeat during it and ``aclose`` dies mid-flush, taking
+        the rows with it and skipping ``discard_files`` and the abort. The
+        reaper has never had that problem because it is a plain
+        ``asyncio`` task; this makes the other caller one too.
+
+        The registry entry goes *before* the task is scheduled, so the
+        thread is free in the same turn the frame was read -- and so the
+        handler unwinding behind this schedules no reaper for a session that
+        is already being torn down.
+        """
+        ended = self.relinquish(session)
+        task = asyncio.create_task(self._finish_release(session, ended=ended))
+        # Held, or the loop may collect it before it runs.
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def _finish_release(self, session: Session, *, ended: bool) -> None:
+        # One guard around both halves: on the ``release_soon`` path this is
+        # a detached task, so anything that escaped would surface nowhere
+        # but a garbage-collector warning -- and a failure in the end-of-chat
+        # step must not cost the session its teardown.
+        try:
+            if ended:
+                await self._end_chat(session)
+        except Exception:
+            logger.exception("Ending the chat of session %s failed", session.id)
+        try:
+            await self.teardown(session)
+        except Exception:
+            logger.exception("Releasing session %s failed", session.id)
+
+    async def _end_chat(self, session: Session) -> None:
+        """The chat is over: tell the application, then write down its state."""
         self._bind(session)
         if self.code.on_chat_end:
             try:
                 await self.code.on_chat_end()
             except Exception:
                 logger.exception("on_chat_end failed in session %s", session.id)
+        self._patch_thread_state(session)
 
+    def _patch_thread_state(self, session: Session) -> None:
+        """Queue what the thread remembers of ``user_session``, if anything.
+
+        A session with no first interaction has no row to patch -- the
+        writer is still holding everything it was given.
+        """
         if session.first_interaction and session.thread_id and session.writer:
             session.writer.submit(
                 PatchThread(
@@ -415,19 +559,6 @@ class ApplicationRunner:
                     ThreadPatch(metadata=persist.thread_state(session)),
                 )
             )
-
-        if session.reaper is not None and not session.reaper.done():
-            session.reaper.cancel()
-        session.reaper = asyncio.create_task(self._reap(session))
-
-    async def _reap(self, session: Session) -> None:
-        await asyncio.sleep(self.session_timeout)
-        if session.connected:
-            return
-        entry = self.registry.get(session.id)
-        if entry is not None and entry.session is session:
-            self.registry.discard(entry)
-        await self.teardown(session)
 
     async def teardown(self, session: Session) -> None:
         """Stop the session's work and release what it holds. Idempotent."""
@@ -449,13 +580,19 @@ class ApplicationRunner:
                     "Writer for thread %s did not close cleanly", session.thread_id
                 )
         session.discard_files()
-        session.outbound.abort()
+        # Not ``INTERNAL``: nothing failed. The session was given up on
+        # purpose -- New chat, a profile switch, a thread deleted -- and the
+        # only honest thing to say to a socket that is somehow still there
+        # is the ordinary goodbye. The client treats a non-terminal code as
+        # "come back", which lands it on a conversation nobody is in and so
+        # on a fresh chat: exactly where the release left it.
+        session.outbound.abort(NORMAL_CLOSURE, "released")
 
     def _record_interrupted_ask(self, session: Session, ask: PendingAsk) -> None:
         """Leave a line in the thread where the question used to be.
 
         This session is being taken down with a form still on screen: the
-        user reloaded into a session of their own, or walked away and the
+        user pressed "New chat" on the question, or walked away and the
         reaper came. The coroutine that asked is gone either way, and the
         question itself is usually flagged ``resume="delete"`` -- so without
         this row the resume shows the turn simply stopping, which is the

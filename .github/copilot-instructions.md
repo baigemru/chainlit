@@ -116,8 +116,7 @@ uv run scripts/format.py --check
 ├── backend/                  # Python backend with uv
 ├── frontend/                 # React frontend app
 ├── libs/
-│   ├── react-client/         # React client library
-│   └── copilot/             # Copilot functionality
+│   └── react-client/         # React client library
 ├── cypress/                  # E2E tests
 └── .github/
     ├── workflows/            # CI/CD pipelines

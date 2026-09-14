@@ -1,9 +1,4 @@
-import {
-  loadCopilotScript,
-  mountCopilotWidget,
-  openCopilot,
-  submitMessage
-} from '../../support/testUtils';
+import { submitMessage } from '../../support/testUtils';
 
 function login() {
   return cy.request({
@@ -13,13 +8,9 @@ function login() {
   });
 }
 
-function getToken() {
-  return cy.request({
-    method: 'GET',
-    url: '/auth/token',
-    followRedirect: false
-  });
-}
+// `/auth/token` had one caller: the embeddable widget, which authenticated
+// with a bearer token because it ran on somebody else's page. The widget is
+// gone and the app is cookie-only, so nothing here mints a token any more.
 
 function shouldShowGreetingMessage() {
   it('should show greeting message', () => {
@@ -96,42 +87,5 @@ describe('Custom Auth', () => {
 
       shouldBeLoggedIn();
     });
-  });
-});
-
-describe('Copilot Token', { includeShadowDom: true }, () => {
-  beforeEach(() => {
-    cy.location('pathname').should('eq', '/login');
-
-    loadCopilotScript();
-  });
-
-  describe('when unauthenticated', () => {
-    it('should throw error about missing authentication token', () => {
-      mountCopilotWidget();
-      openCopilot();
-      cy.get('#chainlit-copilot-chat').should(
-        'contain',
-        'No authentication token provided.'
-      );
-    });
-  });
-
-  describe('authenticating via custom endpoint', () => {
-    beforeEach(() => {
-      getToken().then((response) => {
-        expect(response.status).to.equal(200);
-
-        const accessToken = response.body;
-        expect(accessToken).to.not.be.null;
-
-        mountCopilotWidget({ accessToken });
-        openCopilot();
-      });
-    });
-
-    shouldShowGreetingMessage();
-
-    shouldSendMessageAndRecieveAnswer();
   });
 });

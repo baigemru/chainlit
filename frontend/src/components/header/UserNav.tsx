@@ -145,7 +145,10 @@ export default function UserNav({ collapsed }: Props) {
             className="relative h-8 w-8 rounded-full"
           >
             <Avatar className="h-8 w-8">
-              <AvatarImage src={user?.metadata.image} alt="user image" />
+              {/* `GET /user` omits an empty `metadata` (msgspec
+                  `omit_defaults`), so a user with nothing in it arrives
+                  without the key at all. */}
+              <AvatarImage src={user?.metadata?.image} alt="user image" />
               <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
                 {capitalize(displayName[0])}
               </AvatarFallback>

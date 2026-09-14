@@ -40,11 +40,9 @@ class CloseCode(IntEnum):
     UNAUTHENTICATED = 4401
     """No valid credentials on a server that requires login."""
 
-    SESSION_FORBIDDEN = 4403
-    """The session id belongs to another user."""
-
-    THREAD_FORBIDDEN = 4404
-    """The thread id is not readable by this user."""
+    # 4403 and 4404 (session / thread forbidden) are retired: a thread the
+    # user may not have is answered by a fresh thread of their own in
+    # ``session.ready``, never by a refusal that confirms it exists.
 
     HEARTBEAT_TIMEOUT = 4408
     """No ``hb.ack`` within the deadline."""

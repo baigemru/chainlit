@@ -2,8 +2,8 @@
 
 ``chainlit.transit`` is a module-global dict with a hand-written sweep. What
 it actually is, is a TTL'd one-shot key-value handoff: a profile switch tears
-the session down, mints the id the successor will connect with, and parks a
-record for that successor's start hook to claim exactly once. Litestar has a
+the session down, mints the *thread* the successor will open, and parks a
+record for that successor's arrival to claim exactly once. Litestar has a
 store abstraction for precisely that, and putting the record there is what
 makes a multi-process deployment possible later — swap the ``MemoryStore``
 for a ``RedisStore`` and the handover survives the switch landing on another
@@ -67,8 +67,10 @@ class TransitRecord(msgspec.Struct):
     """What one session hands to its successor.
 
     ``value`` is the transit message and may legitimately be ``None`` — a
-    record can carry only a ``parent``. ``owner`` is the session that parked
-    it, and only that owner may claim it.
+    record can carry only a ``parent``. ``owner`` is the user who parked it,
+    and only that user may claim it: the key is a thread id, and a thread id
+    is guessable in exactly the way a uuid4 is not, but the check costs
+    nothing and the record can carry a message.
     """
 
     value: Any = None
@@ -94,54 +96,68 @@ class TransitStore:
         self._lock = asyncio.Lock()
 
     @staticmethod
-    def _key(session_id: str) -> str:
-        return f"{KEY_PREFIX}{session_id}"
+    def _key(thread_id: str) -> str:
+        return f"{KEY_PREFIX}{thread_id}"
 
     async def park(
         self,
-        session_id: str,
+        thread_id: str,
         value: Any,
         owner: Optional[str],
         parent: Optional[str] = None,
     ) -> None:
-        """Park a record for ``session_id``.
+        """Park a record for ``thread_id``.
 
         With nothing to hand over — no value and no parent — whatever an
         earlier call parked is revoked instead. That is the contract the
         emitter is written against.
         """
         if value is None and parent is None:
-            await self.discard(session_id)
+            await self.discard(thread_id)
             return
         record = TransitRecord(value=value, owner=owner, parent=parent)
         await self.store.set(
-            self._key(session_id), msgspec.json.encode(record), expires_in=self.ttl
+            self._key(thread_id), msgspec.json.encode(record), expires_in=self.ttl
         )
 
     async def claim(
-        self, session_id: str, owner: Optional[str]
+        self, thread_id: str, owner: Optional[str]
     ) -> Optional[TransitRecord]:
-        """Take the record for ``session_id``, or ``None``.
+        """Take the record for ``thread_id``, or ``None``.
 
         ``None`` covers all four ways there is nothing to hand over: never
-        parked, already claimed, expired, or parked by a different owner. A
-        foreign record is dropped rather than left behind — the id was minted
-        for this successor and nobody else will ever come for it.
+        parked, already claimed, expired, or parked by a different owner.
+        Only a claim that *succeeds* removes the record: the key is a thread
+        id, which now rides in the address bar, so anyone who reads one over
+        a shoulder could otherwise destroy a handover simply by saying hello
+        for it — the owner would arrive a moment later and be given a blank
+        chat where their switch should have been. A foreign claim therefore
+        leaves the record exactly where it was, and the TTL is what bounds
+        it. (It used to delete first and check after, on the reasoning that
+        nobody but the successor would ever come for the thread. The id was
+        a private uuid4 then; it is a URL now.)
+
+        Claimed on every arrival into a conversation nobody is live in, so
+        ``None`` is the ordinary answer: a hit means the thread was minted
+        by a profile switch moments ago and there is nothing to resume.
         """
-        key = self._key(session_id)
+        key = self._key(thread_id)
         async with self._lock:
             raw = await self.store.get(key)
             if raw is None:
                 return None
+            record = msgspec.json.decode(raw, type=TransitRecord)
+            if record.owner != owner:
+                return None
+            # Inside the lock, and only now: the delete is what makes the
+            # claim one-shot, and two concurrent claims by the owner must
+            # not both come back with the record.
             await self.store.delete(key)
-        record = msgspec.json.decode(raw, type=TransitRecord)
-        if record.owner != owner:
-            return None
         return record
 
-    async def discard(self, session_id: str) -> None:
-        """Drop the record parked for ``session_id``, if any."""
-        await self.store.delete(self._key(session_id))
+    async def discard(self, thread_id: str) -> None:
+        """Drop the record parked for ``thread_id``, if any."""
+        await self.store.delete(self._key(thread_id))
 
     async def sweep(self) -> None:
         """Reap expired records.

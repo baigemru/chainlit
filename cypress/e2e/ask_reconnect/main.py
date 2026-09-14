@@ -1,6 +1,16 @@
 import chainlit as cl
 
 
+@cl.on_chat_resume
+async def resume(thread):
+    # The address bar is the session's identity: only an app that can
+    # resume is given a `/thread/<id>` address, and only such an address
+    # lets a reload find the live session (and its open question) again.
+    # This app never reads the thread; declaring the hook is what makes it
+    # resumable. Without it every F5 below would be a fresh chat.
+    return None
+
+
 @cl.on_chat_start
 async def main():
     res = await cl.AskUserMessage(content="What is your name?", timeout=120).send()

@@ -60,13 +60,6 @@ def copy_frontend(project_root: pathlib.Path):
     copy_directory(frontend_dist, backend_frontend_dir, "frontend assets")
 
 
-def copy_copilot(project_root: pathlib.Path):
-    """Copy the copilot dist directory to the backend for inclusion in the package."""
-    backend_copilot_dir = project_root / "backend" / "chainlit" / "copilot" / "dist"
-    copilot_dist = project_root / "libs" / "copilot" / "dist"
-    copy_directory(copilot_dist, backend_copilot_dir, "copilot assets")
-
-
 def build():
     """Main build function with proper error handling"""
 
@@ -92,7 +85,6 @@ def build():
         pnpm_install(project_root, pnpm)
         pnpm_buildui(project_root, pnpm)
         copy_frontend(project_root)
-        copy_copilot(project_root)
 
     except KeyboardInterrupt:
         print("\nBuild interrupted by user")

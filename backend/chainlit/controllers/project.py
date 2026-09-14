@@ -283,10 +283,15 @@ def hide_resume_deleted(
 
     The one implementation of the rule, applied by every reader: the two
     thread routes here and the runner's resume of a reopened socket. It is
-    filtering only — nothing is deleted here. The thread routes also serve
-    the F5 of a live session, and a thread with a running task is not dead
-    at all: its flagged messages are legitimately live, and a second tab
-    reading the thread must not make them disappear from the first.
+    filtering only — nothing is deleted here. The thread routes are the
+    ones that matter: a thread with a running task is not dead at all, its
+    flagged messages are legitimately live, and the history list reading it
+    must not make them disappear from the window they are on screen in.
+
+    On the resume path this can only ever pass the thread through — a
+    conversation somebody is live in is never resumed, it is handed over —
+    and the call is kept because the rule is about a *reader*, not about a
+    caller, and the next reader to appear must not have to rediscover it.
     """
     if not thread.steps:
         return thread
@@ -936,11 +941,24 @@ class ProjectController(Controller):
         self,
         request: AuthedRequest,
         data: JSONBody[ThreadDelete],
+        sessions: NamedDependency[SessionRegistry],
         threads: NamedDependency[ThreadService],
         storage: NamedDependency[Optional[BaseStorageClient]] = None,
     ) -> Ok:
-        """Delete a thread, its steps, elements, feedbacks and their blobs."""
+        """Delete a thread, its steps, elements, feedbacks and their blobs.
+
+        A live session on the thread is released first, in that order for
+        two reasons. Its teardown drains a writer that may still have rows
+        to file, and rows filed after the delete would be a conversation
+        that came back from the dead. And a session left running would keep
+        writing into an address nothing answers for: deleting the thread
+        used to leave it alive and reachable, its next message re-creating
+        the row the user had just thrown away.
+        """
         await assert_thread_author(threads, data.thread_id, request)
+        session = sessions.find_thread(str(data.thread_id))
+        if session is not None:
+            await session.release()
         await discard_blobs(storage, await threads.remove(str(data.thread_id)))
         return Ok()
 

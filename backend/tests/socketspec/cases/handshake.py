@@ -16,8 +16,13 @@ HELLO = Incoming("hello")
 
 
 def _fresh(**kwargs) -> Given:
-    """A session handed its id by a switch, before anyone has interacted."""
-    return Given(restored=True, has_first_interaction=False, **kwargs)
+    """The successor a profile switch minted a thread for.
+
+    Not ``restored``: nothing is live in that thread, the arrival creates a
+    session and ``session.ready`` says ``restored: false``. What makes it a
+    handover is the record parked under the thread, not a hand-back.
+    """
+    return Given(switch_successor=True, has_first_interaction=False, **kwargs)
 
 
 HANDSHAKE_SCENARIOS = (
@@ -117,12 +122,15 @@ HANDSHAKE_SCENARIOS = (
         ),
     ),
     Scenario(
-        name="a record parked by another user is dropped, not delivered",
+        name="a record parked by another user is neither delivered nor destroyed",
         why=(
-            "Session ids are handed out by the server, but a claim still "
-            "has to prove ownership: delivering another user's parked "
-            "message is a cross-account leak, and leaving it parked is one "
-            "that waits."
+            "A claim has to prove ownership: delivering another user's "
+            "parked message is a cross-account leak. It must also leave the "
+            "record alone. The key is a thread id and a thread id is in the "
+            "address bar, so a claim that deleted before it checked would "
+            "let anyone who reads a URL destroy the handover -- the owner "
+            "arrives a moment later and gets a blank chat. The TTL is what "
+            "bounds an unclaimed record, not a stranger's hello."
         ),
         given=_fresh(
             handover=Handover(
@@ -141,8 +149,8 @@ HANDSHAKE_SCENARIOS = (
                 "another user's thread was linked as the parent",
             ),
             assert_that(
-                not result.state["handover_parked"],
-                "a foreign record was left parked for someone else to claim",
+                result.state["handover_parked"],
+                "a stranger's hello destroyed the record its owner was coming for",
             ),
         ),
     ),
@@ -154,7 +162,7 @@ HANDSHAKE_SCENARIOS = (
             "callback again would replay its opening messages over a "
             "conversation already in progress."
         ),
-        given=Given(hooks=("chat_start",)),
+        given=Given(server_holds_session=False, hooks=("chat_start",)),
         when=(HELLO, HELLO),
         then=lambda result: assert_that(
             result.state["hook_runs"].get("chat_start") == 1,

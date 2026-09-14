@@ -81,12 +81,12 @@ TRANSCRIPT_SCENARIOS = (
         expect=(Expect("step.upsert", {"step.id": "m1"}),),
     ),
     Scenario(
-        name="a session the server did not keep replays nothing",
+        name="a conversation the server is not holding replays nothing",
         why=(
             "There is no conversation to re-send: this client is starting "
             "one. Replaying here would put someone else's history on screen."
         ),
-        given=_restored(transcript=(FIRST,), restored=False),
+        given=Given(server_holds_session=False, chat_started=True),
         when=(HELLO,),
         forbid=("step.upsert",),
     ),

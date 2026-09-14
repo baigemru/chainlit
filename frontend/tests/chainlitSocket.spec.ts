@@ -67,7 +67,7 @@ class FakeWebSocket {
   }
 }
 
-const HELLO: Hello = { t: 'hello', sessionId: 'session-1' };
+const HELLO: Hello = { t: 'hello', threadId: 'thread-1' };
 
 const READY: ServerMsg = { t: 'session.ready', sessionId: 'session-1' };
 

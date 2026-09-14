@@ -340,37 +340,41 @@ class Emitter:
         keep_transcript: bool = False,
         transit_message: Any = None,
     ) -> None:
-        """Ask the client to start a new session on another profile.
+        """Ask the client to open a new conversation on another profile.
 
-        Whatever ``transit_message`` carries is parked server-side under the
-        successor's id and read by the new session's ``on_chat_start`` via
-        ``cl.user_session.get("transit_message")``; it never travels through
-        the browser. ``None`` revokes what an earlier call parked. The
-        current thread's id rides along as the successor's parent once the
-        thread exists.
+        The successor's *thread* is minted here, and that is the whole of
+        the handover: the record is parked under it, the browser navigates
+        to it, and the server recognises what the arriving socket is by
+        finding the record -- not by anything the client says about itself.
+
+        Whatever ``transit_message`` carries is read by the new session's
+        ``on_chat_start`` via ``cl.user_session.get("transit_message")``; it
+        never travels through the browser. ``None`` revokes what an earlier
+        call parked. The current thread's id rides along as the successor's
+        parent once the thread exists.
         """
         session = self.session
         owner = _identifier(session.user)
         parent = session.thread_id if session.first_interaction else None
 
         if self.transit is not None and session.pending_transit_id:
-            # Each call mints a fresh id; the record parked under the
+            # Each call mints a fresh thread; the record parked under the
             # previous one would otherwise outlive the switch that replaced it.
             await self.transit.discard(session.pending_transit_id)
 
-        next_session_id: Optional[str] = None
+        next_thread_id: Optional[str] = None
         if transit_message is not None or parent is not None:
-            next_session_id = str(uuid.uuid4())
+            next_thread_id = str(uuid.uuid4())
             if self.transit is not None:
                 await self.transit.park(
-                    next_session_id, transit_message, owner, parent=parent
+                    next_thread_id, transit_message, owner, parent=parent
                 )
-        session.pending_transit_id = next_session_id
+        session.pending_transit_id = next_thread_id
 
         session.send(
             SessionHandoff(
                 chat_profile=name,
-                next_session_id=next_session_id,
+                next_thread_id=next_thread_id,
                 keep_transcript=keep_transcript,
                 has_transit_message=transit_message is not None,
             )

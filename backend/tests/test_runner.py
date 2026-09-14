@@ -27,7 +27,14 @@ pytestmark = pytest.mark.usefixtures("test_config")
 
 
 def hello(**overrides: Any) -> str:
-    frame: Dict[str, Any] = {"t": "hello", "sessionId": "s1", "pageLoad": True}
+    """A first visit: the client names nothing.
+
+    There is no session id to offer -- the server mints one and names it in
+    ``session.ready`` -- and an empty address bar names no thread either, so
+    the server mints that too. A test that wants a particular conversation
+    passes ``threadId``.
+    """
+    frame: Dict[str, Any] = {"t": "hello", "pageLoad": True}
     frame.update(overrides)
     return json.dumps(frame)
 
@@ -63,6 +70,15 @@ def read_until(
 def open_session(ws: Any, **hello_overrides: Any) -> List[dict]:
     ws.send_text(hello(**hello_overrides))
     return read_until(ws, "task.indicator")
+
+
+def ready_of(frames: List[dict]) -> dict:
+    """The ``session.ready`` in a handshake.
+
+    Not necessarily the first frame: a kept session may still hold frames
+    the previous socket never took, and the queue delivers those first.
+    """
+    return next(frame for frame in frames if frame["t"] == "session.ready")
 
 
 @pytest.fixture
@@ -101,7 +117,11 @@ def test_on_chat_start_runs_after_the_handshake_and_its_message_arrives(
     # hook is launched only once the screen is rebuilt.
     assert handshake[0]["t"] == "session.ready"
     assert greeting[-1]["step"]["output"] == "hello there"
-    assert started == ["s1"]
+    # The handle the hook saw is the one the server minted and named. The
+    # client offered nothing for it to be, and the thread came back the
+    # same way.
+    assert started == [handshake[0]["sessionId"]]
+    assert handshake[0]["threadId"]
     # And once the hook is done the spinner goes out -- the composer is
     # locked while it is lit, so a spinner nobody puts out is a dead chat.
     assert after[-1]["running"] is False
@@ -216,9 +236,17 @@ def test_stop_cancels_the_running_task_and_calls_on_stop(
     assert frames[-1]["running"] is False
 
 
-def test_a_closed_socket_runs_on_chat_end_and_schedules_the_reaper(
+def test_a_closed_socket_schedules_the_reaper_which_ends_the_chat(
     plugin: ChainlitPlugin, test_config: Any
 ) -> None:
+    """The drop schedules; the reaper ends.
+
+    ``on_chat_end`` used to fire the instant the socket went, which is a
+    reload as often as it is a goodbye. It belongs to ``release`` now, so
+    the grace period below is not just when the session dies -- it is when
+    the application is told its conversation is over. Compressed to 50ms
+    here; it is five minutes in production.
+    """
     ended: List[str] = []
 
     async def on_chat_end() -> None:
@@ -233,21 +261,22 @@ def test_a_closed_socket_runs_on_chat_end_and_schedules_the_reaper(
 
     with create_test_client(plugins=[plugin]) as client:
         with client.websocket_connect("/ws") as ws:
-            open_session(ws)
+            ready = ready_of(open_session(ws))
+        thread = ready["threadId"]
         # The session survives the socket for the grace period ...
-        assert plugin.runner.registry.get("s1") is not None
+        assert plugin.runner.registry.entry_of_thread(thread) is not None
         for _ in range(250):
             if ended:
                 break
             time.sleep(0.02)
-        assert ended == ["s1"]
+        assert ended == [ready["sessionId"]]
         # ... and not beyond it.
         deadline = 50
-        while plugin.runner.registry.get("s1") is not None and deadline:
+        while plugin.runner.registry.entry_of_thread(thread) is not None and deadline:
             time.sleep(0.02)
             deadline -= 1
 
-    assert plugin.runner.registry.get("s1") is None
+    assert plugin.runner.registry.entry_of_thread(thread) is None
 
 
 def test_a_reconnect_within_the_grace_period_keeps_the_session(
@@ -264,20 +293,19 @@ def test_a_reconnect_within_the_grace_period_keeps_the_session(
 
     with create_test_client(plugins=[plugin]) as client:
         with client.websocket_connect("/ws") as ws:
-            open_session(ws)
+            thread = ready_of(open_session(ws))["threadId"]
         with client.websocket_connect("/ws") as ws:
-            frames = open_session(ws, pageLoad=False)
+            # The conversation is the only thing the client offers, and it
+            # is what hands this socket the session it left behind.
+            frames = open_session(ws, pageLoad=False, threadId=thread)
 
-    # Not necessarily the first frame: a session kept across the gap may
-    # still hold frames the last socket never took, and the queue delivers
-    # those first. The client rebuilds its screen after ``session.ready``
-    # regardless.
-    ready = next(f for f in frames if f["t"] == "session.ready")
+    ready = ready_of(frames)
     assert ready["restored"] is True
+    assert ready["threadId"] == thread
     assert starts == [1], "on_chat_start ran again on a reconnect"
-    session = plugin.runner.registry.get("s1")
-    assert session is not None
-    assert session.session.state["counter"] == 42  # type: ignore[attr-defined]
+    entry = plugin.runner.registry.entry_of_thread(thread)
+    assert entry is not None
+    assert entry.session.state["counter"] == 42  # type: ignore[attr-defined]
 
 
 def test_the_runner_is_the_sessions_runner(
@@ -291,8 +319,8 @@ def test_the_runner_is_the_sessions_runner(
         create_test_client(plugins=[plugin]) as client,
         client.websocket_connect("/ws") as ws,
     ):
-        open_session(ws)
-        entry = plugin.runner.registry.get("s1")
+        thread = ready_of(open_session(ws))["threadId"]
+        entry = plugin.runner.registry.entry_of_thread(thread)
 
     assert entry is not None
     assert isinstance(entry.session.runner, ApplicationRunner)  # type: ignore[attr-defined]

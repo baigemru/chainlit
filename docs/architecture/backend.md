@@ -15,44 +15,44 @@ usually a bug that was fixed — treat it as normative.
 Public API means: exported from `backend/chainlit/__init__.py` `__all__` and meant to be
 called as `cl.*` by an application author. Everything else is internal.
 
-| Path                                                                                              | Purpose                                                                                                         | Surface                |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `__init__.py`                                                                                     | Re-exports the `cl.*` API; loads `.env` before any other import.                                                | public                 |
-| `plugin.py`                                                                                       | `ChainlitPlugin(InitPlugin)` — the entire integration surface with a host `Litestar`.                           | public (embedding)     |
-| `runner.py`                                                                                       | `ApplicationRunner`: runs `config.code` on behalf of sessions; the only place that sets the context var.        | internal               |
-| `ws/session.py`                                                                                   | `Session` — a conversation, independent of the socket carrying it. Imports nothing from the `cl.*` layer.       | internal               |
-| `ws/connection.py`                                                                                | The `@websocket("/ws")` route, `Connection`, the reader and heartbeat loops.                                    | internal               |
-| `ws/outbound.py`                                                                                  | `Outbound` — one bounded queue, one writer task, one owner of the close.                                        | internal               |
-| `ws/registry.py`                                                                                  | `SessionRegistry` plus the eviction/ownership predicates. Imports nothing from `chainlit` or the transport.     | internal               |
-| `ws/handshake.py`                                                                                 | `arrive` / `ready_frame` / `restore` / `sweep_superseded` — what a `hello` is allowed to mean.                  | internal               |
-| `protocol/{server,client,payloads,codec}.py`                                                      | msgspec tagged unions on `t`, plus `CloseCode`/`ErrorCode`. Imports no other `chainlit` module.                 | internal (stable wire) |
-| `protocol/README.md`                                                                              | Old-event → tag map, renames, shape changes, close codes.                                                       | docs                   |
-| `controllers/auth.py`                                                                             | `/auth/*`, `/login`, `/logout`, `/user`, `/set-session-cookie`.                                                 | internal               |
-| `controllers/project.py`                                                                          | Threads, elements, feedback, actions, `/project/settings`, `/health`.                                           | internal               |
-| `controllers/files.py`                                                                            | Upload/download, `/favicon`, `/logo`, `/avatars/*`.                                                             | internal               |
-| `controllers/index.py`                                                                            | `render_index` — fills the built SPA shell with title, favicon, OG tags, theme.                                 | internal               |
-| `controllers/sessions.py`                                                                         | `LiveSession` / `SessionRegistry` protocols the routes are allowed to see.                                      | internal               |
-| `controllers/caller.py`                                                                           | `caller`, `caller_identifier`, `assert_session_owner` — reading the scope safely.                               | internal               |
-| `persistence/`                                                                                    | `records` → `models` → `statements` → `repositories`/`services` → `config` → `writer`.                          | internal               |
-| `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`.                 | internal               |
-| `security.py`                                                                                     | `ChainlitAuth(JWTCookieAuth)`, `Identity`, `identity_from_token`, `chainlit_auth()`.                            | internal               |
-| `oauth_providers.py`                                                                              | The configured OAuth providers and their token exchanges.                                                       | internal               |
-| `transit_store.py`                                                                                | `TransitStore` — the TTL'd one-shot profile-switch handover on a `litestar.stores` store.                       | internal               |
-| `config.py`                                                                                       | `.chainlit/config.toml` decoded with msgspec, plus `config.code` (the registered callbacks).                    | internal               |
-| `callbacks.py`                                                                                    | The `@cl.on_*` decorators; each stores a wrapped function on `config.code`.                                     | public                 |
-| `context.py`                                                                                      | `ChainlitContext`, `context_var`, `init_context`, and the `cl.context` proxy.                                   | public (`cl.context`)  |
-| `emitter.py`                                                                                      | `Emitter` — one method per thing the app can put on screen; produces frames, never rows.                        | internal               |
-| `message.py`                                                                                      | `Message`, `ErrorMessage`, `AskUserMessage`, `AskActionMessage`, `AskFileMessage`, `AskElementMessage`.         | public                 |
-| `step.py`                                                                                         | `Step` and the `@cl.step` decorator.                                                                            | public                 |
-| `element.py`                                                                                      | `Image`, `Pdf`, `Text`, `File`, `Video`, `Audio`, `Plotly`, `Pyplot`, `Dataframe`, `CustomElement`, `TaskList`. | public                 |
-| `action.py`                                                                                       | `Action` — a button attached to a message.                                                                      | public                 |
-| `input_widget.py`                                                                                 | Input widget dataclasses (`cl.input_widget`).                                                                   | public                 |
-| `user_session.py`                                                                                 | `cl.user_session` — a thin view over `Session.state`.                                                           | public                 |
-| `chat_context.py`                                                                                 | `cl.chat_context` — the conversation's messages, kept on the session's state.                                   | public                 |
-| `sidebar.py`, `mode.py`, `types.py`, `user.py`                                                    | `ElementSidebar`, `Mode`/`ModeOption`, `ThreadDict`/`ChatProfile`/`Starter`, `User`/`PersistedUser`.            | public                 |
-| `cli/__init__.py`                                                                                 | The `chainlit` command: `run`, `hello`, `init`, `create-secret`, `lint-translations`.                           | public (CLI)           |
-| `utils.py`, `_utils.py`, `secret.py`, `markdown.py`, `logger.py`, `translations.py`, `version.py` | Helpers, secret generation, `chainlit.md` bootstrap, the `chainlit` logger, translation linting, `__version__`. | internal               |
-| `frontend/dist`, `copilot/dist`, `translations/*.json`, `sample/`                                 | Built JS artefacts (not in git), shipped UI translations, the `chainlit hello` demo apps.                       | assets                 |
+| Path                                                                                              | Purpose                                                                                                                              | Surface                |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| `__init__.py`                                                                                     | Re-exports the `cl.*` API; loads `.env` before any other import.                                                                     | public                 |
+| `plugin.py`                                                                                       | `ChainlitPlugin(InitPlugin)` — the entire integration surface with a host `Litestar`.                                                | public (embedding)     |
+| `runner.py`                                                                                       | `ApplicationRunner`: runs `config.code` on behalf of sessions; the only place that sets the context var.                             | internal               |
+| `ws/session.py`                                                                                   | `Session` — a conversation, independent of the socket carrying it. Imports nothing from the `cl.*` layer.                            | internal               |
+| `ws/connection.py`                                                                                | The `@websocket("/ws")` route, `Connection`, the reader and heartbeat loops.                                                         | internal               |
+| `ws/outbound.py`                                                                                  | `Outbound` — one bounded queue, one writer task, one owner of the close.                                                             | internal               |
+| `ws/registry.py`                                                                                  | `SessionRegistry` — one session per thread, keyed by thread and indexed by handle. Imports nothing from `chainlit` or the transport. | internal               |
+| `ws/handshake.py`                                                                                 | `arrive` / `ready_frame` / `restore` — what a `hello` is allowed to mean.                                                            | internal               |
+| `protocol/{server,client,payloads,codec}.py`                                                      | msgspec tagged unions on `t`, plus `CloseCode`/`ErrorCode`. Imports no other `chainlit` module.                                      | internal (stable wire) |
+| `protocol/README.md`                                                                              | Old-event → tag map, renames, shape changes, close codes.                                                                            | docs                   |
+| `controllers/auth.py`                                                                             | `/auth/*`, `/login`, `/logout`, `/user`.                                                                                             | internal               |
+| `controllers/project.py`                                                                          | Threads, elements, feedback, actions, `/project/settings`, `/health`.                                                                | internal               |
+| `controllers/files.py`                                                                            | Upload/download, `/favicon`, `/logo`, `/avatars/*`.                                                                                  | internal               |
+| `controllers/index.py`                                                                            | `render_index` — fills the built SPA shell with title, favicon, OG tags, theme.                                                      | internal               |
+| `controllers/sessions.py`                                                                         | `LiveSession` / `SessionRegistry` protocols the routes are allowed to see.                                                           | internal               |
+| `controllers/caller.py`                                                                           | `caller`, `caller_identifier`, `assert_session_owner` — reading the scope safely.                                                    | internal               |
+| `persistence/`                                                                                    | `records` → `models` → `statements` → `repositories`/`services` → `config` → `writer`.                                               | internal               |
+| `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`.                                      | internal               |
+| `security.py`                                                                                     | `ChainlitAuth(JWTCookieAuth)`, `Identity`, `identity_from_token`, `chainlit_auth()`.                                                 | internal               |
+| `oauth_providers.py`                                                                              | The configured OAuth providers and their token exchanges.                                                                            | internal               |
+| `transit_store.py`                                                                                | `TransitStore` — the TTL'd one-shot profile-switch handover on a `litestar.stores` store.                                            | internal               |
+| `config.py`                                                                                       | `.chainlit/config.toml` decoded with msgspec, plus `config.code` (the registered callbacks).                                         | internal               |
+| `callbacks.py`                                                                                    | The `@cl.on_*` decorators; each stores a wrapped function on `config.code`.                                                          | public                 |
+| `context.py`                                                                                      | `ChainlitContext`, `context_var`, `init_context`, and the `cl.context` proxy.                                                        | public (`cl.context`)  |
+| `emitter.py`                                                                                      | `Emitter` — one method per thing the app can put on screen; produces frames, never rows.                                             | internal               |
+| `message.py`                                                                                      | `Message`, `ErrorMessage`, `AskUserMessage`, `AskActionMessage`, `AskFileMessage`, `AskElementMessage`.                              | public                 |
+| `step.py`                                                                                         | `Step` and the `@cl.step` decorator.                                                                                                 | public                 |
+| `element.py`                                                                                      | `Image`, `Pdf`, `Text`, `File`, `Video`, `Audio`, `Plotly`, `Pyplot`, `Dataframe`, `CustomElement`, `TaskList`.                      | public                 |
+| `action.py`                                                                                       | `Action` — a button attached to a message.                                                                                           | public                 |
+| `input_widget.py`                                                                                 | Input widget dataclasses (`cl.input_widget`).                                                                                        | public                 |
+| `user_session.py`                                                                                 | `cl.user_session` — a thin view over `Session.state`.                                                                                | public                 |
+| `chat_context.py`                                                                                 | `cl.chat_context` — the conversation's messages, kept on the session's state.                                                        | public                 |
+| `sidebar.py`, `mode.py`, `types.py`, `user.py`                                                    | `ElementSidebar`, `Mode`/`ModeOption`, `ThreadDict`/`ChatProfile`/`Starter`, `User`/`PersistedUser`.                                 | public                 |
+| `cli/__init__.py`                                                                                 | The `chainlit` command: `run`, `hello`, `init`, `create-secret`, `lint-translations`.                                                | public (CLI)           |
+| `utils.py`, `_utils.py`, `secret.py`, `markdown.py`, `logger.py`, `translations.py`, `version.py` | Helpers, secret generation, `chainlit.md` bootstrap, the `chainlit` logger, translation linting, `__version__`.                      | internal               |
+| `frontend/dist`, `translations/*.json`, `sample/`                                                 | Built JS artefacts (not in git), shipped UI translations, the `chainlit hello` demo apps.                                            | assets                 |
 
 ---
 
@@ -113,9 +113,26 @@ accepted socket and holds what a second socket must not share: `generation` (nev
 asks. `session.current` is the single owner; a connection that has lost it does nothing further
 to the session.
 
+**Identity.** The client names a **thread** and nothing else — `hello` carries no session id.
+The server mints the session handle and announces it in `session.ready`; the client keeps it in
+memory (never in storage) and uses it to address HTTP calls that act on live objects: uploads,
+action buttons, custom-element writes. There is no refusal in the handshake: every `hello`
+opens.
+
 **Handshake.** Accept → `_first_hello` (10s deadline, must be a well-formed `hello`, else close
-4400/4413) → `arrive(...)` → optional refusal (close 4403) → `on_arrival` → `Connection` →
-`_take_over` → `_serve`.
+4400/4413) → `arrive(...)` → `on_arrival` → `Connection` → `_take_over` → `_serve`.
+
+**One arrival at a time per conversation.** Everything from `arrive` to `_take_over` runs under
+a per-thread `asyncio.Lock` (`arrivals`, a `WeakValueDictionary` in the handler closure; a hello
+naming no thread takes none). `arrive` registers and returns, then `on_arrival` does database
+work — so without it two hellos for one thread resolved **backwards**: the second claimed the
+session the first had just registered, adopted it and started replaying, and then the first woke
+from its `_resume` and adopted it back. The tab the user opened last was the one closed 4409,
+and the frames it had queued drained onto the tab it replaced. The key is the thread the client
+_asked_ for, not the one its session ends up in — `_disown_thread` may move it, which leaves the
+requested thread free for whoever was waiting, exactly as it should. Not in the registry, which
+is lock-free and synchronous by design: this is the opposite concern, a stretch of the handshake
+that must await.
 
 **`_take_over` order** is load-bearing and must not be reordered:
 
@@ -142,56 +159,106 @@ than dropping a frame. Three terminations: `drop` ends the _connection_ and keep
 `abort` is terminal and discards, `close` flushes then closes. A stop the writer cannot answer
 within `FORCE_CLOSE_GRACE = 1.0s` cancels it and closes from the aborting task.
 
-**`SessionRegistry.claim`** returns one of four outcomes — the vocabulary the scenario table
-uses: `REFUSED` (ownership check first, on both paths), `KEPT` (not a page load, or a page load
-onto a session with live work), `REPLACED` (a page load onto an idle session), `CREATED`.
-`has_live_work` = live ask **or** live task **or** parked reply.
+**`SessionRegistry`** is keyed by `thread_id` — one session per conversation — with a secondary
+index by session handle for the HTTP routes (`find`, `get`, `mark_*`, `discard`). `register`
+raises `ThreadHeld` if the thread is taken, and nothing may `await` between `claim` and the
+`register` that acts on it. `claim(thread_id, user)` returns two outcomes: `KEPT` (the thread is
+held and it is this user's — the session takes this socket and the previous one is closed 4409)
+or `CREATED` (nobody is in it, **or** somebody else is; a foreign thread is answered with a
+fresh one of the caller's own and its tenant is not touched). Why the socket opened is not
+consulted: a reload, a duplicated tab and a transport blip all say the same sentence.
+`has_live_task(thread)` and `protected_step_ids(thread)` are single lookups.
 
 **`ApplicationRunner`** is the application half: `make_session` (mints a thread id and, with
 persistence, a `SessionWriter(hold_until_interaction=True)`), `on_arrival` — the **one** place
 that decides start / resume / nothing — `on_ready` (which only carries out what `on_arrival`
-decided), `on_disconnect`, `_reap`, `teardown`, `on_message`, `on_stop`, `call_action`.
+decided), `on_disconnect`, `_reap`, `relinquish`/`release`/`release_soon`, `teardown`,
+`on_message`, `on_stop`, `call_action`.
 `requested_thread_id` is what the client _asked_ to resume; `thread_id` may be the id the
 session was minted with, and only an asked-for thread can be reported missing.
 
 ### Sequences
 
-**Fresh page load.** `hello{pageLoad:true}` → `claim` = `CREATED` → `make_session` → registered
-→ `on_arrival`: no supersession, `_resume` returns false (nothing requested), `_claim_transit`,
-`chat_started = True`, `start_chat = True` → `session.ready{restored:false}` → `restore` sends
-nothing but `task.indicator{running:false}` → `on_ready` launches `on_chat_start` as the
-session's `current_task`.
+**Fresh visit.** `hello{pageLoad:true}` naming no thread → `claim` = `CREATED` →
+`make_session` mints a handle and a thread → registered → `on_arrival`: `_claim_transit` finds
+nothing, `_resume` returns false (nothing was requested), `chat_started = True`,
+`start_chat = True` → `session.ready{restored:false}` naming both ids → `restore` sends nothing
+but `task.indicator{running:false}` → `on_ready` launches `on_chat_start` as the session's
+`current_task`.
 
-**Reconnect (KEPT).** `hello{pageLoad:false}` → `claim` = `KEPT` → session marked connected, its
-reaper cancelled → `on_arrival` returns on the first line (a reconnect decides nothing) →
-`session.ready{restored:true}` queued at the front, ahead of the frames the old socket never
-took → `restore` replays transcript, elements, a live ask with **what is left** of its deadline
-→ `on_ready` starts nothing.
+**Reload or reconnect (KEPT).** `hello{threadId:T}` where `T` is held by this user → `claim` =
+`KEPT` → session marked connected, its reaper cancelled → `on_arrival` returns on the first
+line (this decides nothing) → `session.ready{restored:true}` queued at the front, ahead of the
+frames the old socket never took → `restore` replays transcript, elements, a live ask with
+**what is left** of its deadline → `on_ready` starts nothing. `pageLoad` decides only how much
+the replay rebuilds. **The hooks do not run again**: a session survives F5 whole, `user_session`
+and all, and `on_chat_start` / `on_chat_resume` fire only when there is no live session — a
+fresh chat, or a resume after the reaper.
 
-**Reload onto an idle session (REPLACED).** `hello{pageLoad:true}`, held session has no ask, no
-task, no parked reply → `claim` = `REPLACED`; the old entry is discarded and carried on
-`Arrival.superseded` → new session created under the same id → `on_arrival` tears the
-superseded session down (`teardown`: cancel work, end any ask, close the writer, discard files,
-`outbound.abort()`) → then the normal fresh-load branch.
-
-**Resume of a stored thread.** `hello{threadId:T}` → `requested_thread_id = T` → `on_arrival` →
-`_resume`: load `ThreadDetail`. A miss never produces an error frame: if `T` was the thread of
-the entry this arrival replaced (`Arrival.superseded`) it is the user's own conversation before
-its first row — a reload on a greeting — and the session keeps it; any other miss, and a thread
-that is someone else's, is answered by `_disown_thread` (a fresh id and a fresh writer) and the
-client learns the outcome from `session.ready.thread_id` naming a different thread than it
-asked for. Otherwise `hide_resume_deleted`, state and profile from metadata, transcript loaded,
+**Resume of a stored thread (cold).** Reachable only when nobody is in `T`: the reaper came, or
+the user pressed "New chat". `hello{threadId:T}` → `claim` = `CREATED`, `requested_thread_id =
+T` → `on_arrival` → `_claim_transit` (no record) → `_resume`: load `ThreadDetail`. A miss never
+produces an error frame — the thread does not exist, or is someone else's, and either way
+`_disown_thread` gives the session a fresh id and a fresh writer; the client learns from
+`session.ready.thread_id` naming a different thread than it asked for. Otherwise
+`hide_resume_deleted`, state and profile from metadata, transcript loaded,
 `first_interaction = "resume"`, `resumed_thread_id = T`, `chat_started = True`,
 `writer.open_gate()` → `session.ready` → `restore` sends `thread.resume` as a snapshot →
 `on_ready` launches `on_chat_resume` followed by `on_thread_ready` in its own slot (the second
 runs even if the first raised).
 
-**Takeover by a second tab.** The new socket adopts the session, the old writer is detached, and
-the old connection is closed 4409 (`SUPERSEDED`) from inside the new handler's task group. The
-old handler's loops see `connection.current is False` at their next await and leave without
-touching the session — its `finally` block is entirely conditional on `connection.current`.
-Separately, `sweep_superseded` evicts sessions of the _same thread_ that are disconnected and
-parked on a question; a running task is deliberately not a shield.
+**Thread held by another user.** `claim` = `CREATED` and the claim names the tenant, so nothing
+is requested: the session is minted on a thread of its own, the database is never consulted,
+and the stranger's session is not touched. With authentication off `is_owned_by` is true of
+every pair, so the uuid4 in the URL is the whole capability — like a share link.
+
+**Profile handoff.** `emitter.set_chat_profile` mints the successor's **thread**, parks the
+transit record under it and sends `session.handoff{nextThreadId}`. The browser navigates there;
+the arriving session finds the record in `_claim_transit`, which is what identifies the arrival
+as a handover — so `_resume` is skipped and the freshly minted thread is not looked up and
+disowned.
+
+**Takeover by a second tab.** Two tabs on one URL is a takeover by design. The new socket adopts
+the session, the old writer is detached, and the old connection is closed 4409 (`SUPERSEDED`)
+from inside the new handler's task group; the client treats 4409 as terminal and does not
+reconnect. The old handler's loops see `connection.current is False` at their next await and
+leave without touching the session — its `finally` block is entirely conditional on
+`connection.current`. There is no sweep: a thread holds one session, so there is nothing to
+evict.
+
+**"New chat" (`session.clear`), and the end of a chat.** `runner.release`: `relinquish`
+(discard the entry) → **the end-of-chat step** — `on_chat_end`, then the `PatchThread` carrying
+`persist.thread_state` — → `teardown` (cancel work, end any ask and write the interrupted-ask
+row, close the writer, discard files, `outbound.abort(1000, "released")`). Discarding first
+frees the thread in the same turn, so reopening it from the history resumes it from the database
+instead of being handed the blank session that was sitting on it, and the boolean `relinquish`
+returns is the guard that makes the end-of-chat step happen **exactly once** across the reaper,
+`session.clear` and a deleted thread. `on_disconnect` schedules no reaper for a session the
+registry no longer holds.
+
+Three consequences worth stating plainly. `on_chat_end` is about the **conversation**, not the
+socket: it does not run on an F5, a blip or a second tab, and an abandoned chat hears it at the
+reaper (+300s) rather than at the drop. The metadata patch is the **only** write of
+end-of-session `user_session` state — `persist.open_thread`'s patch fires once, at the first
+interaction — so it has to happen before `teardown` clears `session.writer`; in `on_disconnect`
+it ran after and was silently skipped. And `on_disconnect` keeps a copy of the patch as
+insurance on any drop, which is cheap and costs a session nothing.
+
+The release from `session.clear` is **scheduled, not awaited** (`Session.release_soon` →
+`ApplicationRunner.release_soon`): the reader is a child of `_serve`'s task group, and a
+teardown awaited there drains the database writer inside a scope the heartbeat can cancel — one
+unanswered probe and `aclose` dies mid-flush with rows still in it, and `discard_files` and the
+abort never run. Only the `relinquish` happens in the reader's own breath. `_reap` and
+`DELETE /project/thread` keep the awaitable `release`: the second needs the drain finished
+before it removes the rows.
+
+The close code is **1000**, not `CloseCode.INTERNAL`: nothing failed, the conversation was given
+up on purpose, and a client still listening should be free to reconnect into a fresh chat rather
+than be told the server broke. `CloseCode` stays private-use (4000–4999) and gains nothing.
+
+**Deleting a thread.** `DELETE /project/thread` releases the live session in that thread before
+removing the rows — the teardown drains a writer that may still have something to file, and a
+session left running would re-create the row the user just deleted.
 
 **Heartbeat timeout.** `_heartbeat` wakes every `HEARTBEAT_INTERVAL_MS = 20_000` ms, checks
 `connection.current`, sends `hb{seq}`, sleeps again, and if `last_ack != seq` calls
@@ -210,14 +277,20 @@ Invariants:
 
 - **`session.ready` is always the first frame** on an accepted socket, and it is the frame the
   client flushes its outbound buffer on. Nothing may be sent before it — which is why
-  `on_arrival` may change state but must not send.
+  `on_arrival` may change state but must not send. It carries both ids: the thread the session
+  ended up in (which may not be the one asked for) and the handle the HTTP routes are addressed
+  with.
+- **`hello` carries no session id.** The thread is the only identity a client may offer, and
+  every field of `hello` is optional.
 - **Upserts are idempotent**; `step.update` carries a `StepPatch` where absent means "no
   opinion". A duplicate frame after a mid-write socket loss is harmless.
 - **Failures are addressed.** `error{code,message}` leaves the socket open (`ErrorCode`:
   `bad_message`, `unknown_tag`, `ask_slot_busy`, …). A failure that must also
-  close sends a `CloseCode` too: 4400 bad handshake, 4401 unauthenticated, 4403 session
-  forbidden, 4404 thread forbidden, 4408 heartbeat timeout, 4409 superseded, 4413 frame too
-  large, 4429 backlog exceeded, 4500 internal. 4429 must be retried by the client.
+  close sends a `CloseCode` too: 4400 bad handshake, 4401 unauthenticated, 4408 heartbeat
+  timeout, 4409 superseded, 4413 frame too large, 4429 backlog exceeded, 4500 internal. 4429
+  must be retried by the client; 4409 is terminal and must **not** be. 4403 and 4404 are
+  retired — a refusal about a thread was an answer about a row that exists, and the server now
+  answers with a thread of the caller's own instead.
 - **`hb` / `hb.ack` are per connection**, never per session: the ack is recorded on
   `Connection.last_ack` and never reaches `_dispatch`.
 - Unknown _fields_ are ignored (forward compatibility); an unknown _tag_, a wrong type or a
@@ -241,7 +314,10 @@ Route handlers name one service and get it injected against the request session
 the OAuth callback answers 302 and its user row must still commit.
 
 **`SessionWriter`** (`persistence/writer.py`) is **one ordered writer per session**, not per
-thread — two tabs on one thread are two writers, and FIFO is a per-writer promise. It queues
+thread. A thread holds one session, but a successor can start on it while its predecessor's
+writer is still draining (the window between `release`'s discard and its `aclose` — wider now
+that `session.clear` schedules the release instead of awaiting it), so `WriterRegistry` keeps a
+_set_ per thread and FIFO stays a per-writer promise. It queues
 `SaveStep`, `DeleteStep`, `SaveElement`, `DeleteElement`, `PatchThread`; the consumer takes up
 to `BATCH_LIMIT = 256` ops per transaction and replays op-by-op if the batch fails.
 `hold_until_interaction=True` keeps ops (and _un-started_ uploads) in an ordered held list;
@@ -285,7 +361,10 @@ browser cannot set an `Authorization` header on an upgrade, so the cookie is the
 
 `AuthController` (`controllers/auth.py`) serves `/auth/config`, `POST /login` (password and
 direct-grant), `POST /auth/jwt`, `POST /logout`, `GET /auth/oauth/{provider}` plus
-`/register`, `/vk`, `/yandex` and `/callback`, `GET /user`, and `POST /set-session-cookie`.
+`/register`, `/vk`, `/yandex` and `/callback`, and `GET /user`. `POST /set-session-cookie` is
+gone: it pinned a session id for load-balancer affinity, and the client has no id to pin — the
+server mints it and names it only after the socket is open. A multi-worker deployment needs
+affinity from the balancer.
 Every route except `/user` carries `opt={"exclude_from_auth": True}` (`PUBLIC`) — an _opt key_,
 not a handler parameter. On an excluded route the middleware never ran, so `request.user`
 **raises**; those handlers read the scope through `controllers/caller.py` instead.
@@ -299,18 +378,19 @@ that it is live. Providers and token exchanges live in `oauth_providers.py`; sta
 
 `cd backend && uv run pytest`. Everything except `tests/persistence` runs with no services.
 
-| Suite                | What it pins                                                                                                                                                                      |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/ws/`          | `test_registry` (claim/eviction predicates), `test_handshake` (arrive/restore), `test_outbound` (queue, backlog, close semantics), `test_connection` (the route itself).          |
-| `tests/socketspec/`  | The scenario table: behaviour stated transport-free, driven against real objects.                                                                                                 |
-| `tests/protocol/`    | Round-trip, unions, patch semantics, package independence, and `test_coverage.py`.                                                                                                |
-| `tests/controllers/` | `test_auth`, `test_project`, `test_files` against the controllers.                                                                                                                |
-| `tests/app/`         | The plugin as assembled: `test_plugin`, `test_auth`, `test_public`, `test_spa`, `test_transit_store`. Uses a fixture `frontend_dir`, because `frontend/dist` is a build artefact. |
-| `tests/persistence/` | Services, statements, migrations, writer, pagination, storage backends. **Needs PostgreSQL.**                                                                                     |
-| `tests/test_*.py`    | The `cl.*` API surface, config, CLI, callbacks, import hygiene.                                                                                                                   |
+| Suite                | What it pins                                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/ws/`          | `test_registry` (the thread key, the claim, the protection queries), `test_handshake` (arrive/restore), `test_outbound` (queue, backlog, close semantics), `test_connection` (the route itself, plus every live-uvicorn case). |
+| `tests/socketspec/`  | The scenario table: behaviour stated transport-free, driven against real objects.                                                                                                                                              |
+| `tests/protocol/`    | Round-trip, unions, patch semantics, package independence, and `test_coverage.py`.                                                                                                                                             |
+| `tests/controllers/` | `test_auth`, `test_project`, `test_files` against the controllers.                                                                                                                                                             |
+| `tests/app/`         | The plugin as assembled: `test_plugin`, `test_auth`, `test_public`, `test_spa`, `test_transit_store`. Uses a fixture `frontend_dir`, because `frontend/dist` is a build artefact.                                              |
+| `tests/persistence/` | Services, statements, migrations, writer, pagination, storage backends. **Needs PostgreSQL.**                                                                                                                                  |
+| `tests/test_*.py`    | The `cl.*` API surface, config, CLI, callbacks, import hygiene.                                                                                                                                                                |
 
 **`tests/socketspec`** — `cases/*.py` groups scenarios by behaviour family (ask, handshake,
-bystanders, transcript, orphans, parents, reload, resume_delete, resync) and `cases/__init__.py`
+bystanders — now "other conversations" — transcript, orphans, parents, reload, resume_delete,
+resync) and `cases/__init__.py`
 unions them into `SCENARIOS`. To add a case: append a `Scenario(name, why, given=Given(...),
 when=(Incoming(...),), expect=(Expect(tag, fields),), forbid=(...), then=lambda result: ...)`
 to the matching family. `given` states facts about the conversation, never about a transport.
@@ -334,9 +414,11 @@ reason. A tag cannot be lost silently.
 `fastapi`, `starlette`, `pydantic`, `pydantic_settings`, `dataclasses_json`, `lazify`, `syncer`,
 `asyncer`, `socketio`, `literalai` — with a self-check that the walk actually sees the package.
 
-**The two live-uvicorn tests** are `test_live_a_takeover_leaves_the_session_connected` and
-`test_live_a_superseded_probe_cannot_close_the_new_socket`, both parametrized over
-`("websockets", "websockets-sansio")`. They exist because Litestar's in-process test client
+**The live-uvicorn tests** (`-k live`, all parametrized over
+`("websockets", "websockets-sansio")`) cover the takeover, the superseded probe, the reload
+that keeps its question, the reload on a greeting that keeps its whole session, the second tab
+that takes an idle thread over, the second tab that is shown the first's open question, and
+`session.clear` giving the conversation up. They exist because Litestar's in-process test client
 never awaits a closing handshake: the superseded handler always unwinds in the harmless order,
 and the old in-memory takeover test was green against code that reaped live sessions on every
 profile change. **Rule: any transport change needs at least one live-server test.**
@@ -371,6 +453,16 @@ profile change. **Rule: any transport change needs at least one live-server test
   launched from the wrong place.
 - **`on_arrival` may not send anything**; `on_ready` may not decide anything.
 - **Only the current connection tears anything down** (`connection.current`).
-- **The registry decides; the caller does.** Nothing in `ws/registry.py` deletes a session, and
-  a candidate must be re-checked with `should_evict` immediately before the awaiting delete.
-- **There is no fan-out.** What looks like cross-session behaviour is a scan of the registry.
+- **The registry decides; the caller does.** Nothing in `ws/registry.py` tears a session down.
+  `ApplicationRunner.release` is the one place that discards an entry and tears down what was in
+  it, and it discards **first** so the thread is free in the same turn.
+- **A teardown never runs inside a connection's task group.** `_serve`'s group cancels every
+  child when one fails, and a cancelled `SessionWriter.aclose` loses the rows it was flushing.
+  The reaper has always been a plain `asyncio` task; `session.clear` schedules one too
+  (`release_soon`).
+- **The chat ends once, in `release`.** `relinquish` returning `True` is the guard — the
+  registry entry _is_ the fact "this conversation is still going", so no separate flag exists to
+  fall out of step. `on_chat_end` is never driven by a socket closing.
+- **One session per thread, enforced by the key.** `register` raises `ThreadHeld` rather than
+  overwriting, and nothing may `await` between `claim` and the `register` that acts on it.
+- **There is no fan-out.** Both protection queries are a single lookup by thread.

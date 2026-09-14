@@ -128,18 +128,21 @@ describe('Ask reconnect', () => {
     cy.get('.step').should('contain', 'Action picked: continue');
   });
 
-  it('starts a fresh chat on reload when nothing is pending', () => {
+  it('keeps the same chat on reload with nothing pending', () => {
     answerNameAsk();
     cy.get('#continue-action').click();
     cy.get('.step').should('contain', 'Action picked: continue');
 
     cy.reload();
 
-    // No pending ask: F5 keeps its historical meaning — a brand-new chat.
-    cy.get('.step').should('contain', 'What is your name?');
+    // The rule changed here. F5 used to mean a brand-new chat unless an ask
+    // was pending; a live session now survives the reload whole, because the
+    // address names the thread and the thread IS the session. The transcript
+    // comes back from memory and the hooks do not run again.
+    cy.get('.step').should('contain', 'Action picked: continue');
     cy.get('.step')
-      .filter(':contains("Action picked")')
-      .should('have.length', 0);
+      .filter(':contains("What is your name?")')
+      .should('have.length', 1);
   });
 
   it('answers exactly once even with rapid double clicks', () => {

@@ -7,7 +7,6 @@ keywords = [
     "gen ai",
     "chat ui",
     "chatbot ui",
-    "copilot",
     "conversational ai",
 ]
 description = "Build Conversational AI."
@@ -94,8 +93,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 exclude = [
-  "chainlit/frontend/**/*",
-  "chainlit/copilot/**/**/"
+  "chainlit/frontend/**/*"
 ]
 
 [tool.hatch.build.hooks.custom]
@@ -103,15 +101,13 @@ path = "build.py"
 
 [tool.hatch.build.targets.sdist]
 artifacts = [
-    "chainlit/frontend/dist/**/*",
-    "chainlit/copilot/dist/**/*"
+    "chainlit/frontend/dist/**/*"
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["chainlit"]
 artifacts = [
-    "chainlit/frontend/dist/**/*",
-    "chainlit/copilot/dist/**/*"
+    "chainlit/frontend/dist/**/*"
 ]
 
 [tool.hatch.version]

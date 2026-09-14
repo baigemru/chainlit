@@ -1,17 +1,17 @@
 """What happens when a client says ``hello``.
 
-The first frame is a *decision*, not a lookup. The id a browser offers is
-the same whether it reloaded the page or merely lost its network for a
-moment, and by the time it arrives the server may be holding something the
-user is still owed: a question waiting for an answer, work that was paid
-for, an answer typed just before the reload and not yet filed. So arriving
-means: keep what is running, and only start over when nothing is.
+The first frame names a conversation, and nothing else: no session id, no
+claim on anything the server is holding except the thread in the address
+bar. So arriving is a lookup of that thread and one of two answers -- the
+session that is in it takes this socket, or this socket begins a session.
+A reload, a second tab and a dropped network all say the same sentence and
+all get the same answer; what tells them apart is only how much of the
+screen the replay has to rebuild (``page_load``).
 
 Two properties of this module are load-bearing and easy to lose.
 
-**The side effects happen once.** Evicting the sessions this arrival
-supersedes is irreversible, and so is the resume itself (the hooks it
-fires, the steps it hides). They belong to the *first* entry into the
+**The side effects happen once.** The resume is irreversible -- the hooks it
+fires, the steps it hides -- and belongs to the *first* entry into the
 resume branch, not to every reconnect that follows.
 
 **The replay is not a blocking prefix.** ``session.ready`` goes out before
@@ -24,11 +24,10 @@ about to send.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -51,7 +50,7 @@ from chainlit.protocol.server import (
     ThreadParent,
     ThreadResume,
 )
-from chainlit.ws.registry import Claim, ClaimOutcome, SessionEntry, SessionRegistry
+from chainlit.ws.registry import Claim, ClaimOutcome, SessionRegistry
 from chainlit.ws.session import Session, TranscriptEntry
 
 __all__ = [
@@ -61,7 +60,6 @@ __all__ = [
     "ready_frame",
     "restore",
     "resume_frame",
-    "sweep_superseded",
 ]
 
 
@@ -101,11 +99,8 @@ class Arrival:
     """
 
     outcome: ClaimOutcome
-    session: Optional[Session]
+    session: Session
     fresh_page_load: bool = True
-    #: Sessions this arrival supersedes. Already out of the registry; the
-    #: caller still has to tear each one down.
-    superseded: List[SessionEntry] = field(default_factory=list)
     #: The stored thread this arrival resumed, if it resumed one. Both the
     #: snapshot the replay sends and the dict the hooks receive.
     resumed_thread: Optional[Mapping[str, Any]] = None
@@ -114,37 +109,32 @@ class Arrival:
     #: beginning and never carries it.
     start_chat: bool = False
 
-    @property
-    def refused(self) -> bool:
-        return self.outcome is ClaimOutcome.REFUSED
-
 
 async def arrive(
     *,
     registry: SessionRegistry,
-    session_id: str,
     user_identifier: Optional[str],
     page_load: bool,
     thread_id: Optional[str],
-    make_session: Callable[[str], Session],
+    make_session: Callable[[Optional[str]], Session],
 ) -> Arrival:
-    """Decide what the id this client offers is allowed to mean.
+    """Decide what the conversation this client names is allowed to mean.
 
-    Four outcomes, and their names are the scenario table's:
+    ``kept``      somebody is in that conversation and it is this user:
+                  the session survives and takes this socket. The socket it
+                  was wearing is closed 4409 by the caller.
+    ``created``   nobody is in it, or the one who is is a stranger. Either
+                  way this connection gets a session of its own -- on the
+                  thread it asked for, or on a fresh one when the thread is
+                  somebody else's, which is the same answer a thread that
+                  never existed gets.
 
-    ``refused``   the id belongs to somebody else. Nothing is created, and
-                  the client is told nothing beyond the close code --
-                  "that session exists but is not yours" says it exists.
-    ``kept``      the held session is still doing something, so it survives
-                  and takes this socket.
-    ``replaced``  a page load landed on an idle session. This is what
-                  reloading has always meant, and it has to keep meaning it.
-    ``created``   nothing was held under that id.
+    Nothing awaits between the claim and the ``register`` that acts on it.
+    That gap is the whole guard on the one-session-per-thread key: a second
+    hello landing inside it would claim the same free thread and the second
+    ``register`` would raise.
     """
-    claim: Claim = registry.claim(session_id, user_identifier, page_load=page_load)
-
-    if claim.outcome is ClaimOutcome.REFUSED:
-        return Arrival(outcome=claim.outcome, session=None)
+    claim: Claim = registry.claim(thread_id, user_identifier)
 
     if claim.outcome is ClaimOutcome.KEPT:
         assert claim.entry is not None
@@ -162,58 +152,23 @@ async def arrive(
         # but only a page load means the browser is holding nothing.
         return Arrival(outcome=claim.outcome, session=held, fresh_page_load=page_load)
 
-    superseded: List[SessionEntry] = []
-    if claim.outcome is ClaimOutcome.REPLACED and claim.entry is not None:
-        superseded.append(claim.entry)
-        registry.discard(claim.entry)
-
-    session = make_session(session_id)
-    if thread_id:
-        # The client's choice wins over whatever the factory minted: this is
-        # a resume. Without one the session keeps the thread it was born
-        # with, so it has a thread id from its first frame onwards -- and
-        # nothing to look up: only a thread that was asked for can be
-        # missing.
-        session.thread_id = thread_id
-        session.requested_thread_id = thread_id
+    # A thread held by a stranger is not asked for again: the session is
+    # minted on one of its own, and there is nothing to look up in storage
+    # either -- a thread somebody else is live in is a thread whose absence
+    # is not this user's to hear about.
+    requested = thread_id if thread_id and claim.entry is None else None
+    session = make_session(requested)
+    #: Only an asked-for thread can be missing. A minted one is not in the
+    #: database yet and never will be until somebody speaks in it.
+    session.requested_thread_id = requested
+    assert session.thread_id is not None, "a session is minted into a thread"
     registry.register(
         session,
-        user_identifier=user_identifier,
         thread_id=session.thread_id,
+        user_identifier=user_identifier,
         connected=True,
     )
-    return Arrival(
-        outcome=claim.outcome,
-        session=session,
-        fresh_page_load=True,
-        superseded=superseded,
-    )
-
-
-def sweep_superseded(
-    registry: SessionRegistry, thread_id: Optional[str], arriving: Session
-) -> List[SessionEntry]:
-    """Evict the sessions this arrival takes over from.
-
-    Only sessions of *this* thread, only ones nobody is looking at, and
-    only ones parked on a question. A disconnected session working between
-    questions is still working; a connected one showing the same question
-    is somebody's second tab.
-
-    A running task is deliberately not a shield. It protects steps from
-    deletion, which is a different question -- and conflating the two is
-    the regression this exists for, because an offer that waits hours keeps
-    its task alive for every one of them.
-
-    Returns what it evicted rather than tearing it down, so deciding and
-    doing stay separable and the caller can await the teardown.
-    """
-    if thread_id is None:
-        return []
-    doomed = registry.abandoned_ask_sessions(thread_id, arriving_session_id=arriving.id)
-    for entry in doomed:
-        registry.discard(entry)
-    return list(doomed)
+    return Arrival(outcome=claim.outcome, session=session, fresh_page_load=True)
 
 
 def ready_frame(session: Session, *, restored: bool, heartbeat_ms: int) -> SessionReady:

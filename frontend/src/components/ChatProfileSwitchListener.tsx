@@ -23,7 +23,8 @@ import {
   attachmentsState,
   chatBoundariesState,
   collapsedExcursionsState,
-  keptExcursionsState
+  keptExcursionsState,
+  openThreadTransitionState
 } from '@/state/chat';
 
 export default function ChatProfileSwitchListener() {
@@ -39,12 +40,13 @@ export default function ChatProfileSwitchListener() {
   const setKeptExcursions = useSetRecoilState(keptExcursionsState);
   const setCollapsedExcursions = useSetRecoilState(collapsedExcursionsState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
+  const setTransition = useSetRecoilState(openThreadTransitionState);
 
   // Latest switch logic lives in a ref so the socket subscription below is
   // only re-registered when the socket itself changes.
   const switchRef = useRef<(payload: SessionHandoff) => void>();
   switchRef.current = (payload) => {
-    const { chatProfile: name, hasTransitMessage, nextSessionId } = payload;
+    const { chatProfile: name, hasTransitMessage, nextThreadId } = payload;
     const keepTranscript = !!payload.keepTranscript;
 
     if (!config?.chatProfiles?.some((profile) => profile.name === name)) {
@@ -64,13 +66,17 @@ export default function ChatProfileSwitchListener() {
     // Same path as a manual selection (ChatProfiles.handleConfirm), minus
     // the confirmation dialog: the server already made the decision.
     //
-    // flushSync keeps the whole teardown in ONE commit. A manual selection
-    // runs in a discrete React event, so its state updates and the router
-    // update share a lane; here we run in a socket callback, where the
-    // Recoil writes are scheduled at sync priority while the router update
-    // is not. That split commits a render still located on /thread/<old>
-    // but with the thread id already cleared, which makes Thread mount
-    // AutoResumeThread and resume the previous thread over the new chat.
+    // flushSync keeps the whole teardown in ONE commit, and it is still
+    // required after the resume driver moved into ThreadAddressSync -- more
+    // so, because that component is mounted on every route rather than only
+    // under /thread/:id. A manual selection runs in a discrete React event,
+    // so its state updates and the router update share a lane; here we run
+    // in a socket callback, where the Recoil writes are scheduled at sync
+    // priority while the router update is not. The split would commit a
+    // render still located on /thread/<old> with the descriptor already
+    // asking for <next>: ThreadAddressSync reads a route naming neither the
+    // requested nor the current thread and clears the session this hand-off
+    // has just created, into <old>.
     flushSync(() => {
       setAskUser(undefined);
       setLoading(false);
@@ -92,12 +98,12 @@ export default function ChatProfileSwitchListener() {
       }
 
       // The real teardown, so this path inherits whatever it grows upstream.
-      // The successor is stated in full rather than assembled: the id the
-      // backend parked the hand-off record under (absent only when there was
-      // nothing to hand over, and a random one is then exactly right) and
-      // the profile it switches to are one decision, and the connect effect
-      // must never see half of it.
-      clear({ sessionId: nextSessionId || undefined, chatProfile: name });
+      // The successor is stated in full rather than assembled: the thread the
+      // backend parked the hand-off record under and the profile it switches
+      // to are one decision, and the connect effect must never see half of
+      // it. Descriptor first, navigation below -- the other order is the
+      // split this flushSync exists to prevent, committed deliberately.
+      clear({ threadId: nextThreadId || undefined, chatProfile: name });
 
       if (keepTranscript && kept === undefined) {
         console.error(
@@ -126,7 +132,25 @@ export default function ChatProfileSwitchListener() {
         setCollapsedExcursions({});
       }
 
-      navigate('/');
+      // Push, not replace: a profile switch is a new conversation, so Back
+      // leads to the one it came from. The transition is what keeps `Chat`
+      // mounted over the kept transcript while /thread/<next> waits for its
+      // `session.ready` -- without it `Thread.tsx` would swap the transcript
+      // this hand-off just preserved for a loader. ThreadReturnListener
+      // retires it when the thread becomes current.
+      //
+      // Only for an app that can resume, which is the same rule the address
+      // follows everywhere else: in an app without resume hooks
+      // `Thread.tsx` renders /thread/<id> as `ReadOnlyThread`, whose fetch
+      // of a thread with no row yet 404s and sends the user home -- so a
+      // switch there would bounce out of the chat it had just created. Such
+      // an app goes to `/` and stays unnamed, exactly as before.
+      if (nextThreadId && config?.threadResumable) {
+        setTransition({ threadId: nextThreadId, keepTranscript });
+        navigate(`/thread/${nextThreadId}`);
+      } else {
+        navigate('/');
+      }
     });
   };
 

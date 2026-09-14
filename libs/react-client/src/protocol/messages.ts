@@ -202,8 +202,7 @@ export interface HeartbeatAck {
 
 export interface Hello {
   t: 'hello';
-  sessionId: string;
-  clientType?: 'copilot' | 'discord' | 'slack' | 'teams' | 'webapp';
+  clientType?: 'discord' | 'slack' | 'teams' | 'webapp';
   device?: 'mobile' | 'pc' | null;
   threadId?: string | null;
   chatProfile?: string | null;
@@ -273,7 +272,7 @@ export interface SessionClear {
 export interface SessionHandoff {
   t: 'session.handoff';
   chatProfile: string;
-  nextSessionId?: string | null;
+  nextThreadId?: string | null;
   keepTranscript?: boolean;
   hasTransitMessage?: boolean;
 }

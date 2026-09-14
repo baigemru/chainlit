@@ -63,7 +63,7 @@ class Identity:
 
 
 class StubSession:
-    """A ``LiveSession``: a user, and an action dispatcher."""
+    """A ``LiveSession``: a user, an action dispatcher, and an ending."""
 
     def __init__(
         self, user: Optional[Identity], actions: Optional[Dict[str, Any]] = None
@@ -71,6 +71,7 @@ class StubSession:
         self.user = user
         self.actions = actions or {}
         self.called: List[Dict[str, Any]] = []
+        self.releases = 0
 
     async def call_action(self, action: Any) -> Any:
         name = action.get("name")
@@ -79,17 +80,24 @@ class StubSession:
         self.called.append(dict(action))
         return self.actions[name]
 
+    async def release(self) -> None:
+        self.releases += 1
+
 
 class StubRegistry:
-    """A ``SessionRegistry``: the three questions the routes ask it."""
+    """A ``SessionRegistry``: the four questions the routes ask it."""
 
     def __init__(self, sessions: Optional[Dict[str, StubSession]] = None) -> None:
         self.sessions = sessions or {}
+        self.threads: Dict[str, StubSession] = {}
         self.live_threads: Set[str] = set()
         self.protected: Dict[str, Set[str]] = {}
 
     def find(self, session_id: str) -> Optional[StubSession]:
         return self.sessions.get(session_id)
+
+    def find_thread(self, thread_id: Optional[str]) -> Optional[StubSession]:
+        return self.threads.get(str(thread_id))
 
     def has_live_task(self, thread_id: str) -> bool:
         return thread_id in self.live_threads
@@ -1172,6 +1180,54 @@ async def test_a_thread_is_deleted_by_its_author_and_by_nobody_else(
     assert allowed.status_code == 200
     async with persistence.uow() as uow:
         assert await uow.threads.fetch(thread_id) is None
+
+
+async def test_deleting_a_thread_releases_the_session_living_in_it(
+    client, auth, persistence: Persistence, registry: StubRegistry
+) -> None:
+    """A deleted conversation must not leave a session running in it.
+
+    The session went on holding the thread, reachable by its handle, and
+    its next message re-created the row the user had just thrown away. It
+    is released before the rows go, in that order: the teardown drains a
+    writer that may still have something to file, and rows filed after the
+    delete would be a conversation coming back from the dead.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    living = StubSession(Identity(ALICE))
+    registry.threads[thread_id] = living
+    login(client, auth, ALICE)
+
+    response = await client.request(
+        "DELETE", "/project/thread", json={"threadId": thread_id}
+    )
+
+    assert response.status_code == 200
+    assert living.releases == 1
+    async with persistence.uow() as uow:
+        assert await uow.threads.fetch(thread_id) is None
+
+
+async def test_deleting_somebody_elses_thread_releases_nothing(
+    client, auth, persistence: Persistence, registry: StubRegistry
+) -> None:
+    """The refusal comes first, so a guessed id cannot end a live session.
+
+    Authorship is checked before the registry is touched at all; without
+    that order a 404 would still have torn the owner's conversation down on
+    the way to answering it.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    hers = StubSession(Identity(ALICE))
+    registry.threads[thread_id] = hers
+    login(client, auth, BOB)
+
+    response = await client.request(
+        "DELETE", "/project/thread", json={"threadId": thread_id}
+    )
+
+    assert response.status_code == 404
+    assert hers.releases == 0
 
 
 async def test_deleting_a_thread_empties_its_shelf_in_the_bucket(

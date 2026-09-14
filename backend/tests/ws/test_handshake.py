@@ -12,22 +12,28 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, List, Sequence
+import uuid
+from typing import Any, List, Optional, Sequence
 
 from chainlit.protocol.codec import encode_server
 from chainlit.protocol.payloads import AskActionSpec, Step as StepPayload, TextElement
 from chainlit.protocol.server import AskStart, StepUpsert
-from chainlit.ws.handshake import (
-    arrive,
-    restore,
-    sweep_superseded,
-)
+from chainlit.ws.handshake import arrive, restore
 from chainlit.ws.registry import ClaimOutcome, SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 
 
 def make(session_id: str) -> Session:
     return Session(id=session_id)
+
+
+def factory(thread_id: Optional[str]) -> Session:
+    """What ``ApplicationRunner.make_session`` does, minus the database half.
+
+    The handle is minted here because nothing on the wire offers one; the
+    thread is minted only when the client named none.
+    """
+    return Session(id=str(uuid.uuid4()), thread_id=thread_id or str(uuid.uuid4()))
 
 
 def tags(session: Session) -> List[str]:
@@ -65,143 +71,208 @@ def ask(
 # ---------------------------------------------------------------- arriving
 
 
-async def test_an_unknown_id_creates_a_conversation() -> None:
+async def test_a_first_visit_is_given_a_conversation_of_its_own() -> None:
+    """Nothing is offered and nothing is looked up.
+
+    A browser with an empty address bar has no thread to name, so the
+    server mints one and says so in ``session.ready``. Nothing is
+    *requested*, which is what keeps the resume path out of the database:
+    a thread minted a microsecond ago cannot be missing from it.
+    """
     registry = SessionRegistry()
+
     arrival = await arrive(
         registry=registry,
-        session_id="s1",
         user_identifier="ada",
         page_load=True,
         thread_id=None,
-        make_session=make,
+        make_session=factory,
     )
+
     assert arrival.outcome is ClaimOutcome.CREATED
-    assert arrival.session is not None
-    assert registry.get("s1") is not None
+    session = arrival.session
+    assert session.thread_id
+    assert session.requested_thread_id is None
+    assert registry.entry_of_thread(session.thread_id) is not None
+    assert registry.find(session.id) is session
 
 
-async def test_reloading_an_idle_conversation_starts_a_new_one() -> None:
-    """What reloading has always meant.
+async def test_a_conversation_nobody_is_in_is_the_one_the_session_gets() -> None:
+    """The address bar names a thread the reaper has already taken.
 
-    Handing the old conversation back would make the one gesture everyone
-    uses to start over stop working.
+    It is asked for, so the runner will look it up; whether there is
+    anything there is the resume's business, not the handshake's.
     """
     registry = SessionRegistry()
-    first = make("s1")
-    registry.register(first, user_identifier="ada", thread_id="t1")
 
     arrival = await arrive(
         registry=registry,
-        session_id="s1",
         user_identifier="ada",
         page_load=True,
         thread_id="t1",
-        make_session=make,
+        make_session=factory,
     )
-    assert arrival.outcome is ClaimOutcome.REPLACED
-    assert arrival.session is not first
-    assert [entry.session for entry in arrival.superseded] == [first]
+
+    assert arrival.outcome is ClaimOutcome.CREATED
+    assert arrival.session.thread_id == "t1"
+    assert arrival.session.requested_thread_id == "t1"
+    assert registry.entry_of_thread("t1") is not None
 
 
-async def test_reloading_while_a_question_waits_keeps_the_conversation() -> None:
-    """Starting over abandons a question the server goes on waiting for."""
+async def test_reloading_a_live_conversation_keeps_it() -> None:
+    """The reversal at the heart of this stage.
+
+    An idle session used to be thrown away on a page load: F5 re-ran the
+    hooks and the ``user_session`` dict started empty. The session *is* the
+    conversation now, so the reload is the same session handed a new
+    socket -- and ``fresh_page_load`` is the only thing the flag still
+    decides, because the browser is holding nothing to draw with.
+    """
     registry = SessionRegistry()
     held = make("s1")
-    ask(held)
-    registry.register(held, user_identifier="ada", thread_id="t1")
+    held.thread_id = "t1"
+    registry.register(held, thread_id="t1", user_identifier="ada")
 
     arrival = await arrive(
         registry=registry,
-        session_id="s1",
         user_identifier="ada",
         page_load=True,
         thread_id="t1",
-        make_session=make,
+        make_session=factory,
     )
+
     assert arrival.outcome is ClaimOutcome.KEPT
     assert arrival.session is held
     assert arrival.fresh_page_load is True
+    assert len(registry) == 1
 
 
-async def test_a_session_of_another_user_is_refused_without_a_word() -> None:
-    """Saying "that exists but is not yours" is saying that it exists."""
+async def test_a_transport_blip_keeps_it_without_rebuilding_the_screen() -> None:
+    """``pageLoad:false`` means the browser still has what it was shown.
+
+    The replay runs either way; what it may skip is the furniture the
+    client never lost -- the element a live question is drawn in.
+    """
     registry = SessionRegistry()
-    registry.register(make("s1"), user_identifier="ada", thread_id="t1")
+    held = make("s1")
+    held.thread_id = "t1"
+    registry.register(held, thread_id="t1", user_identifier="ada")
 
     arrival = await arrive(
         registry=registry,
-        session_id="s1",
-        user_identifier="grace",
+        user_identifier="ada",
         page_load=False,
         thread_id="t1",
-        make_session=make,
+        make_session=factory,
     )
-    assert arrival.refused
-    assert arrival.session is None
+
+    assert arrival.outcome is ClaimOutcome.KEPT
+    assert arrival.fresh_page_load is False
 
 
-# ------------------------------------------------------------- superseding
-
-
-async def test_an_abandoned_question_in_this_thread_is_evicted() -> None:
+async def test_coming_back_marks_the_session_connected_again() -> None:
     registry = SessionRegistry()
-    abandoned = make("old")
-    ask(abandoned)
-    registry.register(abandoned, user_identifier="ada", thread_id="t1", connected=False)
-    arriving = make("new")
-    registry.register(arriving, user_identifier="ada", thread_id="t1")
+    held = make("s1")
+    held.thread_id = "t1"
+    held.connected = False
+    entry = registry.register(
+        held, thread_id="t1", user_identifier="ada", connected=False
+    )
 
-    evicted = sweep_superseded(registry, "t1", arriving)
+    await arrive(
+        registry=registry,
+        user_identifier="ada",
+        page_load=True,
+        thread_id="t1",
+        make_session=factory,
+    )
 
-    assert [entry.session for entry in evicted] == [abandoned]
-    assert registry.get("old") is None
-    assert registry.get("new") is not None
+    assert held.connected is True
+    assert entry.connected is True
 
 
-async def test_a_running_task_does_not_shield_an_abandoned_question() -> None:
-    """A task protects steps from deletion, which is a different question.
+async def test_the_reaper_waiting_for_this_user_is_stopped() -> None:
+    """The one thing an arrival into a kept session must do.
 
-    Conflating the two is the regression this sweep exists for: an offer
-    that waits for hours keeps its task alive for every one of them.
+    The teardown was scheduled when the socket went; the user came back
+    inside the grace period, and a reaper left running would take the
+    conversation down underneath them a few minutes later.
     """
     registry = SessionRegistry()
-    abandoned = make("old")
-    ask(abandoned)
-    abandoned.current_task = asyncio.ensure_future(asyncio.sleep(30))
-    registry.register(abandoned, user_identifier="ada", thread_id="t1", connected=False)
-    arriving = make("new")
-    registry.register(arriving, user_identifier="ada", thread_id="t1")
+    held = make("s1")
+    held.thread_id = "t1"
+    held.reaper = asyncio.ensure_future(asyncio.sleep(300))
+    registry.register(held, thread_id="t1", user_identifier="ada")
 
     try:
-        assert [
-            entry.session for entry in sweep_superseded(registry, "t1", arriving)
-        ] == [abandoned]
+        await arrive(
+            registry=registry,
+            user_identifier="ada",
+            page_load=True,
+            thread_id="t1",
+            make_session=factory,
+        )
     finally:
-        abandoned.current_task.cancel()
+        if held.reaper is not None:
+            held.reaper.cancel()
+
+    assert held.reaper is None
 
 
-async def test_a_connected_tab_showing_the_same_question_is_left_alone() -> None:
+async def test_somebody_elses_conversation_is_answered_with_a_fresh_one() -> None:
+    """Not a refusal, and not a word about the thread that was asked for.
+
+    A close code meaning "that is not yours" confirms it exists, and the
+    id in a URL is a bearer token in everything but name. The arriving
+    user gets a conversation of their own; ``session.ready`` names it, and
+    that is how the client learns the address it asked for is not the one
+    it got.
+    """
     registry = SessionRegistry()
-    other_tab = make("old")
-    ask(other_tab)
-    registry.register(other_tab, user_identifier="ada", thread_id="t1", connected=True)
-    arriving = make("new")
-    registry.register(arriving, user_identifier="ada", thread_id="t1")
+    theirs = make("s1")
+    theirs.thread_id = "t1"
+    registry.register(theirs, thread_id="t1", user_identifier="ada")
 
-    assert sweep_superseded(registry, "t1", arriving) == []
-    assert registry.get("old") is not None
+    arrival = await arrive(
+        registry=registry,
+        user_identifier="grace",
+        page_load=True,
+        thread_id="t1",
+        make_session=factory,
+    )
+
+    assert arrival.outcome is ClaimOutcome.CREATED
+    assert arrival.session is not theirs
+    assert arrival.session.thread_id != "t1"
+    # Nothing to look up: a thread somebody is live in is not one whose
+    # absence from the database this user may hear about.
+    assert arrival.session.requested_thread_id is None
 
 
-async def test_a_session_of_another_conversation_is_never_touched() -> None:
+async def test_the_stranger_goes_on_looking_at_their_screen() -> None:
+    """Reading the registry is not touching it.
+
+    The foreign session keeps its thread, its socket and its entry: a
+    second user guessing a URL must not so much as disconnect the first.
+    """
     registry = SessionRegistry()
-    elsewhere = make("old")
-    ask(elsewhere)
-    registry.register(elsewhere, user_identifier="ada", thread_id="t2", connected=False)
-    arriving = make("new")
-    registry.register(arriving, user_identifier="ada", thread_id="t1")
+    theirs = make("s1")
+    theirs.thread_id = "t1"
+    ask(theirs)
+    entry = registry.register(theirs, thread_id="t1", user_identifier="ada")
 
-    assert sweep_superseded(registry, "t1", arriving) == []
-    assert registry.get("old") is not None
+    await arrive(
+        registry=registry,
+        user_identifier="grace",
+        page_load=True,
+        thread_id="t1",
+        make_session=factory,
+    )
+
+    assert registry.entry_of_thread("t1") is entry
+    assert entry.connected is True
+    assert theirs.pending_ask is not None
+    assert len(registry) == 2
 
 
 # ----------------------------------------------------------------- replay

@@ -88,7 +88,7 @@ export const collapsedExcursionsState = atom<Record<string, boolean>>({
 /**
  * Parent of the chat currently on screen. Scoped to the session or thread it
  * was learned for, so a stale parent can never leak into an unrelated chat:
- * `clear()` resets both the session id and the current thread id, which
+ * `clear()` drops the session handle and the current thread id, which
  * invalidates the entry without anyone having to clean it up.
  */
 export interface IParentThreadEntry {
@@ -110,23 +110,14 @@ export interface IOpenThreadTransition {
   keepTranscript: boolean;
 }
 
-// Set when openThread hands over to the regular resume path, cleared when the
-// thread becomes current (or the resume fails). While set, /thread/:id keeps
-// the chat mounted so the kept transcript never yields to a loader, and any
-// further open_thread events are ignored (one transition at a time).
+// Set when openThread -- or a profile hand-off -- hands over to the regular
+// resume path, cleared when the thread becomes current (or the resume fails).
+// While set, /thread/:id keeps the chat mounted so the kept transcript never
+// yields to a loader, and any further open_thread events are ignored (one
+// transition at a time).
 export const openThreadTransitionState = atom<
   IOpenThreadTransition | undefined
 >({
   key: 'OpenThreadTransition',
-  default: undefined
-});
-
-// A click on the composer's return button. The composer renders inside the
-// copilot widget too, where there is no router, so instead of navigating it
-// parks the request here for ThreadReturnListener (app only) to execute.
-// Every click writes a fresh object, so repeated identical requests still
-// re-trigger the consuming effect.
-export const openThreadRequestState = atom<IOpenThreadTransition | undefined>({
-  key: 'OpenThreadRequest',
   default: undefined
 });

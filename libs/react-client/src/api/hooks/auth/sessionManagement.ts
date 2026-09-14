@@ -1,6 +1,5 @@
 import { useContext } from 'react';
 import { ChainlitContext } from 'src/index';
-import { sessionIdStorage } from 'src/state';
 
 import { useAuthState } from './state';
 
@@ -13,17 +12,11 @@ export const useSessionManagement = () => {
     setUser(undefined);
     setThreadHistory(undefined);
 
-    // The reload below is a *reload* navigation, which is exactly the one
-    // that adopts the stored id. Whoever logs in next in this tab must not
-    // offer the previous user's session. The thread is not this function's
-    // business: it lives in the address bar, and the caller is the one with
-    // a router (UserNav navigates home before calling this).
-    try {
-      sessionStorage.removeItem(sessionIdStorage.key);
-    } catch (_error) {
-      // Storage unavailable: nothing was stored to leak either.
-    }
-
+    // Nothing to forget here any more: this tab writes no session id down,
+    // and the thread is not this function's business either — it lives in
+    // the address bar, and the caller is the one with a router (UserNav
+    // navigates home before calling this, so the reload below asks for a
+    // new chat rather than for the thread the previous user was in).
     if (reload) {
       window.location.reload();
     }

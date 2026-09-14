@@ -1,4 +1,3 @@
-import { cn } from '@/lib/utils';
 import useSWR from 'swr';
 
 import { useChatData, useConfig } from '@chainlit/react-client';
@@ -26,10 +25,9 @@ const Header = ({ status }: HeaderProps) => {
 
 interface TaskListProps {
   isMobile: boolean;
-  isCopilot?: boolean;
 }
 
-const TaskList = ({ isMobile, isCopilot }: TaskListProps) => {
+const TaskList = ({ isMobile }: TaskListProps) => {
   const { tasklists } = useChatData();
   const tasklist = tasklists[tasklists.length - 1];
   const { config } = useConfig();
@@ -68,9 +66,7 @@ const TaskList = ({ isMobile, isCopilot }: TaskListProps) => {
     const highlightedTask = tasks?.[highlightedTaskIndex];
 
     return (
-      <aside
-        className={cn('w-full tasklist-mobile', !isCopilot && 'md:hidden')}
-      >
+      <aside className="w-full tasklist-mobile md:hidden">
         <Card>
           <Header status={content.status} />
           {highlightedTask && (

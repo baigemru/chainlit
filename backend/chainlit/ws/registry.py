@@ -1,17 +1,32 @@
-"""The registry of live websocket sessions, and the policy that reads it.
+"""The registry of live sessions, keyed by the conversation they are in.
 
-A conversation is not one socket. At any moment the server may be holding
-the tab the user is looking at, a tab they left open on another screen, and
-a session some connection walked away from without closing. Nothing here
-sends anything to any of them: there is no fan-out in this server, and there
-must not be one. What looks like cross-session behaviour is a *scan of this
-registry* -- "is anybody still working in this conversation?", "which of
-these was abandoned mid-question?" -- and the answers decide what the
-arriving session is allowed to do.
+One conversation, one session. The thread id is the identity on this wire
+-- it is what the URL says, what the client offers in ``hello`` and the only
+thing it may offer -- so the registry is a map from thread to the session
+holding it, and a second socket asking for a thread somebody is already in
+is not a second session: it is that session changing hands.
+
+That is the whole of the policy. ``claim`` answers *kept* when the thread is
+held by this user and *created* when it is free -- or held by somebody else,
+which is answered with a thread of the arriving user's own rather than with
+a refusal, because "that thread is not yours" is an answer about a row that
+exists. The session id the server mints is a handle for the HTTP routes
+(uploads, actions, custom-element writes) and never a claim on anything; it
+is indexed here only so those routes can find their session.
+
+What the old shape carried, and why none of it is left
+------------------------------------------------------
+Keyed by session id, several sessions could sit in one conversation at once,
+and everything that followed was bookkeeping for that: a thread index that
+was a set, a sweep for the ones parked on a question nobody would answer,
+``REPLACED`` for a reload onto an idle session, ``REFUSED`` for an id that
+was somebody else's. With one session per thread, a reload is the same
+session handed a new socket, a second tab is a takeover, and there is no
+such thing as a bystander to sweep.
 
 So this module is a data structure plus the predicates that read it. It
 imports nothing from ``chainlit`` and nothing from the transport: not
-``litestar``, not ``chainlit.protocol``, ``chainlit.socket``,
+``litestar``, not ``chainlit.protocol``, ``chainlit.ws.connection``,
 ``chainlit.server`` or ``chainlit.emitter``. That independence is the point.
 The registry is the one piece of server state that would have to become
 shared storage the day this runs on more than one replica, and a thing that
@@ -20,12 +35,11 @@ may have to be swapped has to be testable on its own.
 What the registry owns, and what it only observes
 -------------------------------------------------
 It owns the three facts that decide policy but do not belong to any single
-session: which conversation a session is in (``thread_id``), who it belongs
-to (``user_identifier``), and whether anyone is on the other end
-(``connected`` -- the flag the old code kept on the session as
-``socket_disconnected``). Those are indexed, so they must be changed through
-``set_thread`` / ``mark_connected`` / ``mark_disconnected``, never by
-assigning to the entry.
+session: which conversation a session is in (``thread_id``, the primary
+key), who it belongs to (``user_identifier``), and whether anyone is on the
+other end (``connected``). Those are indexed, so they must be changed
+through ``set_thread`` / ``mark_connected`` / ``mark_disconnected``, never
+by assigning to the entry.
 
 It only *observes* the work a session holds -- a live ask, a running task,
 an answer parked on the handshake gate. Those live in the session object and
@@ -36,36 +50,21 @@ in particular stay out of here: ``has_live_ask`` is already the answer to
 
 Deciding is not doing
 ---------------------
-Nothing in this module deletes a session. ``claim`` returns an outcome and
-``abandoned_ask_sessions`` returns candidates; the caller performs the
-eviction, because eviction is an ``await`` (closing MCP sessions, removing
-files) and a registry that awaits inside a scan is neither testable nor
-reasonable to lock. The caller is expected to re-check each candidate with
-``should_evict`` immediately before the awaiting delete: a candidate may
-have reconnected while a previous delete was in flight.
-
-No index by socket id
----------------------
-The old code carried a second dict keyed by the socket.io ``sid``
-(``ws_sessions_sid``) because socket.io hands a handler nothing but that
-string, so the server had no other way back to the session. A raw websocket
-handler holds the connection object itself and can carry its session on it,
-so the reverse index would buy nothing and cost the thing it always cost: a
-second mapping that has to be re-keyed on every reconnect, and that leaks
-whenever a session is removed after its socket id has already moved on. It
-is deliberately not here.
+Nothing in this module tears a session down. ``claim`` returns an outcome;
+the caller performs whatever follows, because a teardown is an ``await``
+(closing writers, removing files) and a registry that awaits inside a
+lookup is neither testable nor reasonable to lock.
 
 Per-process, single-loop
 ------------------------
 This registry is per-process and assumes the single event loop that owns
-it: no locks, and every method is synchronous so that a scan cannot be
+it: no locks, and every method is synchronous so that a read cannot be
 interleaved with a mutation. For more than one replica it is not enough to
 put this dict in Redis -- entries hold live ``asyncio`` objects that cannot
 cross a process. Shared storage could hold only the owned facts (thread,
-owner, connected, and the *observed booleans* snapshotted on change), which
-makes the queries here answerable anywhere; the eviction itself would have
-to become a message to the replica that holds the session, which is the
-first genuine fan-out this server would ever need.
+owner, connected), which makes the queries here answerable anywhere; the
+takeover itself would have to become a message to the replica holding the
+session, which is the first genuine fan-out this server would ever need.
 """
 
 from __future__ import annotations
@@ -84,10 +83,21 @@ __all__ = [
     "SessionEntry",
     "SessionRegistry",
     "SessionView",
-    "has_live_work",
-    "is_abandoned_ask_session",
+    "ThreadHeld",
     "is_owned_by",
 ]
+
+
+class ThreadHeld(RuntimeError):
+    """A session was registered on a thread another session already holds.
+
+    Never a client's doing: ``claim`` answers *kept* for a held thread, so
+    reaching ``register`` with one means the caller skipped the claim or
+    awaited between the two. Loud rather than silent, because the quiet
+    alternatives are both worse -- overwriting orphans a live session in
+    somebody's browser, and keeping both brings back the fan-out this key
+    exists to forbid.
+    """
 
 
 class SessionView(Protocol):
@@ -101,7 +111,11 @@ class SessionView(Protocol):
 
     @property
     def id(self) -> str:
-        """The session id: the key the client offers on connect."""
+        """The handle the server minted for this session.
+
+        Not an identity the client may claim: it is how an HTTP route finds
+        the session that rendered the button it is pressing.
+        """
 
     @property
     def has_live_ask(self) -> bool:
@@ -128,37 +142,29 @@ class SessionView(Protocol):
 
 
 class ClaimOutcome(StrEnum):
-    """What happens to the session id a connecting client offers.
-
-    The values are the four words the scenario table uses for ``on_open``.
-    """
+    """What happens to the thread a connecting client asks for."""
 
     CREATED = "created"
-    """Nothing was held under that id: an ordinary first connection."""
+    """Nobody is in that conversation -- or the one who is, is not this
+    user. Either way this connection begins a session of its own."""
 
     KEPT = "kept"
-    """The held session survives and is handed the new socket."""
-
-    REPLACED = "replaced"
-    """The held session had nothing worth keeping: drop it, start over."""
-
-    REFUSED = "refused"
-    """The id is held by somebody else. The connection does not open."""
+    """The session in that conversation survives and takes this socket."""
 
 
 @dataclass(slots=True)
 class SessionEntry:
     """One session's tenancy in the registry.
 
-    Identity matters: the entry object, not the id, is what a pending
-    eviction holds on to. An id can be re-claimed by a successor session
-    while a delete of its predecessor is still awaiting, and acting on the
-    id alone would then wipe the successor.
+    Identity matters: the entry object, not the thread id, is what a
+    deferred cleanup holds on to. A thread can be re-claimed by a successor
+    session while a teardown of its predecessor is still awaiting, and
+    acting on the id alone would then wipe the successor.
     """
 
     session: SessionView
+    thread_id: str
     user_identifier: Optional[str] = None
-    thread_id: Optional[str] = None
     connected: bool = True
 
     @property
@@ -168,17 +174,18 @@ class SessionEntry:
 
 @dataclass(frozen=True, slots=True)
 class Claim:
-    """The decision about a connecting client's session id."""
+    """The decision about the thread a connecting client asked for."""
 
     outcome: ClaimOutcome
     entry: Optional[SessionEntry] = None
-    """The held entry, for every outcome but ``CREATED``."""
+    """For ``KEPT``, the session being handed over. For ``CREATED``, the
+    tenant that made the requested thread unavailable, if there was one --
+    the arriving connection is told nothing about it, but the handshake has
+    to know the thread it asked for is not the one it is getting, and
+    learning that from the claim saves a second lookup racing this one."""
 
 
 # --- Predicates -----------------------------------------------------------
-#
-# Named after what they decide, and kept out of the scans that use them so
-# that each can be pinned by a test on its own.
 
 
 def is_owned_by(entry: SessionEntry, user_identifier: Optional[str]) -> bool:
@@ -186,9 +193,13 @@ def is_owned_by(entry: SessionEntry, user_identifier: Optional[str]) -> bool:
 
     An anonymous session belongs to the anonymous user and to nobody else:
     with authentication off both sides are ``None`` and match, but a named
-    user must never inherit an unowned session, nor the reverse. The session
-    id is a bearer token in everything but name, so guessing one must not be
-    enough to reconnect to somebody else's conversation.
+    user must never inherit an unowned session, nor the reverse.
+
+    With authentication off this is true of every pair, so the thread id in
+    the URL is the whole of the capability -- a uuid4, like a share link,
+    and anyone who has it takes the conversation over. That is the deal an
+    anonymous deployment makes; a deployment that cannot make it turns
+    authentication on.
     """
     if entry.user_identifier is None and user_identifier is None:
         return True
@@ -197,52 +208,18 @@ def is_owned_by(entry: SessionEntry, user_identifier: Optional[str]) -> bool:
     return entry.user_identifier == user_identifier
 
 
-def has_live_work(entry: SessionEntry) -> bool:
-    """Whether dropping this session would take something from the user.
-
-    Three distinct things, and each is somebody's loss: a question waiting
-    for an answer, work that was started and may have been paid for, and an
-    answer that was typed and has not been filed yet.
-    """
-    session = entry.session
-    return session.has_live_ask or session.has_live_task or session.has_parked_reply
-
-
-def is_abandoned_ask_session(entry: SessionEntry, thread_id: Optional[str]) -> bool:
-    """Whether this session is holding a conversation open for nobody.
-
-    All three, and nothing else: it belongs to this conversation, its socket
-    is gone, and it is parked on a question. The user who would have
-    answered that question is arriving somewhere else in the same thread, so
-    the question is never going to be answered where it stands -- while it
-    stands, the conversation counts as busy and is never tidied up.
-
-    Note what is *not* here. A running task does not shield an abandoned
-    ask: a hook parked on a long offer keeps its task live for as long as
-    the deadline lasts, and shielding on that is exactly how every reload
-    used to leave another session behind. A connected session is never
-    abandoned however long its question has been up -- the form is really on
-    screen and the user can really answer it.
-    """
-    if thread_id is None or entry.thread_id != thread_id:
-        return False
-    return not entry.connected and entry.session.has_live_ask
-
-
 class SessionRegistry:
-    """Live sessions, keyed by session id and indexed by thread.
+    """Live sessions, keyed by thread and indexed by session id.
 
-    The thread index is the part that must not be a scan: it is read on
-    every resume, by the eviction sweep and by both protection queries.
-    There is deliberately no index by user -- nothing asks that question,
-    and a second index is a second thing to keep consistent.
+    The thread map is the registry; the id map is a lookup table for the
+    HTTP routes, which are handed a session id and nothing else. There is
+    deliberately no index by user -- nothing asks that question, and a third
+    index is a third thing to keep consistent.
     """
 
     def __init__(self) -> None:
-        self._entries: dict[str, SessionEntry] = {}
-        # thread id -> {session id: entry}, insertion-ordered, so the sweep
-        # and both protection queries are O(sessions of this thread).
-        self._by_thread: dict[str, dict[str, SessionEntry]] = {}
+        self._by_thread: dict[str, SessionEntry] = {}
+        self._by_id: dict[str, SessionEntry] = {}
 
     # --- Registration -----------------------------------------------
 
@@ -250,84 +227,102 @@ class SessionRegistry:
         self,
         session: SessionView,
         *,
+        thread_id: str,
         user_identifier: Optional[str] = None,
-        thread_id: Optional[str] = None,
         connected: bool = True,
     ) -> SessionEntry:
         """Take a session into the registry and return its entry.
 
-        Registering under an id that is already held evicts the previous
-        entry from the indexes first: a successor created under the same id
-        (what a replaced page load does) must not leave its predecessor
-        behind in the thread index.
+        Raises:
+            ThreadHeld: something is already in that conversation.
+
+        The session id is not checked, because it is not offered by anybody:
+        the server mints a fresh uuid4 for every session it creates, so the
+        secondary index cannot collide unless the mint is broken.
         """
-        self.remove(session.id)
+        held = self._by_thread.get(thread_id)
+        if held is not None:
+            raise ThreadHeld(f"thread {thread_id} is already held by session {held.id}")
         entry = SessionEntry(
             session=session,
-            user_identifier=user_identifier,
             thread_id=thread_id,
+            user_identifier=user_identifier,
             connected=connected,
         )
-        self._entries[entry.id] = entry
-        self._index(entry)
+        self._by_thread[thread_id] = entry
+        self._by_id[entry.id] = entry
         return entry
 
     def get(self, session_id: str) -> Optional[SessionEntry]:
-        """The entry held under this id, or ``None`` if there is none."""
-        return self._entries.get(session_id)
+        """The entry of the session with this handle, if it is still here."""
+        return self._by_id.get(session_id)
+
+    def entry_of_thread(self, thread_id: Optional[str]) -> Optional[SessionEntry]:
+        """The entry holding this conversation, if anybody is in it."""
+        if thread_id is None:
+            return None
+        return self._by_thread.get(thread_id)
 
     def find(self, session_id: str) -> Optional["Session"]:
-        """The session held under this id, without its bookkeeping.
+        """The session with this handle, without its bookkeeping.
 
         What the HTTP routes are given: a controller has no business with
         the entry around a session, and handing it over would let one
         write to it.
         """
-        entry = self._entries.get(session_id)
+        entry = self._by_id.get(session_id)
+        return None if entry is None else cast("Session", entry.session)
+
+    def find_thread(self, thread_id: Optional[str]) -> Optional["Session"]:
+        """The session in this conversation, for the routes that act on threads."""
+        entry = self.entry_of_thread(thread_id)
         return None if entry is None else cast("Session", entry.session)
 
     def holds(self, entry: SessionEntry) -> bool:
-        """Whether this exact entry is still the tenant of its id.
+        """Whether this exact entry is still the tenant of its thread.
 
-        Identity, not equality: a successor registered under the same id
+        Identity, not equality: a successor registered on the same thread
         does not count.
         """
-        return self._entries.get(entry.id) is entry
-
-    def remove(self, session_id: str) -> Optional[SessionEntry]:
-        """Drop the session held under this id and return it, if any."""
-        entry = self._entries.pop(session_id, None)
-        if entry is not None:
-            self._deindex(entry)
-        return entry
+        return self._by_thread.get(entry.thread_id) is entry
 
     def discard(self, entry: SessionEntry) -> bool:
         """Drop this exact entry, and only if it is still the tenant.
 
-        The removal to prefer wherever a session tears itself down: a
-        deferred cleanup that removed by id alone would wipe the registry
-        entry of a successor created under the same id in the meantime.
+        The removal to prefer everywhere: a deferred cleanup that removed by
+        thread alone would wipe the registry entry of a successor that took
+        the conversation over in the meantime.
         """
         if not self.holds(entry):
             return False
-        self.remove(entry.id)
+        del self._by_thread[entry.thread_id]
+        if self._by_id.get(entry.id) is entry:
+            del self._by_id[entry.id]
         return True
 
     # --- Owned, indexed state ---------------------------------------
 
-    def set_thread(self, session_id: str, thread_id: Optional[str]) -> bool:
-        """Move a session into a conversation, keeping the index consistent.
+    def set_thread(self, session_id: str, thread_id: str) -> bool:
+        """Move a session into another conversation, re-keying the registry.
 
-        The only way the thread of a registered session may change.
+        The only way the thread of a registered session may change, and the
+        one caller is the disown: a session that asked for a thread it may
+        not have is given one of its own.
+
+        Raises:
+            ThreadHeld: the conversation it is being moved into is occupied.
         """
-        entry = self._entries.get(session_id)
+        entry = self._by_id.get(session_id)
         if entry is None:
             return False
         if entry.thread_id == thread_id:
             return True
-        self._deindex(entry)
+        held = self._by_thread.get(thread_id)
+        if held is not None:
+            raise ThreadHeld(f"thread {thread_id} is already held by session {held.id}")
+        del self._by_thread[entry.thread_id]
         entry.thread_id = thread_id
-        self._index(entry)
+        self._by_thread[thread_id] = entry
         return True
 
     def mark_connected(self, session_id: str) -> bool:
@@ -339,7 +334,7 @@ class SessionRegistry:
         return self._set_connected(session_id, False)
 
     def _set_connected(self, session_id: str, connected: bool) -> bool:
-        entry = self._entries.get(session_id)
+        entry = self._by_id.get(session_id)
         if entry is None:
             return False
         entry.connected = connected
@@ -347,152 +342,65 @@ class SessionRegistry:
 
     # --- Queries ----------------------------------------------------
 
-    def entries_of_thread(self, thread_id: Optional[str]) -> tuple[SessionEntry, ...]:
-        """Every session of one conversation, in registration order."""
-        if thread_id is None:
-            return ()
-        return tuple(self._by_thread.get(thread_id, {}).values())
-
     def __contains__(self, session_id: object) -> bool:
-        return session_id in self._entries
+        return session_id in self._by_id
 
     def __len__(self) -> int:
-        return len(self._entries)
+        return len(self._by_thread)
 
     def __iter__(self) -> Iterator[SessionEntry]:
         """A snapshot, so a caller may remove sessions while iterating."""
-        return iter(tuple(self._entries.values()))
+        return iter(tuple(self._by_thread.values()))
 
-    # --- Policy: what happens to the id a client offers --------------
+    # --- Policy: what happens to the thread a client asks for --------
 
     def claim(
-        self,
-        session_id: str,
-        user_identifier: Optional[str] = None,
-        *,
-        page_load: bool = False,
+        self, thread_id: Optional[str], user_identifier: Optional[str] = None
     ) -> Claim:
-        """Decide what a connecting client gets for the id it offered.
+        """Decide what a connecting client gets for the conversation it named.
 
-        An idle conversation is replaced on a page load -- the *session*
-        starts over. Whether the replacement opens blank or resumes a
-        stored thread is not decided here: the client now carries the
-        thread it was in through a reload, and the runner's resume path
-        answers for it. What this decides is narrower: by the time the
-        reload arrives the server may be in the middle of something the
-        user is still owed -- an open question, running work, a parked
-        reply -- and that session survives the reload outright. A transport
-        reconnect asked for nothing, so nothing may be taken from it -- its
-        conversation is kept whatever state it is in.
+        Two answers, and neither depends on why the socket opened. A reload,
+        a second tab and a transport blip all say the same thing -- "I am in
+        thread T" -- and the answer to all three is the session that is in
+        thread T, if it is this user's. The client learns which socket won
+        from the 4409 the loser gets, not from anything decided here.
 
-        Ownership is checked on both paths and before everything else: a
-        reconnect to somebody else's id is as much a read of their
-        conversation as a reload is.
+        A thread held by somebody else is answered exactly as a thread that
+        was never held: ``CREATED``, and a conversation of the arriving
+        user's own. A refusal would confirm the thread exists, and the id in
+        a URL is a bearer token in everything but name.
         """
-        entry = self._entries.get(session_id)
+        if thread_id is None:
+            return Claim(ClaimOutcome.CREATED)
+        entry = self._by_thread.get(thread_id)
         if entry is None:
             return Claim(ClaimOutcome.CREATED)
         if not is_owned_by(entry, user_identifier):
-            return Claim(ClaimOutcome.REFUSED, entry)
-        if not page_load:
-            return Claim(ClaimOutcome.KEPT, entry)
-        if has_live_work(entry):
-            return Claim(ClaimOutcome.KEPT, entry)
-        return Claim(ClaimOutcome.REPLACED, entry)
+            return Claim(ClaimOutcome.CREATED, entry)
+        return Claim(ClaimOutcome.KEPT, entry)
 
-    # --- Policy: the sweep -------------------------------------------
-
-    def abandoned_ask_sessions(
-        self,
-        thread_id: Optional[str],
-        *,
-        arriving_session_id: Optional[str] = None,
-    ) -> tuple[SessionEntry, ...]:
-        """The sessions of this conversation that are holding it open for nobody.
-
-        Read on the first entry of a new session into the resume branch,
-        before the resume="delete" decision -- the whole point is that the
-        conversation reads as idle again by the time that decision is made,
-        so the caller must have performed the evictions before it asks
-        ``has_live_task`` or ``protected_step_ids``.
-
-        The arriving session is excluded, and cannot in practice be a
-        candidate anyway: handing it the socket is what marks it connected,
-        and that has already happened. Belt and suspenders.
-        """
-        return tuple(
-            entry
-            for entry in self.entries_of_thread(thread_id)
-            if entry.id != arriving_session_id
-            and is_abandoned_ask_session(entry, thread_id)
-        )
-
-    def should_evict(
-        self,
-        entry: SessionEntry,
-        thread_id: Optional[str],
-        *,
-        arriving_session_id: Optional[str] = None,
-    ) -> bool:
-        """Re-check one candidate immediately before deleting it.
-
-        Deleting awaits, so the plan is stale the moment it is made: a
-        candidate may have reconnected, changed conversation or been
-        replaced under its id while an earlier delete was in flight. Call
-        this with no await between it and the delete.
-        """
-        if not self.holds(entry):
-            return False
-        if entry.id == arriving_session_id:
-            return False
-        return is_abandoned_ask_session(entry, thread_id)
-
-    # --- Policy: what a conversation's other sessions protect ---------
+    # --- Policy: what a conversation protects -------------------------
 
     def has_live_task(self, thread_id: Optional[str]) -> bool:
-        """Whether work is running anywhere in this conversation.
+        """Whether work is running in this conversation.
 
-        A running task on *any* session means the conversation is alive, and
-        the messages it is producing are not leftovers: a resume from a
-        second tab that deleted them would have the running work put its
-        rows back as orphans and the two feeds disagree.
+        Read by the resume-delete filter: work that is running is not a
+        leftover, and a read that deleted its messages would have the task
+        put its rows back as orphans and the two feeds disagree.
 
         Connectedness is not consulted -- work running behind a dropped
-        socket is still work, and it will post its results. Neither is the
-        arriving session excluded: including it is harmless (its own slots
-        are empty at resume time) and excluding it would be a second rule to
-        keep true.
+        socket is still work, and it will post its results.
         """
-        return any(
-            entry.session.has_live_task for entry in self.entries_of_thread(thread_id)
-        )
+        entry = self.entry_of_thread(thread_id)
+        return entry is not None and entry.session.has_live_task
 
     def protected_step_ids(self, thread_id: Optional[str]) -> frozenset[str]:
-        """Step ids that a live question of this conversation is displaying.
+        """Step ids a live question of this conversation is displaying.
 
-        Whose session the question belongs to is not the point -- that
-        somebody is being asked is. Deleting the step from under another
-        session's live question leaves that user with nothing to answer.
+        Deleting the step from under a question that is still on screen
+        leaves the user with nothing to answer.
         """
-        protected: set[str] = set()
-        for entry in self.entries_of_thread(thread_id):
-            if entry.session.has_live_ask:
-                protected.update(entry.session.live_ask_step_ids)
-        return frozenset(protected)
-
-    # --- Index bookkeeping -------------------------------------------
-
-    def _index(self, entry: SessionEntry) -> None:
-        if entry.thread_id is None:
-            return
-        self._by_thread.setdefault(entry.thread_id, {})[entry.id] = entry
-
-    def _deindex(self, entry: SessionEntry) -> None:
-        if entry.thread_id is None:
-            return
-        bucket = self._by_thread.get(entry.thread_id)
-        if bucket is None:
-            return
-        bucket.pop(entry.id, None)
-        if not bucket:
-            del self._by_thread[entry.thread_id]
+        entry = self.entry_of_thread(thread_id)
+        if entry is None or not entry.session.has_live_ask:
+            return frozenset()
+        return frozenset(entry.session.live_ask_step_ids)

@@ -1,3 +1,4 @@
+import { requiredEnvPresent } from '@/lib/userEnv';
 import { Navigate } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 
@@ -8,7 +9,7 @@ import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
 import MobileNotice from '@/components/MobileNotice';
 import { TaskList } from '@/components/Tasklist';
-import ThreadAddressListener from '@/components/ThreadAddressListener';
+import ThreadAddressSync from '@/components/ThreadAddressSync';
 import ThreadReturnListener from '@/components/ThreadReturnListener';
 import { Header } from '@/components/header';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -26,10 +27,8 @@ const Page = ({ children }: Props) => {
   const userEnv = useRecoilValue(userEnvState);
   const sideView = useRecoilValue(sideViewState);
 
-  if (config?.userEnv) {
-    for (const key of config.userEnv || []) {
-      if (!userEnv[key]) return <Navigate to="/env" />;
-    }
+  if (!requiredEnvPresent(config?.userEnv, userEnv)) {
+    return <Navigate to="/env" />;
   }
 
   const mainContent = (
@@ -69,7 +68,7 @@ const Page = ({ children }: Props) => {
       <ChatProfileSwitchListener />
       <MobileNotice />
       <ThreadReturnListener />
-      <ThreadAddressListener />
+      <ThreadAddressSync />
       {historyEnabled && !sidebarHidden ? (
         <>
           <LeftSidebar />

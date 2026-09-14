@@ -74,10 +74,10 @@ export const CloseCode = {
   BAD_HANDSHAKE: 4400,
   /** No valid credentials on a server that requires login. */
   UNAUTHENTICATED: 4401,
-  /** The session id belongs to another user. */
-  SESSION_FORBIDDEN: 4403,
-  /** The thread id is not readable by this user. */
-  THREAD_FORBIDDEN: 4404,
+  // 4403 SESSION_FORBIDDEN and 4404 THREAD_FORBIDDEN are gone. Nothing can
+  // refuse a name the client chose any more: the session id is minted by the
+  // server, and a thread this user may not have is answered by starting a
+  // fresh one silently rather than by closing the socket in their face.
   /** No `hb.ack` within the deadline. */
   HEARTBEAT_TIMEOUT: 4408,
   /** Another connection took this session over. */

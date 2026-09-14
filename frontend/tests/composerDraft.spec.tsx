@@ -7,7 +7,7 @@ import MessageComposer from '@/components/chat/MessageComposer';
 /**
  * The draft has to outlive the composer that is showing it.
  *
- * `/` and `/thread/:id` are two route elements, so ThreadAddressListener
+ * `/` and `/thread/:id` are two route elements, so ThreadAddressSync
  * moving the address onto the thread the server just named unmounts `Home`
  * and mounts `Page` — a second `MessageComposer`, and a third after New
  * Chat sends the address back to `/` and the next `session.ready` names it

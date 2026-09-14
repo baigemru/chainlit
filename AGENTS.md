@@ -41,7 +41,7 @@ Structure lives in the architecture documents, not here:
 Python **3.14**, Node **24+** (`lts/*` in CI), [uv](https://docs.astral.sh/uv/),
 pnpm **9** (pinned by `packageManager`). The repository is one uv workspace
 (root `pyproject.toml`, member `backend/`) and one pnpm workspace
-(`frontend/`, `libs/react-client/`, `libs/copilot/`).
+(`frontend/`, `libs/react-client/`).
 
 ### Install
 
@@ -59,7 +59,7 @@ pnpm **9** (pinned by `packageManager`). The repository is one uv workspace
 | Backend wheel   | `uv build`                                   | `backend/` |
 
 **Build order matters**: `@chainlit/react-client` must be built before
-`frontend` and `libs/copilot` type-check or build against it — CI does exactly
+`frontend` type-checks or builds against it — CI does exactly
 this in `check-frontend.yaml`. `pnpm build` is `pnpm run --recursive build`,
 which respects workspace order; a bare `cd frontend && pnpm build` after editing
 the client does not.
@@ -232,7 +232,7 @@ per-project only.
 
 Wheels come from `.github/workflows/build-litestar.yaml`, which fires on tags
 matching `litestar-v*` on `feat/litestar-rebuild`, builds the JS assets, copies
-them into `backend/chainlit/{frontend,copilot}/dist/`, runs the full backend
+them into `backend/chainlit/frontend/dist/`, runs the full backend
 suite against a PostgreSQL service, builds the wheel and publishes it as a
 GitHub **pre-release**. The workflow rewrites `backend/chainlit/version.py` from
 the tag (`litestar-v3.0.0a12` → `3.0.0a12`), so the tag and the committed version
@@ -268,11 +268,9 @@ attaches — a "hung" container after a restart is usually this, not a crash.
 
 ## 5. Known state and gotchas
 
-- Three vitest cases in `frontend/tests/displayModePrecedence.spec.ts` fail on a
-  clean checkout; they are pre-existing, not your regression.
-- `libs/copilot` type-check is a deliberate no-op (`echo 'SKIPPED: …'`), and the
-  lint-staged entry for it is commented out. Rationale:
-  [docs/research/copilot-type-checking.md](docs/research/copilot-type-checking.md).
+- The embeddable copilot widget (`libs/copilot/`) was deleted on 14.09.2026 — the
+  fork's one consumer never embedded it, and it was the only package whose
+  type-check had to be skipped. Do not reintroduce it.
 - Three Cypress specs are permanently red on a ru-RU machine (locale-dependent
   assertions). Not a regression either.
 - `starlette`, `fastapi`, `pydantic` and `mcp` are gone from `uv.lock` entirely.

@@ -1,3 +1,4 @@
+import { requiredEnvPresent } from '@/lib/userEnv';
 import { cn } from '@/lib/utils';
 import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
@@ -49,11 +50,19 @@ function App() {
       : true
     : false;
 
+  // A session is born with its `user_env` and never reads it again, so the
+  // keys the app requires have to be typed before the first handshake goes
+  // out. Re-attaching once they are only refreshes the payload of a
+  // connection that is already up.
+  const userEnvOk = configLoaded
+    ? requiredEnvPresent(config.userEnv, userEnv)
+    : false;
+
   // The whole connection policy: when the app is ready to talk, say which
   // session it is talking about. Attaching is idempotent, so this effect
   // states an intent rather than performing a transition.
   useEffect(() => {
-    if (!isAuthenticated || !isReady || !chatProfileOk) {
+    if (!isAuthenticated || !isReady || !chatProfileOk || !userEnvOk) {
       return;
     }
 
@@ -65,6 +74,7 @@ function App() {
     descriptor,
     isReady,
     chatProfileOk,
+    userEnvOk,
     device
   ]);
 

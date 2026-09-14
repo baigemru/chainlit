@@ -1,6 +1,5 @@
 import { isEqual } from 'lodash';
 import { AtomEffect, DefaultValue, atom, selector } from 'recoil';
-import { v4 as uuidv4 } from 'uuid';
 
 import type { ProtocolError } from './protocol';
 import type { SessionDescriptor } from './transport';
@@ -30,19 +29,12 @@ export const protocolErrorState = atom<ProtocolError | undefined>({
   default: undefined
 });
 
-// Storage key for the persisted session id. Mutable on purpose: embedders
-// that share a tab with the main app (the copilot widget) must override it
-// before mounting, otherwise both clients would fight over one server
-// session.
-export const sessionIdStorage = { key: 'chainlit-session-id' };
-
 // Which thread this page load is *asking* for. A function rather than a
 // value because the host decides where the request comes from -- in the
 // frontend it is the address bar, read at atom initialisation -- and this
-// package knows nothing about routes. Set before RecoilRoot mounts, like
-// `sessionIdStorage.key` above.
+// package knows nothing about routes. Set before RecoilRoot mounts.
 //
-// It has to be synchronous, and that is the whole point: `AutoResumeThread`
+// It has to be synchronous, and that is the whole point: `ThreadAddressSync`
 // compares the URL's thread against the descriptor's on mount, before a
 // single frame can arrive, and calls `clear()` when they differ. A
 // descriptor that learned its thread from an effect would always differ on
@@ -52,103 +44,52 @@ export const sessionDescriptorSeed: {
   threadId?: () => string | undefined;
 } = {};
 
-// A saved session id is only reused when this page load is a plain reload
-// of the same tab. A brand-new navigation — including tabs opened from this
-// one via target=_blank or window.open, which inherit a copy of
-// sessionStorage — must NOT adopt the id, or the new tab would silently
-// hijack the original tab's server session. 'back_forward' is deliberately
-// excluded too: Chromium reports it for duplicated/reopened tabs. In old
-// browsers without Navigation Timing L2 this degrades to the historical
-// behavior (a fresh id on every load).
-const isReloadNavigation = (): boolean => {
-  try {
-    const nav = performance.getEntriesByType('navigation')[0] as
-      | PerformanceNavigationTiming
-      | undefined;
-    return nav?.type === 'reload';
-  } catch (_error) {
-    return false;
-  }
-};
-
-// Persist the session id in sessionStorage (per-tab, survives F5) so a page
-// reload reconnects to the same server session and a pending ask can be
-// restored. sessionStorage is deliberate: localStorage would collapse every
-// tab into a single server session.
-//
-// Only the id. The thread is asked for by the host seed on both branches --
-// storage has no say in it, because two places naming the thread is two
-// answers to the same question, and the one that disagrees with the address
-// bar is the one that wipes a live session.
-const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
-  setSelf,
-  onSet
-}) => {
-  const requested = () => {
-    const threadId = sessionDescriptorSeed.threadId?.();
-    // Absent, not present-and-undefined: the transport compares descriptors
-    // by shape, and `clear()` writes the key only when it has one.
-    return threadId ? { threadId } : {};
-  };
-
-  try {
-    const saved = isReloadNavigation()
-      ? sessionStorage.getItem(sessionIdStorage.key)
-      : null;
-    if (saved) {
-      setSelf({ sessionId: saved, ...requested() });
-    } else {
-      const fresh = uuidv4();
-      sessionStorage.setItem(sessionIdStorage.key, fresh);
-      setSelf({ sessionId: fresh, ...requested() });
-    }
-  } catch (_error) {
-    // Storage unavailable (sandboxed iframe, privacy mode): a fresh id, as
-    // ever -- but still the thread the address bar asked for, or a reload
-    // there would be read as "resume something else" and clear the session.
-    setSelf({ sessionId: uuidv4(), ...requested() });
-  }
-
-  onSet((descriptor) => {
-    try {
-      sessionStorage.setItem(sessionIdStorage.key, descriptor.sessionId);
-    } catch (_error) {
-      // Ignore storage failures; the atom still holds the id.
-    }
-  });
+// Nothing about a conversation is written down between page loads any more.
+// The thread comes out of the address bar, which is the one place that can
+// name it; the session id is minted by the server and is only ever a handle
+// for HTTP routes, so there is nothing to persist and nothing a duplicated
+// tab could inherit and hijack. A second tab on the same address is a
+// takeover the server decides on, not a collision this side has to prevent.
+const seedEffect: AtomEffect<SessionDescriptor> = ({ setSelf }) => {
+  const threadId = sessionDescriptorSeed.threadId?.();
+  // Absent, not present-and-undefined: the transport compares descriptors
+  // by shape, and `clear()` writes the key only when it has one.
+  if (threadId) setSelf({ threadId });
 };
 
 /**
- * What the socket is currently for: the session, the thread it resumes, and
- * the profile the client offers.
+ * What the socket is currently for: the thread it resumes and the profile
+ * the client offers.
  *
- * One atom rather than three, because navigation moves all of them at once
- * and the transport reacts to the result. `clear()`, a profile hand-off and
- * a thread resume each mint a whole descriptor in a single write; when they
- * were three atoms every one of those changes reached the connect effect
- * separately, and the intermediate combinations — a new session id still
- * pointing at the previous thread — were real states the socket was opened
- * on.
+ * One atom rather than two, because navigation moves both at once and the
+ * transport reacts to the result. `clear()`, a profile hand-off and a thread
+ * resume each mint a whole descriptor in a single write; as separate atoms
+ * every one of those changes reached the connect effect on its own, and the
+ * intermediate combinations were real states a socket got opened on.
  *
- * The three selectors below are views onto it, so the components that only
+ * The two selectors below are views onto it, so the components that only
  * read one field keep doing so.
  */
 export const sessionDescriptorState = atom<SessionDescriptor>({
   key: 'SessionDescriptor',
-  default: { sessionId: uuidv4() },
-  effects: [sessionStorageSessionIdEffect]
+  default: {},
+  effects: [seedEffect]
 });
 
-export const sessionIdState = selector<string>({
+/**
+ * The server's handle for this session's live objects, as announced in
+ * `session.ready`.
+ *
+ * Deliberately outside the descriptor: it is not a request, it is an answer,
+ * and nothing may connect on it. Uploads, action calls and custom-element
+ * writes address the session over HTTP with it, so every one of those has to
+ * survive it being `undefined` — which it is before the first `session.ready`
+ * and again from the moment `clear()` gives the session up, or an early click
+ * would act on the session that was just abandoned.
+ */
+export const sessionIdState = atom<string | undefined>({
   key: 'SessionId',
-  get: ({ get }) => get(sessionDescriptorState).sessionId,
-  // A reset means "give me a different session", which is a fresh uuid --
-  // the DefaultValue itself never reaches the atom.
-  set: ({ set }, newValue) =>
-    set(sessionDescriptorState, (descriptor) => ({
-      ...descriptor,
-      sessionId: newValue instanceof DefaultValue ? uuidv4() : newValue
-    }))
+  default: undefined
 });
 
 export const chatProfileState = selector<string | undefined>({

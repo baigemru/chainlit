@@ -38,8 +38,7 @@ const MIN_WATCHDOG_MS = 10_000;
  * a malformed handshake and an oversized frame are client bugs, missing or
  * insufficient credentials need the user, and a superseded session belongs
  * to another connection now — reconnecting would see-saw it between tabs.
- * `onClose` still fires, so the application can act (see the one-shot
- * session-id reset in `useChatSession`).
+ * `onClose` still fires with `terminal: true`, so the application can act.
  *
  * `BACKLOG_EXCEEDED` is deliberately absent: it means the server gave up
  * waiting for us to read, and reconnecting is the whole recovery — the
@@ -48,8 +47,6 @@ const MIN_WATCHDOG_MS = 10_000;
 const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set<number>([
   CloseCode.BAD_HANDSHAKE,
   CloseCode.UNAUTHENTICATED,
-  CloseCode.SESSION_FORBIDDEN,
-  CloseCode.THREAD_FORBIDDEN,
   CloseCode.SUPERSEDED,
   CloseCode.FRAME_TOO_LARGE
 ]);

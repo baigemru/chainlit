@@ -339,3 +339,102 @@ def test_a_reload_onto_a_finished_turn_leaves_no_interruption_trace(
     outputs = [step.get("output") for step in replay[-1]["thread"]["steps"]]
     assert TRACE not in outputs, outputs
     assert "paid report" in outputs, outputs
+
+
+# ------------------------- 4. the thread restore in apps that cannot resume
+
+
+def test_an_app_without_resume_hooks_gets_a_fresh_thread_not_the_old_one(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """A requested thread the app cannot resume must be disowned, not kept.
+
+    The client now offers the stored thread on every reload. An application
+    with no ``on_chat_resume``/``on_thread_ready`` bails out of ``_resume``
+    -- and used to bail with the session still *bound* to the requested
+    thread, so the blank chat the user saw was quietly appending its
+    greeting and their next message to the old conversation's rows.
+    """
+    seed_user(db_url, ALICE)
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = None
+    test_config.code.on_thread_ready = None
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws, sessionId="s1")
+            thread_id = handshake[0]["threadId"]
+            ws.send_text(message("first"))
+            read_until(ws, "step.upsert", limit=40)
+        detail = wait_for_thread(db_url, thread_id, lambda d: len(d.steps) >= 2)
+        before = len(detail.steps)
+
+        wait_until(lambda: _disconnected(plugin, "s1"))
+
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws, sessionId="s2", threadId=thread_id)
+            ready = frames[0]
+            assert ready["t"] == "session.ready"
+            # Not the thread it asked for, and no snapshot pretending it is.
+            assert ready["threadId"] != thread_id, ready
+            assert frames_of(frames, "thread.resume") == [], tags(frames)
+
+            ws.send_text(message("second, in what must be a new chat"))
+            read_until(ws, "step.upsert", limit=40)
+            new_thread = ready["threadId"]
+            wait_for_thread(db_url, new_thread, lambda d: len(d.steps) >= 2)
+
+    # The old conversation gained nothing: the new chat is where the new
+    # turn went, not into the rows of the thread the reload happened to name.
+    after = thread_detail(db_url, thread_id)
+    assert after is not None
+    assert len(after.steps) == before, [step.output for step in after.steps]
+
+
+def test_an_idle_reload_resumes_the_conversation_it_was_in(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The behavior the thread restore deliberately changes, pinned.
+
+    An idle session is REPLACED on a page load -- but the descriptor now
+    carries the thread the tab was in, so the replacement resumes that
+    conversation instead of opening a blank chat at ``/``.
+    """
+    seed_user(db_url, ALICE)
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = _noop_resume
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws, sessionId="s1")
+            thread_id = handshake[0]["threadId"]
+            ws.send_text(message("keep this"))
+            read_until(ws, "step.upsert", limit=40)
+        wait_for_thread(db_url, thread_id, lambda d: len(d.steps) >= 2)
+        wait_until(lambda: _disconnected(plugin, "s1"))
+
+        # The same tab reloads: stored id, stored thread, nothing running.
+        with client.websocket_connect("/ws") as ws:
+            ws.send_text(hello(sessionId="s1", threadId=thread_id))
+            frames = read_until(ws, "thread.resume", limit=40)
+
+    outputs = [step.get("output") for step in frames[-1]["thread"]["steps"]]
+    assert "echo keep this" in outputs, outputs

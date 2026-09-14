@@ -284,6 +284,13 @@ class ApplicationRunner:
             await self._disown_thread(session)
             return False
         if not (self.code.on_chat_resume or self.code.on_thread_ready):
+            # The app has nothing to resume *into*, so this is a fresh chat
+            # -- but the session arrived bound to the requested thread, and
+            # left that way its greeting and the user's next message would
+            # quietly append to the old conversation's rows. Disowned, not
+            # refused: the thread exists and is theirs, the application just
+            # does not do resumes, which has always meant "start over".
+            await self._disown_thread(session)
             return False
 
         if self.transit is not None:

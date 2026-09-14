@@ -29,8 +29,13 @@ from chainlit.controllers.project import hide_resume_deleted
 from chainlit.emitter import Emitter
 from chainlit.logger import logger
 from chainlit.persistence.config import isolated
-from chainlit.persistence.records import ThreadDetail, ThreadPatch
-from chainlit.persistence.writer import PatchThread, SessionWriter, WriterRegistry
+from chainlit.persistence.records import StepRecord, ThreadDetail, ThreadPatch
+from chainlit.persistence.writer import (
+    PatchThread,
+    SaveStep,
+    SessionWriter,
+    WriterRegistry,
+)
 from chainlit.protocol.codec import ErrorCode
 from chainlit.protocol.payloads import (
     AskTextReply,
@@ -43,7 +48,7 @@ from chainlit.protocol.server import Error
 from chainlit.utils import utc_now
 from chainlit.ws.handshake import Arrival, sweep_superseded
 from chainlit.ws.registry import SessionRegistry
-from chainlit.ws.session import Session, TranscriptEntry
+from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 
 if TYPE_CHECKING:
     from chainlit.persistence.config import Persistence
@@ -55,6 +60,17 @@ __all__ = ["ApplicationRunner", "ThreadStoreAdapter"]
 # How long a session survives its socket. The old default; a reload takes
 # well under it and a closed tab is gone for good after it.
 DEFAULT_SESSION_TIMEOUT = 300.0
+
+DEFAULT_INTERRUPTED_ASK_MESSAGE = (
+    "The action was interrupted and has to be started again."
+)
+"""What the feed says where a question used to be.
+
+English, and overridable in one line of ``config.toml``
+(``project.interrupted_ask_message``), for the same reason
+``"Task manually stopped."`` is: this is a row in somebody's thread, not a
+label in the client bundle, so it cannot come from the browser's locale.
+"""
 
 
 def _identifier(user: Any) -> Optional[str]:
@@ -268,6 +284,13 @@ class ApplicationRunner:
             await self._disown_thread(session)
             return False
         if not (self.code.on_chat_resume or self.code.on_thread_ready):
+            # The app has nothing to resume *into*, so this is a fresh chat
+            # -- but the session arrived bound to the requested thread, and
+            # left that way its greeting and the user's next message would
+            # quietly append to the old conversation's rows. Disowned, not
+            # refused: the thread exists and is theirs, the application just
+            # does not do resumes, which has always meant "start over".
+            await self._disown_thread(session)
             return False
 
         if self.transit is not None:
@@ -398,9 +421,14 @@ class ApplicationRunner:
 
     async def teardown(self, session: Session) -> None:
         """Stop the session's work and release what it holds. Idempotent."""
+        # Read before the cancel, because the cancel is what makes it no
+        # longer live: a trace decided afterwards is a trace never written.
+        interrupted = session.pending_ask if session.has_live_ask else None
         session.cancel_work()
         if session.pending_ask is not None:
             Emitter(session).end_ask(session.pending_ask.step_id, "superseded")
+        if interrupted is not None:
+            self._record_interrupted_ask(session, interrupted)
         writer = session.writer
         session.writer = None
         if isinstance(writer, SessionWriter):
@@ -412,6 +440,49 @@ class ApplicationRunner:
                 )
         session.discard_files()
         session.outbound.abort()
+
+    def _record_interrupted_ask(self, session: Session, ask: PendingAsk) -> None:
+        """Leave a line in the thread where the question used to be.
+
+        This session is being taken down with a form still on screen: the
+        user reloaded into a session of their own, or walked away and the
+        reaper came. The coroutine that asked is gone either way, and the
+        question itself is usually flagged ``resume="delete"`` -- so without
+        this row the resume shows the turn simply stopping, which is the
+        silence the consumer reported.
+
+        Written through the dying session's writer, before ``aclose``
+        drains it: the arriving session reads the thread immediately after
+        this teardown returns, and a row queued anywhere else would not be
+        in it yet. Deliberately unflagged and parentless -- it exists to be
+        seen by the very resume that hides the question, so it must not
+        hang off anything that resume takes away.
+        """
+        writer = session.writer
+        if not isinstance(writer, SessionWriter) or not session.thread_id:
+            return
+        project = getattr(self.config, "project", None)
+        configured = getattr(project, "interrupted_ask_message", None)
+        text = DEFAULT_INTERRUPTED_ASK_MESSAGE if configured is None else configured
+        if not text:
+            return
+        now = utc_now()
+        writer.submit(
+            SaveStep(
+                StepRecord(
+                    id=str(uuid.uuid4()),
+                    type="assistant_message",
+                    thread_id=session.thread_id,
+                    # The voice the question was asked in. Anything else and
+                    # the interruption arrives from a stranger.
+                    name=ask.step.name or None,
+                    output=text,
+                    created_at=now,
+                    start=now,
+                    end=now,
+                )
+            )
+        )
 
     # ---------------------------------------------------- CallbackRunner API
 

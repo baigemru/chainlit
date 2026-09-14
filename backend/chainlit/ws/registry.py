@@ -374,12 +374,16 @@ class SessionRegistry:
     ) -> Claim:
         """Decide what a connecting client gets for the id it offered.
 
-        Reloading has always meant "start over", and it keeps meaning that:
-        an idle conversation is replaced. But by the time the reload arrives
-        the server may be in the middle of something the user is still owed,
-        and that survives. A transport reconnect asked for nothing, so
-        nothing may be taken from it -- its conversation is kept whatever
-        state it is in.
+        An idle conversation is replaced on a page load -- the *session*
+        starts over. Whether the replacement opens blank or resumes a
+        stored thread is not decided here: the client now carries the
+        thread it was in through a reload, and the runner's resume path
+        answers for it. What this decides is narrower: by the time the
+        reload arrives the server may be in the middle of something the
+        user is still owed -- an open question, running work, a parked
+        reply -- and that session survives the reload outright. A transport
+        reconnect asked for nothing, so nothing may be taken from it -- its
+        conversation is kept whatever state it is in.
 
         Ownership is checked on both paths and before everything else: a
         reconnect to somebody else's id is as much a read of their

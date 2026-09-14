@@ -159,6 +159,74 @@ class TestGCSStorageClient:
             binary_data, content_type="text/plain"
         )
 
+    def test_sync_upload_file_carries_the_content_disposition(self, mock_gcs_client):
+        """The one upload argument GCS has no keyword for.
+
+        It is object metadata, sent with the upload and served by the signed
+        url this client hands out -- so a blob uploaded without it is a
+        spreadsheet the browser opens as a tab of XML, forever.
+        """
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+        mock_gcs_client["bucket"].reset_mock()
+        mock_gcs_client["blob"].reset_mock()
+
+        client.sync_upload_file(
+            object_key="test/path/file.xlsx",
+            data=b"PK\x03\x04",
+            mime="application/vnd.ms-excel",
+            content_disposition='attachment; filename="file.xlsx"',
+        )
+
+        assert (
+            mock_gcs_client["blob"].content_disposition
+            == 'attachment; filename="file.xlsx"'
+        )
+
+    def test_sync_upload_file_leaves_the_disposition_alone_when_none_is_given(
+        self, mock_gcs_client
+    ):
+        """No header rather than the string ``None`` on the object."""
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+        mock_gcs_client["blob"].reset_mock()
+        del mock_gcs_client["blob"].content_disposition
+
+        client.sync_upload_file(object_key="test/path/file.txt", data=b"text")
+
+        assert not hasattr(mock_gcs_client["blob"], "content_disposition")
+
+    @pytest.mark.asyncio
+    async def test_upload_file_carries_the_content_disposition(self, mock_gcs_client):
+        """The async wrapper passes it on; it used to drop it here."""
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+        mock_gcs_client["blob"].reset_mock()
+
+        await client.upload_file(
+            object_key="test/path/chart.png",
+            data=b"\x89PNG",
+            mime="image/png",
+            content_disposition='inline; filename="chart.png"',
+        )
+
+        assert (
+            mock_gcs_client["blob"].content_disposition
+            == 'inline; filename="chart.png"'
+        )
+
     def test_sync_upload_file_string_data(self, mock_gcs_client):
         """Test uploading string data to GCS."""
         client = GCSStorageClient(
@@ -271,6 +339,39 @@ class TestGCSStorageClient:
         mock_gcs_client["blob"].upload_from_string.assert_called_once_with(
             binary_data, content_type="text/plain"
         )
+
+    @pytest.mark.asyncio
+    async def test_read_file(self, mock_gcs_client):
+        """The bytes back out, for the route that serves elements itself."""
+        mock_gcs_client["blob"].download_as_bytes.return_value = b"\x89PNG bytes"
+
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+        mock_gcs_client["bucket"].reset_mock()
+        mock_gcs_client["blob"].reset_mock()
+
+        data = await client.read_file("test/path/file.png")
+
+        mock_gcs_client["bucket"].blob.assert_called_once_with("test/path/file.png")
+        assert data == b"\x89PNG bytes"
+
+    @pytest.mark.asyncio
+    async def test_read_file_that_is_not_there(self, mock_gcs_client):
+        """``None``, not an exception: the caller turns this into a 404."""
+        mock_gcs_client["blob"].download_as_bytes.side_effect = ValueError("404")
+
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+
+        assert await client.read_file("test/path/missing.png") is None
 
     def test_sync_delete_file(self, mock_gcs_client):
         """Test deleting a file from GCS."""

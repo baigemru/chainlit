@@ -211,6 +211,7 @@ const useChatSession = () => {
         if (!element.url && element.chainlitKey) {
           element.url = client.getElementUrl(element.chainlitKey, sessionId);
         }
+        element.url = client.resolveElementUrl(element.url);
         if (element.type === 'tasklist') {
           setTasklists((old) => upsertById(old, element as ITasklistElement));
         } else {
@@ -302,7 +303,13 @@ const useChatSession = () => {
           setChatProfile(resumed.metadata.chat_profile);
         }
         setMessages(messages);
-        const elements = resumed.elements || [];
+        // A resumed thread's elements come straight from the database, so
+        // their urls are the app-relative form — including the tasklists,
+        // whose JSON is fetched by url exactly like an image's bytes.
+        const elements = (resumed.elements || []).map((element) => ({
+          ...element,
+          url: client.resolveElementUrl(element.url)
+        }));
         setTasklists(
           (elements as ITasklistElement[]).filter((e) => e.type === 'tasklist')
         );
@@ -350,6 +357,7 @@ const useChatSession = () => {
                     sessionId
                   );
                 }
+                element.url = client.resolveElementUrl(element.url);
                 return element;
               })
             : undefined;

@@ -450,6 +450,20 @@ class ChainlitPlugin(InitPlugin):
             "persistence_enabled",
             Provide(lambda: self._persistence is not None, sync_to_thread=False),
         )
+        # Not part of ``Persistence.dependencies()``: those are per-request
+        # services built on the request's session, and this is one long-lived
+        # client. The element file route takes it as optional and answers 404
+        # when it is absent, so an application with no bucket serves the rest
+        # of its elements rather than failing to start.
+        app_config.dependencies.setdefault(
+            "storage",
+            Provide(
+                lambda: (
+                    self._persistence.storage if self._persistence is not None else None
+                ),
+                sync_to_thread=False,
+            ),
+        )
         app_config.dependencies.setdefault("security", security_provider(self._auth))
         app_config.dependencies.setdefault(
             "user_service", Provide(provide_user_service)

@@ -60,7 +60,7 @@ from typing import (
 from uuid import UUID
 
 import msgspec
-from litestar import Controller, delete, get, post, put
+from litestar import Controller, Response, delete, get, post, put
 from litestar.di import NamedDependency
 from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery, JSONBody, QueryParameter
@@ -72,6 +72,7 @@ from chainlit.controllers.caller import (
     caller_identifier,
 )
 from chainlit.controllers.sessions import LiveSession, SessionRegistry
+from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
 from chainlit.persistence.records import (
     ElementRecord,
@@ -90,6 +91,11 @@ from chainlit.persistence.services import (
     from_datetime,
     now,
 )
+from chainlit.persistence.storage.base import BaseStorageClient, discard_blobs
+
+# Re-exported: the upload path settles the same header at upload time, so the
+# rule lives where neither side of it has to import the other.
+from chainlit.persistence.storage.disposition import content_disposition, element_mime
 from chainlit.security import AuthedRequest
 
 __all__ = (
@@ -102,7 +108,9 @@ __all__ = (
     "ThreadDelete",
     "ThreadRename",
     "ThreadShare",
+    "content_disposition",
     "doomed_step_ids",
+    "element_mime",
     "hide_resume_deleted",
     "is_resume_delete",
 )
@@ -601,6 +609,61 @@ class ProjectController(Controller):
             raise NotFoundException("Element not found")
         return element
 
+    @get("/project/thread/{thread_id:uuid}/element/{element_id:uuid}/file")
+    async def get_thread_element_file(
+        self,
+        request: AuthedRequest,
+        thread_id: FromPath[UUID],
+        element_id: FromPath[UUID],
+        threads: NamedDependency[ThreadService],
+        elements: NamedDependency[ElementService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
+    ) -> Response[bytes]:
+        """The blob behind a stored element, served by the application.
+
+        The bucket is private, so the ``url`` written next to the blob at
+        upload time is not reachable by a browser and never was: until this
+        route existed, every persisted image in a reloaded thread was a
+        broken one. :func:`chainlit.persistence.services.row_to_element`
+        points reloaded elements here instead.
+
+        Read and forward, not redirect to a presigned url. Half the element
+        components (text, dataframe, plotly, the pdf viewer) ``fetch`` their
+        url, which against the bucket's origin is a CORS request it refuses;
+        and a cross-origin ``<a download>`` ignores the filename, which for
+        this fork's consumer is the whole point of the header below.
+
+        Authorised by the thread in the url, like its neighbour: an element
+        id is not a secret, and a read authorised by one would be a read of
+        anybody's element.
+        """
+        await assert_thread_author(threads, thread_id, request)
+        record = await elements.fetch(str(thread_id), str(element_id))
+        # Everything that is not "here are the bytes" is the same 404. The
+        # caller already proved the thread is theirs; what is left to
+        # distinguish is how the row is broken, and that is our problem.
+        if record is None:
+            raise NotFoundException("Element not found")
+        object_key = record.object_key
+        if not isinstance(object_key, str) or not object_key:
+            raise NotFoundException("Element not found")
+        if storage is None:
+            logger.warning(
+                "Element %s has a blob but no storage client is configured", element_id
+            )
+            raise NotFoundException("Element not found")
+
+        data = await storage.read_file(object_key)
+        if data is None:
+            raise NotFoundException("Element not found")
+
+        mime = element_mime(record)
+        return Response(
+            data,
+            media_type=mime,
+            headers={"content-disposition": content_disposition(record.name, mime)},
+        )
+
     @put("/project/element")
     async def update_element(
         self,
@@ -633,12 +696,19 @@ class ProjectController(Controller):
         sessions: NamedDependency[SessionRegistry],
         elements: NamedDependency[ElementService],
         threads: NamedDependency[ThreadService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
     ) -> Ok:
         """Remove a custom element the app rendered into the chat.
 
         The delete is scoped to the thread the *stored row* belongs to, not
         to the one the payload names: an unscoped delete by id alone is a
         delete of anybody's element.
+
+        The blob goes with the row. It runs before the before-send handler
+        commits, so a commit that then fails leaves a row whose bytes are
+        gone -- which the file route already answers with a 404, and which is
+        the direction to fail in: the other one keeps a user's file in the
+        bucket with nothing left in the database that knows it is there.
         """
         self._session_of(sessions, data.session_id, request)
         if data.element.get("type") != WRITABLE_ELEMENT_TYPE:
@@ -647,7 +717,7 @@ class ProjectController(Controller):
         element_id, thread_id = await authorize_element(
             elements, threads, data.element, request
         )
-        await elements.remove(str(element_id), thread_id)
+        await discard_blobs(storage, await elements.remove(str(element_id), thread_id))
         return Ok()
 
     @put("/project/thread")
@@ -690,10 +760,11 @@ class ProjectController(Controller):
         request: AuthedRequest,
         data: JSONBody[ThreadDelete],
         threads: NamedDependency[ThreadService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
     ) -> Ok:
-        """Delete a thread and its steps, elements and feedbacks."""
+        """Delete a thread, its steps, elements, feedbacks and their blobs."""
         await assert_thread_author(threads, data.thread_id, request)
-        await threads.remove(str(data.thread_id))
+        await discard_blobs(storage, await threads.remove(str(data.thread_id)))
         return Ok()
 
     @post("/project/action", status_code=200)

@@ -52,6 +52,14 @@ BOB = "bob"
 
 T = TypeVar("T")
 
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# Precomputed rather than derived in the assertion, and copied rather than
+# imported from ``tests/controllers/test_element_file.py``: what the two
+# files assert about is the same name, but neither owns the other's fixtures.
+CYRILLIC_NAME = "Отчёт по товарам.xlsx"
+CYRILLIC_QUOTED = "%D0%9E%D1%82%D1%87%D1%91%D1%82%20%D0%BF%D0%BE%20%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%B0%D0%BC.xlsx"
+
 # A 1x1 PNG, the smallest blob that is unmistakably an image.
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
@@ -192,7 +200,14 @@ class FakeStorage:
         overwrite: bool = True,
         content_disposition: Optional[str] = None,
     ) -> Dict[str, Any]:
-        self.uploads.append({"object_key": object_key, "data": data, "mime": mime})
+        self.uploads.append(
+            {
+                "object_key": object_key,
+                "data": data,
+                "mime": mime,
+                "content_disposition": content_disposition,
+            }
+        )
         return {"url": f"https://bucket.test/{object_key}", "object_key": object_key}
 
     async def delete_file(self, object_key: str) -> bool:
@@ -669,15 +684,61 @@ def test_an_element_blob_goes_to_storage_and_the_row_points_at_it(
     assert storage.uploads[0]["data"] == PNG
     assert storage.uploads[0]["mime"] == "image/png"
     assert storage.uploads[0]["object_key"] == f"{ALICE}/{row.id}/pic"
+    # What the bucket is told the object is for. An image is drawn where it
+    # is, so a presigned url must not hand the browser a download.
+    assert storage.uploads[0]["content_disposition"] == 'inline; filename="pic"'
     assert row.name == "pic"
     assert row.object_key == f"{ALICE}/{row.id}/pic"
-    assert row.url == f"https://bucket.test/{ALICE}/{row.id}/pic"
+    # The reader substitutes the app's own element route for any row with a
+    # blob -- the storage url lands in the column (asserted at the column
+    # level in test_writer.py) but never reaches the UI again.
+    assert row.url == f"/project/thread/{thread_id}/element/{row.id}/file"
     assert row.thread_id == thread_id
     # The frame goes out before the upload: it carries the session's spool
     # key, never the storage URL.
     assert element["id"] == row.id
     assert element["chainlitKey"] == row.chainlit_key
     assert element.get("url") is None
+
+
+def test_a_download_carries_its_name_to_the_bucket(
+    make_plugin: Callable[..., ChainlitPlugin],
+    test_config: Any,
+    auth: ChainlitAuth,
+    db_url: str,
+    tmp_path: Path,
+) -> None:
+    """The consumer's spreadsheets are named in Cyrillic, and a header is latin-1.
+
+    The encoded form is written out rather than derived: a test that quotes
+    the name the way the code does passes whatever the code does.
+    """
+    seed_user(db_url, ALICE)
+    report = tmp_path / "report.xlsx"
+    report.write_bytes(b"PK\x03\x04 a spreadsheet")
+    storage = FakeStorage()
+    plugin = make_plugin(storage=storage)
+
+    async def on_message(msg: cl.Message) -> None:
+        attachment = cl.File(path=str(report), name=CYRILLIC_NAME, mime=XLSX_MIME)
+        await cl.Message(content="here", elements=[attachment]).send()
+
+    test_config.code.on_message = on_message
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            send_and_read_reply(ws, "the numbers")
+            read_until(ws, "element.upsert")
+        thread_id = handshake[0]["threadId"]
+        wait_for_thread(db_url, thread_id, lambda d: len(d.elements) == 1)
+
+    assert len(storage.uploads) == 1
+    assert storage.uploads[0]["mime"] == XLSX_MIME
+    assert storage.uploads[0]["content_disposition"] == (
+        f"attachment; filename*=utf-8''{CYRILLIC_QUOTED}"
+    )
 
 
 def test_without_storage_the_row_has_no_url_and_the_spool_serves_the_key(

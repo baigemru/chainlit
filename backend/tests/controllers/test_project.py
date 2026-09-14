@@ -42,6 +42,7 @@ from chainlit.persistence.records import (
     StepRecord,
     ThreadPatch,
 )
+from chainlit.persistence.storage.base import BaseStorageClient
 from chainlit.security import chainlit_auth
 from tests.persistence.conftest import database_url, engine
 
@@ -112,6 +113,50 @@ def auth():
     return chainlit_auth(token_secret=TEST_SECRET)
 
 
+class RecordingStorage(BaseStorageClient):
+    """A store that logs its deletes, and can be told to fall over.
+
+    Only ``delete_file`` is exercised here -- these routes never upload -- and
+    it raises rather than returning ``False`` when it is told to refuse: the
+    real clients swallow their own errors, so an exception is the failure
+    this layer has to be the one to absorb.
+    """
+
+    def __init__(self) -> None:
+        self.deleted: List[str] = []
+        self.broken = False
+
+    async def delete_file(self, object_key: str) -> bool:
+        self.deleted.append(object_key)
+        if self.broken:
+            raise OSError("bucket unreachable")
+        return True
+
+    async def upload_file(
+        self,
+        object_key: str,
+        data: Any,
+        mime: str = "application/octet-stream",
+        overwrite: bool = True,
+        content_disposition: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {"object_key": object_key, "url": f"memory://{object_key}"}
+
+    async def get_read_url(self, object_key: str) -> str:
+        return f"memory://{object_key}"
+
+    async def read_file(self, object_key: str) -> Optional[bytes]:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def storage() -> RecordingStorage:
+    return RecordingStorage()
+
+
 @pytest.fixture
 def registry() -> StubRegistry:
     return StubRegistry(
@@ -124,7 +169,7 @@ def registry() -> StubRegistry:
 
 @pytest_asyncio.fixture
 async def client(
-    persistence: Persistence, auth, registry: StubRegistry
+    persistence: Persistence, auth, registry: StubRegistry, storage: RecordingStorage
 ) -> AsyncIterator[Any]:
     async with create_async_test_client(
         route_handlers=[ProjectController],
@@ -133,6 +178,7 @@ async def client(
             **persistence.dependencies(),
             "sessions": Provide(lambda: registry, sync_to_thread=False),
             "persistence_enabled": Provide(lambda: True, sync_to_thread=False),
+            "storage": Provide(lambda: storage, sync_to_thread=False),
         },
         on_app_init=[auth.on_app_init],
     ) as test_client:
@@ -214,7 +260,11 @@ async def make_step(
 
 
 async def make_element(
-    persistence: Persistence, thread_id: str, *, for_id: Optional[str] = None
+    persistence: Persistence,
+    thread_id: str,
+    *,
+    for_id: Optional[str] = None,
+    object_key: Optional[str] = None,
 ) -> str:
     element_id = str(uuid.uuid4())
     async with persistence.uow() as uow:
@@ -225,6 +275,7 @@ async def make_element(
                 type="custom",
                 thread_id=thread_id,
                 for_id=for_id,
+                object_key=object_key,
                 props={"a": 1},
             )
         )
@@ -771,6 +822,79 @@ async def test_a_custom_element_is_removed(
         assert await uow.elements.fetch(thread_id, element_id) is None
 
 
+async def delete_element(client: Any, thread_id: str, element_id: str) -> Any:
+    return await client.request(
+        "DELETE",
+        "/project/element",
+        json={
+            "sessionId": "alice-session",
+            "element": {
+                "id": element_id,
+                "name": "chart",
+                "type": "custom",
+                "threadId": thread_id,
+            },
+        },
+    )
+
+
+async def test_removing_an_element_takes_its_blob_with_it(
+    client, auth, persistence: Persistence, storage: RecordingStorage
+) -> None:
+    """The row was the only thing that knew where the bytes were."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(
+        persistence, thread_id, object_key="alice/chart.png"
+    )
+    login(client, auth, ALICE)
+
+    response = await delete_element(client, thread_id, element_id)
+
+    assert response.status_code == 200
+    assert storage.deleted == ["alice/chart.png"]
+
+
+async def test_removing_an_element_that_never_had_a_blob_asks_for_nothing(
+    client, auth, persistence: Persistence, storage: RecordingStorage
+) -> None:
+    """``cl.Image(url=...)`` keeps its own url and uploads nothing.
+
+    Asserted on the delete log rather than on the status: a store handed an
+    empty key answers the same 200, one round trip and one warning later.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    login(client, auth, ALICE)
+
+    response = await delete_element(client, thread_id, element_id)
+
+    assert response.status_code == 200
+    assert storage.deleted == []
+
+
+async def test_a_store_that_refuses_does_not_fail_the_element_delete(
+    client, auth, persistence: Persistence, storage: RecordingStorage
+) -> None:
+    """The row is gone either way; the leak is logged, not raised.
+
+    A 500 here would leave the client believing the element it can no longer
+    see is still there, and re-deleting it would not help.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(
+        persistence, thread_id, object_key="alice/chart.png"
+    )
+    storage.broken = True
+    login(client, auth, ALICE)
+
+    response = await delete_element(client, thread_id, element_id)
+
+    assert response.status_code == 200
+    assert storage.deleted == ["alice/chart.png"]
+    async with persistence.uow() as uow:
+        assert await uow.elements.fetch(thread_id, element_id) is None
+
+
 # --------------------------------------------------------------------------
 # Feedback
 # --------------------------------------------------------------------------
@@ -990,6 +1114,56 @@ async def test_a_thread_is_deleted_by_its_author_and_by_nobody_else(
         "DELETE", "/project/thread", json={"threadId": thread_id}
     )
     assert allowed.status_code == 200
+    async with persistence.uow() as uow:
+        assert await uow.threads.fetch(thread_id) is None
+
+
+async def test_deleting_a_thread_empties_its_shelf_in_the_bucket(
+    client, auth, persistence: Persistence, storage: RecordingStorage
+) -> None:
+    """Every blob the thread was holding, and only those.
+
+    A second thread is deleted around: the bucket keys travel from the rows
+    the DELETE actually removed, so a statement that forgot its ``WHERE``
+    would show up here as somebody else's file disappearing.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    other = await make_thread(persistence, owner=ALICE)
+    step_id = await make_step(persistence, thread_id)
+    await make_element(
+        persistence, thread_id, for_id=step_id, object_key="alice/one.png"
+    )
+    await make_element(persistence, thread_id, object_key="alice/two.png")
+    await make_element(persistence, thread_id)
+    await make_element(persistence, other, object_key="alice/elsewhere.png")
+    login(client, auth, ALICE)
+
+    response = await client.request(
+        "DELETE", "/project/thread", json={"threadId": thread_id}
+    )
+
+    assert response.status_code == 200
+    assert sorted(storage.deleted) == ["alice/one.png", "alice/two.png"]
+
+
+async def test_a_store_that_refuses_does_not_fail_the_thread_delete(
+    client, auth, persistence: Persistence, storage: RecordingStorage
+) -> None:
+    """One unreachable blob must not keep the thread on the user's screen."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    await make_element(persistence, thread_id, object_key="alice/one.png")
+    await make_element(persistence, thread_id, object_key="alice/two.png")
+    storage.broken = True
+    login(client, auth, ALICE)
+
+    response = await client.request(
+        "DELETE", "/project/thread", json={"threadId": thread_id}
+    )
+
+    assert response.status_code == 200
+    # Both attempted: a loop that let the first failure out would leave the
+    # rest of the thread's files in the bucket for good.
+    assert sorted(storage.deleted) == ["alice/one.png", "alice/two.png"]
     async with persistence.uow() as uow:
         assert await uow.threads.fetch(thread_id) is None
 

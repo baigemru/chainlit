@@ -1,5 +1,7 @@
 """The service surface the rest of the rebuild talks to."""
 
+from typing import Optional
+
 import pytest
 from advanced_alchemy.exceptions import IntegrityError, MultipleResultsFoundError
 from sqlalchemy import func, select
@@ -15,7 +17,7 @@ from chainlit.persistence import (
     UnitOfWork,
 )
 from chainlit.persistence.models import ELEMENTS, STEPS, THREADS
-from chainlit.persistence.services import _column_values
+from chainlit.persistence.services import _column_values, to_uuid
 from tests.persistence.conftest import at, iso, make_thread, new_id
 
 
@@ -123,7 +125,16 @@ async def test_an_element_write_leaves_the_columns_it_omits_alone(
 
     stored = await uow.elements.fetch(thread_id, element_id)
     assert stored is not None
-    assert stored.url == "https://cdn.example/chart.png"
+    # The merge is asserted on the column itself: the reader substitutes the
+    # app's element route for any row with a blob, so ``stored.url`` no
+    # longer shows what the write left behind.
+    row = (
+        await uow.session.execute(
+            select(ELEMENTS.c["url"]).where(ELEMENTS.c["id"] == to_uuid(element_id))
+        )
+    ).one()
+    assert row.url == "https://cdn.example/chart.png"
+    assert stored.url == f"/project/thread/{thread_id}/element/{element_id}/file"
     assert stored.object_key == "threads/abc/chart.png"
     assert stored.mime == "image/png"
     assert stored.props == {"width": 400}
@@ -216,6 +227,80 @@ async def test_deleting_a_thread_takes_its_children_with_it(uow: UnitOfWork) -> 
     for table in (THREADS, STEPS, ELEMENTS):
         remaining = await uow.session.execute(select(func.count()).select_from(table))
         assert remaining.scalar_one() == 0
+
+
+async def blob_element(
+    uow: UnitOfWork, thread_id: str, step_id: str, object_key: Optional[str]
+) -> str:
+    element_id = new_id()
+    await uow.elements.save(
+        ElementRecord(
+            id=element_id,
+            name="report.xlsx",
+            type="file",
+            thread_id=thread_id,
+            for_id=step_id,
+            object_key=object_key,
+        )
+    )
+    return element_id
+
+
+async def test_a_delete_hands_back_the_blobs_the_rows_were_holding(
+    uow: UnitOfWork,
+) -> None:
+    """The service knows which objects are now unreachable; it cannot delete
+    them.
+
+    A storage client is not part of a database session, so what the remove
+    methods return is the whole of their contribution -- the caller that has
+    one (the writer, or a route) does the deleting. NULL and ``""`` are left
+    out: the first is an element given a url it already had, the second an
+    upload that failed after the row was written, and neither is a key.
+    """
+    thread_id = await make_thread(uow)
+    step_id = new_id()
+    await uow.steps.save(
+        StepRecord(id=step_id, type="assistant_message", thread_id=thread_id)
+    )
+    await blob_element(uow, thread_id, step_id, "alice/one.xlsx")
+    await blob_element(uow, thread_id, step_id, None)
+    await blob_element(uow, thread_id, step_id, "")
+
+    assert await uow.threads.remove(thread_id) == ["alice/one.xlsx"]
+
+
+async def test_removing_one_element_hands_back_only_its_own_blob(
+    uow: UnitOfWork,
+) -> None:
+    """And nothing at all when the thread in the call is not the row's."""
+    thread_id = await make_thread(uow)
+    other = await make_thread(uow)
+    step_id = new_id()
+    await uow.steps.save(
+        StepRecord(id=step_id, type="assistant_message", thread_id=thread_id)
+    )
+    mine = await blob_element(uow, thread_id, step_id, "alice/mine.xlsx")
+    await blob_element(uow, thread_id, step_id, "alice/neighbour.xlsx")
+
+    assert await uow.elements.remove(mine, other) == []
+    assert await uow.elements.fetch(thread_id, mine) is not None
+    assert await uow.elements.remove(mine, thread_id) == ["alice/mine.xlsx"]
+
+
+async def test_removing_a_step_hands_back_the_blobs_of_its_elements(
+    uow: UnitOfWork,
+) -> None:
+    thread_id = await make_thread(uow)
+    kept, dropped = new_id(), new_id()
+    for step_id in (kept, dropped):
+        await uow.steps.save(
+            StepRecord(id=step_id, type="assistant_message", thread_id=thread_id)
+        )
+    await blob_element(uow, thread_id, dropped, "alice/dropped.xlsx")
+    await blob_element(uow, thread_id, kept, "alice/kept.xlsx")
+
+    assert await uow.steps.remove(dropped) == ["alice/dropped.xlsx"]
 
 
 async def test_deleting_a_step_leaves_the_thread(uow: UnitOfWork) -> None:

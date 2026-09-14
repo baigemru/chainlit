@@ -54,6 +54,7 @@ class GCSStorageClient(BaseStorageClient):
         data: Union[bytes, str],
         mime: str = "application/octet-stream",
         overwrite: bool = True,
+        content_disposition: str | None = None,
     ) -> Dict[str, Any]:
         try:
             blob = self.bucket.blob(object_key)
@@ -65,6 +66,14 @@ class GCSStorageClient(BaseStorageClient):
 
             if isinstance(data, str):
                 data = data.encode("utf-8")
+
+            if content_disposition is not None:
+                # Set on the blob rather than passed to the upload: the
+                # library has no keyword for it, and the property is part of
+                # the writable object metadata the upload sends
+                # (``blob._get_writable_metadata``). The signed url this
+                # method returns serves the object with that header.
+                blob.content_disposition = content_disposition
 
             blob.upload_from_string(data, content_type=mime)
 
@@ -86,8 +95,24 @@ class GCSStorageClient(BaseStorageClient):
         content_disposition: str | None = None,
     ) -> Dict[str, Any]:
         return await sync_to_thread(
-            self.sync_upload_file, object_key, data, mime, overwrite
+            self.sync_upload_file,
+            object_key,
+            data,
+            mime,
+            overwrite,
+            content_disposition,
         )
+
+    def sync_read_file(self, object_key: str) -> Optional[bytes]:
+        try:
+            data: bytes = self.bucket.blob(object_key).download_as_bytes()
+            return data
+        except Exception as e:
+            logger.warning(f"GCSStorageClient, read_file error: {e}")
+            return None
+
+    async def read_file(self, object_key: str) -> Optional[bytes]:
+        return await sync_to_thread(self.sync_read_file, object_key)
 
     def sync_delete_file(self, object_key: str) -> bool:
         try:

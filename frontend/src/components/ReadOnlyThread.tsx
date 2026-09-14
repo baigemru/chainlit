@@ -149,7 +149,18 @@ const ReadOnlyThread = ({ id }: Props) => {
 
   const onError = useCallback((error: string) => toast.error(error), [toast]);
 
-  const elements = thread?.elements || [];
+  // Straight off the REST record, so the persisted urls are app-relative and
+  // must be pointed at the api endpoint before a component renders them.
+  // Memoized because `Content` compares its `elements` prop by identity: a
+  // fresh array every render would defeat that memo for the whole transcript.
+  const elements = useMemo(
+    () =>
+      (thread?.elements || []).map((element) => ({
+        ...element,
+        url: apiClient.resolveElementUrl(element.url)
+      })),
+    [thread, apiClient]
+  );
   const actions: IAction[] = [];
   const messages = nestMessages(steps);
 

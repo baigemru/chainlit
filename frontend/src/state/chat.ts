@@ -20,6 +20,25 @@ export const attachmentsState = atom<IAttachment[]>({
   default: []
 });
 
+/**
+ * The half-typed message, held above the composer that is showing it.
+ *
+ * `/` and `/thread/:id` are two route elements, so the address moving onto
+ * the thread the server just named unmounts `Home` and mounts `Page` — and
+ * with it a second `MessageComposer`. A draft in the composer's own
+ * `useState` dies there: type at `/` before `session.ready` arrives, or type
+ * after New Chat (which navigates to `/`, and is then named again), and the
+ * box empties itself under the cursor.
+ *
+ * Deliberately outlives `clear()` and New Chat. What the user typed while a
+ * session was being replaced is exactly what must survive the replacement;
+ * only sending clears it.
+ */
+export const composerDraftState = atom<string>({
+  key: 'ComposerDraft',
+  default: ''
+});
+
 export interface IChatBoundary {
   /** Id of the last root message of the chat that ended here. */
   afterMessageId: string;

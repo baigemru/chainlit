@@ -33,11 +33,26 @@ from litestar.testing import create_test_client
 from litestar.types import ASGIApp, Receive, Scope, Send
 from websockets.asyncio.client import ClientConnection, connect
 
+import chainlit as cl
+from chainlit.plugin import ChainlitPlugin
 from chainlit.protocol.codec import MAX_FRAME_BYTES, CloseCode
 from chainlit.protocol.server import Heartbeat
+from chainlit.security import ChainlitAuth
 from chainlit.ws.connection import Connection, make_websocket_handler
-from chainlit.ws.registry import SessionRegistry
+from chainlit.ws.registry import SessionRegistry, has_live_work
 from chainlit.ws.session import Session
+from tests.persistence.conftest import database_url  # noqa: F401 - fixture re-export
+from tests.test_runner import frontend_dir  # noqa: F401 - fixture re-export
+from tests.test_runner_persistence import (  # noqa: F401 - fixture re-export
+    ALICE,
+    auth,
+    db_url,
+    make_plugin,
+    message as user_message,
+    seed_user,
+    thread_detail,
+    wait_for_thread,
+)
 
 
 class _Identity:
@@ -812,3 +827,123 @@ def _stage_open_question(session: Session) -> None:
         deadline=time.monotonic() + 600,
         restore_actions=[Action(id="a1", name="yes", for_id="ask-1")],
     )
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: the reload that keeps its thread
+# --------------------------------------------------------------------------
+
+
+async def _idle(
+    plugin: ChainlitPlugin, session_id: str, *, timeout: float = 5.0
+) -> None:
+    """Poll until the session is disconnected with nothing in flight.
+
+    A poll rather than ``wait_until``: the server is running in *this*
+    loop, so a ``time.sleep`` here would stop the thing being waited for.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        entry = plugin.runner.registry.get(session_id)
+        if entry is not None and not entry.connected and not has_live_work(entry):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"session {session_id!r} never went idle")
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_reload_onto_an_unwritten_thread_keeps_its_address(
+    ws_impl: str,
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """F5 on a greeting, over a socket that really closed.
+
+    The in-process twin of this case never closes anything: ``close`` there
+    is a queue write, so the first session is still half-alive when the
+    reload is read. Here the connection goes, the handler unwinds, and the
+    reload arrives at a session that is genuinely alone -- through real
+    cookie auth on the upgrade, under both ws implementations.
+
+    What that buys is the rest of the branch, end to end. The reload keeps
+    the thread it was minted with, and the superseded session was torn down
+    holding a writer of its own on that same thread -- writers are
+    registered per *thread*, so the successor's is in the same bucket as
+    the one teardown closed. The row carrying the echo is the proof that
+    closing the one did not take the other.
+
+    The whole application is behind this handler, not the bare route the
+    cases above use: without a runner there is no ``on_arrival``, ``_resume``
+    never runs, and every hello is answered the same way.
+    """
+    plugin = make_plugin()
+    started: List[Optional[str]] = []
+
+    async def on_chat_start() -> None:
+        started.append(cl.context.session.thread_id)
+        await cl.Message(content="hello there").send()
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        return None
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+    await asyncio.to_thread(seed_user, db_url, ALICE)
+    # A cookie, because that is the only way a browser authenticates an
+    # upgrade: there is no header to put a bearer token on.
+    cookie = {"Cookie": f"{auth.key}={auth.create_token(ALICE)}"}
+
+    async with live_server(Litestar(plugins=[plugin]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url, additional_headers=cookie) as first:
+            opening = await open_live(first, pageLoad=True)
+            thread_id = opening[0]["threadId"]
+            opening += await read_live(first, "step.upsert")
+            assert [
+                f["step"].get("output") for f in opening if f["t"] == "step.upsert"
+            ] == ["hello there"]
+
+        await _idle(plugin, "s1")
+        assert await asyncio.to_thread(thread_detail, db_url, thread_id) is None, (
+            "the premise: greeted, never spoken in, so nowhere in the database"
+        )
+
+        async with connect(url, additional_headers=cookie) as second:
+            replay = await open_live(second, pageLoad=True, threadId=thread_id)
+            ready = replay[0]
+            assert ready["t"] == "session.ready"
+            assert not ready.get("restored"), "replaced, not kept"
+            assert ready["threadId"] == thread_id, ready
+            replay += await read_live(second, "step.upsert")
+            assert [
+                f["step"].get("output") for f in replay if f["t"] == "step.upsert"
+            ] == ["hello there"], (
+                "a reload has no conversation to resume into, only its greeting"
+            )
+
+            await second.send(user_message("hi again"))
+            replay += await read_live(second, "thread.first_interaction")
+
+    assert [f for f in replay if f["t"] == "error"] == [], [f["t"] for f in replay]
+    announced = [f for f in replay if f["t"] == "thread.first_interaction"]
+    assert announced[0]["threadId"] == thread_id, announced
+    assert started == [thread_id, thread_id]
+
+    # The writer that outlived the superseded session's teardown is the one
+    # that wrote this. Read after the server is gone, so a row that is only
+    # there because a drain ran on shutdown still counts -- what must not
+    # happen is the turn going nowhere, or going somewhere else.
+    detail = await asyncio.to_thread(
+        wait_for_thread,
+        db_url,
+        thread_id,
+        lambda d: "echo hi again" in [step.output for step in d.steps],
+    )
+    assert detail.id == thread_id

@@ -17,6 +17,7 @@ but nothing unflagged may go with them.
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -36,9 +37,11 @@ from tests.test_runner import (  # noqa: F401 - fixture re-export
 )
 from tests.test_runner_persistence import (  # noqa: F401 - fixture re-export
     ALICE,
+    BOB,
     FakeStorage,
     auth,
     db_url,
+    first,
     login,
     make_plugin,
     message,
@@ -477,6 +480,165 @@ def test_a_reload_onto_an_unwritten_thread_keeps_its_address(
 def _idle(plugin: ChainlitPlugin, session_id: str) -> bool:
     entry = plugin.runner.registry.get(session_id)
     return entry is not None and not entry.connected and not has_live_work(entry)
+
+
+def test_a_reload_that_asks_for_a_different_missing_thread_is_not_kept_on_it(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """A missing id the session was never on is not the user's to keep.
+
+    Same shape as the reload above -- same session id, same page load, same
+    lookup that misses -- and one thing different: the id asked for is not
+    the one this session was holding. An address bar edited by hand, a
+    history entry from a chat that was deleted, a link from somebody else.
+    The keep is granted on that one piece of evidence, ``superseded``
+    carrying *this* thread, and nothing weaker: a rule that read
+    ``arrival.superseded`` as a boolean would hand the session every
+    stranger's id it ever asked for, on the grounds that some reload
+    happened.
+    """
+    seed_user(db_url, ALICE)
+    started: List[Optional[str]] = []
+
+    async def on_chat_start() -> None:
+        started.append(cl.context.session.thread_id)
+        await cl.Message(content="hello there").send()
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = _noop_resume
+    plugin = make_plugin()
+
+    stranger = str(uuid.uuid4())
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            frames = open_session(ws, sessionId="s1")
+            thread_id = frames[0]["threadId"]
+            frames += read_until(ws, "step.upsert", limit=20)
+        wait_until(lambda: _idle(plugin, "s1"))
+        assert thread_detail(db_url, stranger) is None, "the premise: not a row"
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, sessionId="s1", threadId=stranger)
+            ready = replay[0]
+            assert ready["t"] == "session.ready"
+            assert not ready.get("restored"), "replaced, not kept"
+            # Neither the id it asked for nor the one it left behind: the
+            # session is disowned onto a thread of its own, and the only
+            # way the client learns that is this frame.
+            assert ready["threadId"] not in {stranger, thread_id}, ready
+            replay += read_until(ws, "step.upsert", limit=20)
+
+            ws.send_text(message("hi again"))
+            replay += read_until(ws, "step.upsert", limit=40)
+        detail = wait_for_thread(
+            db_url,
+            ready["threadId"],
+            lambda d: "echo hi again" in [step.output for step in d.steps],
+        )
+        assert detail.id == ready["threadId"]
+        assert (
+            first(replay, "thread.first_interaction")["threadId"] == ready["threadId"]
+        )
+
+    assert started == [thread_id, ready["threadId"]]
+    # Still nothing reported: a miss is answered by the thread in
+    # ``session.ready``, whichever branch produced it.
+    assert frames_of(replay, "error") == [], tags(replay)
+    # And neither of the two ids the tab knew about gained a row.
+    assert thread_detail(db_url, stranger) is None
+    assert thread_detail(db_url, thread_id) is None
+
+
+def test_a_reload_that_asks_for_another_users_thread_is_not_kept_on_it(
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """Bob reloads his own session onto Alice's id, and is moved off it.
+
+    Ownership was pinned on the fresh-session path only: a socket that had
+    never been seen before asking for somebody else's thread. A reload is
+    the other path -- the session id is known, the arrival is REPLACED and
+    carries a ``superseded`` entry -- and the entry is the evidence the keep
+    is granted on. It says which thread was this session's, and nothing
+    about whose the requested one is, so a resume decision that consults it
+    without comparing thread ids grants a stranger's conversation on the
+    strength of a reload having occurred.
+    """
+    seed_user(db_url, ALICE)
+    seed_user(db_url, BOB)
+    resumed: List[str] = []
+
+    async def on_chat_start() -> None:
+        await cl.Message(content="hello there").send()
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        resumed.append(str(thread.get("id")))
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+    plugin = make_plugin()
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            hers = open_session(ws, sessionId="s-alice")
+            alice_thread = hers[0]["threadId"]
+            ws.send_text(message("alice's secret"))
+            hers += read_until(ws, "step.upsert", limit=40)
+        # Written, and so findable: this is the branch where the row exists
+        # and the identifier on it is not the one asking.
+        before = wait_for_thread(
+            db_url,
+            alice_thread,
+            lambda d: "echo alice's secret" in [step.output for step in d.steps],
+        )
+
+        login(client, auth, BOB)
+        with client.websocket_connect("/ws") as ws:
+            his = open_session(ws, sessionId="s-bob")
+            bob_thread = his[0]["threadId"]
+            his += read_until(ws, "step.upsert", limit=20)
+        wait_until(lambda: _idle(plugin, "s-bob"))
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, sessionId="s-bob", threadId=alice_thread)
+            ready = replay[0]
+            assert ready["t"] == "session.ready"
+            assert ready["threadId"] not in {alice_thread, bob_thread}, ready
+            replay += read_until(ws, "step.upsert", limit=20)
+
+            ws.send_text(message("hi again"))
+            replay += read_until(ws, "step.upsert", limit=40)
+        mine = wait_for_thread(
+            db_url,
+            ready["threadId"],
+            lambda d: "echo hi again" in [step.output for step in d.steps],
+        )
+        assert mine.user_identifier == BOB
+
+    # Nothing of hers was resumed, said, or written into.
+    assert resumed == []
+    assert frames_of(replay, "error") == [], tags(replay)
+    outputs = [f["step"].get("output") for f in frames_of(replay, "step.upsert")]
+    assert "alice's secret" not in outputs, outputs
+    after = thread_detail(db_url, alice_thread)
+    assert after is not None
+    assert len(after.steps) == len(before.steps), [s.output for s in after.steps]
 
 
 def test_an_idle_reload_resumes_the_conversation_it_was_in(

@@ -19,14 +19,23 @@ import { useChatTransport, useConfig } from '@chainlit/react-client';
  * previous thread — which is precisely the disagreement AutoResumeThread
  * answers by clearing the session.
  *
- * No `flushSync` here, unlike ChatProfileSwitchListener. Frames reach the
- * sink before the listeners, so `currentThreadId` is already the new thread
- * in the same commit as the navigation; and the intermediate state, were the
- * commit ever split, is harmless — on `/thread/<old>` AutoResumeThread's
- * guard is satisfied (`idToResume === id`) and on `/` it is not mounted at
- * all. The switch listener needed the flush because its intermediate had the
- * thread *cleared*, which is the state that resumes the old thread over the
- * new chat.
+ * No `flushSync` here, unlike ChatProfileSwitchListener. The intermediate
+ * that would hurt is `/thread/<new>` committed while `currentThreadId` is
+ * still undefined — a fresh load at `/`, where the descriptor carries no
+ * thread: `Thread.tsx` would see `threadId !== id`, mount AutoResumeThread,
+ * fail its `idToResume === id` guard and send `clear({ threadId: new })`,
+ * wiping the session the server had just created.
+ *
+ * It cannot be committed. The `currentThreadId` write is issued from the
+ * session sink, which runs before any `onMessage` listener for the same
+ * frame (`transport.ts:311-327`), and the navigation is issued after it at
+ * no higher priority: `navigate` is not wrapped in `flushSync`, and
+ * RouterProvider's subscriber calls `setStateImpl` plainly unless
+ * `future.v7_startTransition` is on, in which case it wraps it in
+ * `React.startTransition` — a *lower* lane
+ * (`react-router@6.30.6/dist/react-router.development.js:911-917`; this app
+ * passes no `future`, so it takes the plain branch). Either way React cannot
+ * render the later update without the earlier one.
  */
 export default function ThreadAddressListener() {
   const transport = useChatTransport();

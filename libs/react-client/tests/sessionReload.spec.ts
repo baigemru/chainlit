@@ -2,7 +2,6 @@ import { snapshot_UNSTABLE } from 'recoil';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  currentThreadIdState,
   sessionDescriptorSeed,
   sessionDescriptorState,
   sessionIdStorage
@@ -83,23 +82,27 @@ describe('the descriptor a page load comes back with', () => {
     expect(descriptor().sessionId).not.toBe('session-1');
   });
 
-  it('never reads or writes a thread of its own in storage', () => {
+  it('ignores a thread left in storage by an older version', () => {
     // The second key is gone. A leftover from a version that had one must
-    // not be adopted, and nothing here may recreate it -- a thread written
-    // down beside the session id is a second answer to "which conversation
-    // is this", and the address bar is the only one.
+    // not be adopted -- a thread written down beside the session id is a
+    // second answer to "which conversation is this", and the address bar is
+    // the only one.
+    //
+    // The other half of that claim -- that nothing here *recreates* the key
+    // -- is not asserted, deliberately. It would have to observe an atom
+    // effect's `onSet`, which fires only for a write into a live Recoil
+    // store; `snapshot_UNSTABLE(({ set }) => ...)` initialises a snapshot
+    // and fires no effect at all, so a test written that way passes with
+    // the old storage effect still installed (verified: re-adding an
+    // `onSet` to `currentThreadIdState` that writes this key left every
+    // case here green). A live store needs a renderer, and this package has
+    // `react` but neither `react-dom` nor a testing library. The guard that
+    // does hold is the read below: if any thread reaches the descriptor
+    // from storage, this goes red.
     sessionStorage.setItem(sessionIdStorage.key, 'session-1');
     sessionStorage.setItem(legacyThreadKey, 'thread-stale');
     navigation('reload');
 
     expect(descriptor()).toEqual({ sessionId: 'session-1' });
-
-    snapshot_UNSTABLE(({ set }) => {
-      set(currentThreadIdState, 'thread-9');
-    })
-      .getLoadable(currentThreadIdState)
-      .getValue();
-
-    expect(sessionStorage.getItem(legacyThreadKey)).toBe('thread-stale');
   });
 });

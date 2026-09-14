@@ -19,11 +19,12 @@ with ``first`` and an opaque ``cursor`` — rather than the old
 body is overwritten unconditionally with the caller's own: it used to be a
 filter the client set, and a filter a client sets is not an authorization.
 
-**Authorization is per-resource.** A thread is readable by its author.
-``GET /project/share/{thread_id}`` is the deliberate exception — it serves a
-thread whose owner published it, to somebody who is not the owner — and it is
-gated on the thread's own ``is_shared`` metadata instead. Both refusals are
-``404``: a ``403`` on somebody else's thread confirms the thread exists.
+**Authorization is per-resource.** A thread is readable by its author. The
+two ``/project/share/`` routes are the deliberate exception — they serve a
+thread whose owner published it, and the blobs hanging off it, to somebody
+who is not the owner — and they are gated on the thread's own ``is_shared``
+metadata instead. Both refusals are ``404``: a ``403`` on somebody else's
+thread confirms the thread exists.
 
 **Live sessions are behind a seam.** ``POST /project/action`` and the element
 routes act on an in-memory websocket session, and the resume filter asks the
@@ -45,6 +46,7 @@ and nowhere else.
 
 from __future__ import annotations
 
+import hashlib
 from typing import (
     AbstractSet,
     Annotated,
@@ -60,7 +62,7 @@ from typing import (
 from uuid import UUID
 
 import msgspec
-from litestar import Controller, Response, delete, get, post, put
+from litestar import Controller, Request, Response, delete, get, post, put
 from litestar.di import NamedDependency
 from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery, JSONBody, QueryParameter
@@ -309,6 +311,151 @@ def public_metadata(metadata: Mapping[str, Any]) -> Dict[str, Any]:
         for key, value in metadata.items()
         if key not in PRIVATE_METADATA_KEYS
     }
+
+
+def author_file_url(thread_id: str, element_id: str) -> str:
+    """The blob url ``row_to_element`` substitutes for a row with an object.
+
+    A second copy of a literal ``row_to_element`` writes inline
+    (``persistence/services.py``), because there is nothing there to import:
+    the url is built in the middle of a row mapping, not by a function. The
+    two have to agree, and what makes them —
+    ``test_a_shared_thread_hands_out_share_urls_for_its_blobs`` reads a real
+    thread through the real ``row_to_element`` and asserts the rewrite
+    happened, so a drift in either string is a red test rather than a shared
+    page of broken images.
+    """
+    return f"/project/thread/{thread_id}/element/{element_id}/file"
+
+
+def share_file_url(thread_id: str, element_id: str) -> str:
+    """The same blob, on the route a reader with no cookie is allowed."""
+    return f"/project/share/{thread_id}/element/{element_id}/file"
+
+
+def shared_element_urls(thread: ThreadDetail) -> ThreadDetail:
+    """Point a shared thread's own blobs at the public route before it leaves.
+
+    ``row_to_element`` substitutes the *author's* file url onto every row
+    that has an object behind it, because everywhere else the reader is the
+    author. On a share the reader is by definition not, and that url answers
+    them with the 404 it answers every stranger with -- so a shared thread
+    used to arrive with every persisted image broken.
+
+    Recognised by exact comparison against :func:`author_file_url` rather
+    than by re-deriving the rule: an element that owns its url
+    (``cl.Image(url="https://…")``) keeps it, and so does anything a later
+    change to the substitution decides not to rewrite.
+    """
+    thread.elements = [
+        msgspec.structs.replace(element, url=share_file_url(thread.id, element.id))
+        if element.url == author_file_url(thread.id, element.id)
+        else element
+        for element in thread.elements
+    ]
+    return thread
+
+
+# An hour, and ``private`` is not decoration: the author route serves one
+# user's file off a url a shared cache could otherwise hand to the next
+# person asking for it. The share route carries the same header for one rule
+# rather than two -- its blob is public, so `private` costs it nothing.
+ELEMENT_CACHE_CONTROL = "private, max-age=3600"
+
+
+def element_etag(data: bytes) -> str:
+    """A strong entity tag for the bytes being served.
+
+    Of the content, never of the ``objectKey``: the upload path writes with
+    ``overwrite=True``, so one key holds different bytes over a row's life
+    and a key-derived tag would pin every browser to whatever it saw first.
+    md5 because this is a cache key and not a signature;
+    ``usedforsecurity=False`` so it is still available on a FIPS build.
+    """
+    return f'"{hashlib.md5(data, usedforsecurity=False).hexdigest()}"'
+
+
+def etag_matches(header: Optional[str], etag: str) -> bool:
+    """Whether an ``If-None-Match`` names the tag we were about to send.
+
+    Exact string comparison, which is RFC 9110 §8.8.3.2's *strong*
+    comparison -- the one a ``GET`` with a range or a cache revalidation on a
+    strong tag requires. A weak validator ``W/"abc"`` therefore never matches
+    ``"abc"``, which is the right answer: nothing here is ever tagged weakly,
+    so a weak tag in the request came from somewhere else and the bytes are
+    the honest reply. ``*`` matches whatever the origin holds, and the origin
+    holds this.
+    """
+    if not header:
+        return False
+    candidates = [candidate.strip() for candidate in header.split(",")]
+    return "*" in candidates or etag in candidates
+
+
+async def serve_element_blob(
+    elements: ElementService,
+    storage: Optional[BaseStorageClient],
+    thread_id: UUID,
+    element_id: UUID,
+    if_none_match: Optional[str],
+) -> Response[bytes]:
+    """The blob of an element of this thread, for a caller already allowed it.
+
+    The two file routes below differ in one thing only -- how they decide the
+    caller may read the thread, the author check or the thread's own
+    ``is_shared`` flag -- and everything after that decision is this.
+
+    It takes the ``If-None-Match`` *value* rather than the request on
+    purpose. The share route runs under ``exclude_from_auth``, where
+    ``connection.user`` raises rather than returns ``None``, and a helper
+    that never receives the request cannot later grow a read of it.
+
+    The conditional saves the client, not the bucket: the object is fetched
+    either way, because the tag is computed from the bytes. A 304 that cost
+    no bucket GET would need :meth:`BaseStorageClient.read_file` to hand back
+    the store's own ETag, which it does not.
+    """
+    record = await elements.fetch(str(thread_id), str(element_id))
+    # Everything that is not "here are the bytes" is the same 404. The caller
+    # already proved they may read the thread; what is left to distinguish is
+    # how the row is broken, and that is our problem.
+    if record is None:
+        raise NotFoundException("Element not found")
+    object_key = record.object_key
+    if not isinstance(object_key, str) or not object_key:
+        raise NotFoundException("Element not found")
+    if storage is None:
+        logger.warning(
+            "Element %s has a blob but no storage client is configured", element_id
+        )
+        raise NotFoundException("Element not found")
+
+    data = await storage.read_file(object_key)
+    if data is None:
+        raise NotFoundException("Element not found")
+
+    etag = element_etag(data)
+    cache_headers = {"etag": etag, "cache-control": ELEMENT_CACHE_CONTROL}
+    if etag_matches(if_none_match, etag):
+        # ``b""`` rather than ``None``: Litestar renders content before it
+        # notices the status forbids a body, and ``None`` under a non-JSON
+        # media type is an unserializable 500 (``response/base.py:392``).
+        # Empty bytes pass through ``render`` untouched, and 304 then skips
+        # the content-type and content-length it would otherwise set
+        # (``response/base.py:100-120``). Both headers are repeated on the
+        # 304 because RFC 9110 §15.4.5 says a cache must be able to update
+        # its stored response from it.
+        return Response(b"", status_code=304, headers=cache_headers)
+
+    mime = element_mime(record)
+    return Response(
+        data,
+        media_type=mime,
+        headers={
+            "content-disposition": content_disposition(record.name, mime),
+            **cache_headers,
+        },
+    )
 
 
 def element_uuid(value: Any, field: str) -> UUID:
@@ -586,7 +733,9 @@ class ProjectController(Controller):
 
         thread = hide_resume_deleted(thread, sessions)
         thread.metadata = public_metadata(thread.metadata)
-        return thread
+        # After the filter, not before: an element about to be dropped is not
+        # worth a rewrite, and the rewrite must not resurrect one.
+        return shared_element_urls(thread)
 
     @get("/project/thread/{thread_id:uuid}/element/{element_id:uuid}")
     async def get_thread_element(
@@ -636,32 +785,60 @@ class ProjectController(Controller):
         Authorised by the thread in the url, like its neighbour: an element
         id is not a secret, and a read authorised by one would be a read of
         anybody's element.
+
+        Conditional, and the conditional saves the client rather than the
+        bucket -- see :func:`serve_element_blob`, which is the whole of the
+        delivery and is shared with the share route below.
         """
         await assert_thread_author(threads, thread_id, request)
-        record = await elements.fetch(str(thread_id), str(element_id))
-        # Everything that is not "here are the bytes" is the same 404. The
-        # caller already proved the thread is theirs; what is left to
-        # distinguish is how the row is broken, and that is our problem.
-        if record is None:
-            raise NotFoundException("Element not found")
-        object_key = record.object_key
-        if not isinstance(object_key, str) or not object_key:
-            raise NotFoundException("Element not found")
-        if storage is None:
-            logger.warning(
-                "Element %s has a blob but no storage client is configured", element_id
-            )
-            raise NotFoundException("Element not found")
+        return await serve_element_blob(
+            elements,
+            storage,
+            thread_id,
+            element_id,
+            request.headers.get("if-none-match"),
+        )
 
-        data = await storage.read_file(object_key)
-        if data is None:
-            raise NotFoundException("Element not found")
+    @get(
+        "/project/share/{thread_id:uuid}/element/{element_id:uuid}/file",
+        opt={"exclude_from_auth": True},
+    )
+    async def get_shared_element_file(
+        self,
+        request: Request[Any, Any, Any],
+        thread_id: FromPath[UUID],
+        element_id: FromPath[UUID],
+        threads: NamedDependency[ThreadService],
+        elements: NamedDependency[ElementService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
+    ) -> Response[bytes]:
+        """The blob of an element of a thread its author published.
 
-        mime = element_mime(record)
-        return Response(
-            data,
-            media_type=mime,
-            headers={"content-disposition": content_disposition(record.name, mime)},
+        The file half of :meth:`get_shared_thread`, gated on exactly the same
+        fact: the thread's own ``is_shared``, and a ``404`` -- never a
+        ``403`` -- when it is not set, so the route cannot be used to
+        discover which threads exist. Withdrawing the share takes the files
+        with it on the next request; nothing is signed, so there is no link
+        left outstanding that outlives the flag. The flag governs *reads*,
+        not copies: a blob already in a viewer's browser cache stays theirs
+        until :data:`ELEMENT_CACHE_CONTROL` expires, which is the price of
+        the header and not a hole in this one.
+
+        The thread is read with ``fetch`` rather than ``get_detail``: the
+        answer is one boolean out of one row, and a page of a shared thread
+        asks this route once per image. A plain :class:`Request`, not
+        :data:`AuthedRequest` -- on an excluded route ``connection.user``
+        raises, and the delivery helper is never handed the request at all.
+        """
+        thread = await threads.fetch(str(thread_id))
+        if thread is None or not thread.metadata.get("is_shared"):
+            raise NotFoundException("Thread not found")
+        return await serve_element_blob(
+            elements,
+            storage,
+            thread_id,
+            element_id,
+            request.headers.get("if-none-match"),
         )
 
     @put("/project/element")

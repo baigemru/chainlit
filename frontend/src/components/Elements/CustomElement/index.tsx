@@ -9,7 +9,6 @@ import {
 } from 'react';
 import { Runner } from 'react-runner';
 import { useRecoilValue } from 'recoil';
-import { v4 as uuidv4 } from 'uuid';
 
 import {
   ChainlitContext,
@@ -25,6 +24,7 @@ import Alert from '@/components/Alert';
 
 import Imports from './Imports';
 import * as Renderer from './Renderer';
+import { UserMessagePayload, buildUserMessage } from './userMessage';
 
 const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
   const apiClient = useContext(ChainlitContext);
@@ -66,17 +66,10 @@ const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
   );
 
   const sendUserMessage = useCallback(
-    (message: string, command?: string) => {
-      return sendMessage({
-        threadId: '',
-        id: uuidv4(),
-        name: user?.identifier || 'User',
-        type: 'user_message',
-        output: message,
-        createdAt: new Date().toISOString(),
-        metadata: { location: window.location.href },
-        command
-      });
+    (message: string, payload?: UserMessagePayload, command?: string) => {
+      return sendMessage(
+        buildUserMessage(message, user?.identifier || 'User', payload, command)
+      );
     },
     [sendMessage, user]
   );

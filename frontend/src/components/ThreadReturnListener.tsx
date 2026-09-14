@@ -4,9 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 
 import {
-  ErrorCode,
   currentThreadIdState,
-  protocolErrorState,
   sessionIdState,
   useChatData,
   useChatTransport
@@ -37,7 +35,6 @@ export default function ThreadReturnListener() {
 
   const sessionId = useRecoilValue(sessionIdState);
   const currentThreadId = useRecoilValue(currentThreadIdState);
-  const protocolError = useRecoilValue(protocolErrorState);
   const setParentEntry = useSetRecoilState(parentThreadEntryState);
   const [transition, setTransition] = useRecoilState(openThreadTransitionState);
   const [request, setRequest] = useRecoilState(openThreadRequestState);
@@ -110,16 +107,18 @@ export default function ThreadReturnListener() {
 
   // Retire the transition once it is over: the opened thread became current
   // (from here the guard against double events is the no-op on the current
-  // thread), the resume failed, or the user abandoned it by navigating
-  // somewhere else before the resume landed — otherwise the in-flight guard
-  // would swallow every future open until a reload.
+  // thread), or the user abandoned it by navigating somewhere else before
+  // the resume landed — otherwise the in-flight guard would swallow every
+  // future open until a reload. A thread the server refuses to resume comes
+  // back through that same pathname branch: it answers `session.ready` with
+  // a thread of its own and the address follows, so the transition's route
+  // is gone.
   useEffect(() => {
     if (
       shouldRetireTransition({
         transition,
         currentThreadId,
         pathname: location.pathname,
-        resumeError: protocolError?.code === ErrorCode.THREAD_NOT_FOUND,
         // A superseded session will never finish the open either, and
         // leaving the transition in flight would swallow every future one.
         sessionError: error || superseded
@@ -131,7 +130,6 @@ export default function ThreadReturnListener() {
     transition,
     currentThreadId,
     location.pathname,
-    protocolError,
     error,
     superseded,
     setTransition

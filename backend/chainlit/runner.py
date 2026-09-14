@@ -36,7 +36,6 @@ from chainlit.persistence.writer import (
     SessionWriter,
     WriterRegistry,
 )
-from chainlit.protocol.codec import ErrorCode
 from chainlit.protocol.payloads import (
     AskTextReply,
     AskTextSpec,
@@ -44,7 +43,6 @@ from chainlit.protocol.payloads import (
     FileRef,
     Step,
 )
-from chainlit.protocol.server import Error
 from chainlit.utils import utc_now
 from chainlit.ws.handshake import Arrival, sweep_superseded
 from chainlit.ws.registry import SessionRegistry
@@ -257,6 +255,12 @@ class ApplicationRunner:
         it does not own would write its next message into somebody else's
         conversation, so a refused thread is *disowned* -- the session gets a
         fresh id and a fresh writer -- not merely left unreplayed.
+
+        Nothing here refuses out loud. A thread that is not in the database
+        is either the user's own conversation before its first row or a name
+        this connection has no business knowing about, and neither is worth
+        an error frame: one keeps its id, the other is disowned, and
+        ``session.ready`` names whichever it ended up with.
         """
         if self.persistence is None or session.first_interaction:
             return False
@@ -270,17 +274,31 @@ class ApplicationRunner:
         async with self.persistence.uow() as unit:
             detail = await unit.threads.get_detail(thread_id)
         if detail is None:
-            # The client asked for a conversation that is not there. Said
-            # once the screen is ready, not now: nothing may go out ahead of
-            # ``session.ready``. Without it the client sat on a loader for a
-            # thread that would never become current, while the server
-            # quietly opened a fresh chat under the id it had asked for.
-            arrival.missing_thread = thread_id
+            if any(entry.thread_id == thread_id for entry in arrival.superseded):
+                # Not a stranger's id: this very session id was holding that
+                # conversation a moment ago, and it has no rows only because
+                # nobody had spoken in it yet -- the writer holds them until
+                # the first interaction. The user pressed F5 on a greeting.
+                # ``arrival.superseded`` is the only record of it left, since
+                # ``arrive`` takes the entry out of the registry before this
+                # runs, so a lookup there would find nothing and hand the
+                # user a new address for the chat they are looking at. The
+                # session keeps the thread it was minted with and the row
+                # appears on the first interaction, as it always would.
+                return False
+            # A conversation that is not there and not this connection's to
+            # miss. Nothing is said about it: the session is given a thread
+            # of its own and ``session.ready`` names it, which is how the
+            # client learns the address it asked for is not the one it got.
+            # The error frame that used to go out instead told the client
+            # something it could not act on and left it on a loader for a
+            # thread that would never become current.
+            await self._disown_thread(session)
             return False
         if identifier is None or detail.user_identifier != identifier:
             # Not found, not forbidden: whether somebody else's thread
-            # exists is not this user's to learn.
-            arrival.missing_thread = thread_id
+            # exists is not this user's to learn. Silent for the same
+            # reason -- a refusal is an answer about a row.
             await self._disown_thread(session)
             return False
         if not (self.code.on_chat_resume or self.code.on_thread_ready):
@@ -355,14 +373,6 @@ class ApplicationRunner:
         session = arrival.session
         assert session is not None
         emitter = self._bind(session)
-
-        if arrival.missing_thread is not None:
-            session.send(
-                Error(
-                    code=ErrorCode.THREAD_NOT_FOUND.value,
-                    message=f"thread {arrival.missing_thread} not found",
-                )
-            )
 
         if arrival.resumed_thread is not None:
             self._launch(session, self._resume_hooks(session, arrival.resumed_thread))

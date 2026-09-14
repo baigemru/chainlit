@@ -38,8 +38,20 @@ def test_error_codes_are_unique_strings() -> None:
     assert all(v == v.lower() and " " not in v for v in values)
 
 
+def test_no_error_code_reports_a_missing_thread() -> None:
+    """A resume that misses is not a failure, so nothing names one.
+
+    The server answers a thread it cannot find by giving the session one of
+    its own and naming it in ``session.ready``; the client changes its
+    address to match. A code for the old refusal would be a promise to a
+    caller that does not exist -- and the client that still had one kept an
+    atom and a loader around waiting for it.
+    """
+    assert [code.value for code in ErrorCode if "thread" in code.value] == []
+
+
 def test_an_error_message_accepts_an_error_code() -> None:
-    msg = s.Error(code=ErrorCode.THREAD_NOT_FOUND.value, message="gone", fatal=True)
+    msg = s.Error(code=ErrorCode.ASK_UNKNOWN.value, message="gone", fatal=True)
     assert decode_server(encode_server(msg)) == msg
 
 

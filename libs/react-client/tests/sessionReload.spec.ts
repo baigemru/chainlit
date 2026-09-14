@@ -2,7 +2,7 @@ import { snapshot_UNSTABLE } from 'recoil';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  rememberThreadId,
+  sessionDescriptorSeed,
   sessionDescriptorState,
   sessionIdStorage
 } from '../src/state';
@@ -10,13 +10,14 @@ import {
 /**
  * What a reload is allowed to inherit from the page that ran before it.
  *
- * The session id alone is not enough. A tab sitting on `/thread/:id` mounts
- * `AutoResumeThread`, which compares the thread in the URL against the
- * descriptor's and calls `clear()` when they differ -- on mount, before any
- * frame can answer. A restored descriptor with no thread therefore mints a
- * fresh session id and sends `session.clear` to the session the server had
- * just kept, taking its open question with it. So the thread the tab was in
- * travels with the id or the rescue never happens.
+ * The session id comes out of sessionStorage; the thread does not, and may
+ * not. A tab sitting on `/thread/:id` mounts `AutoResumeThread`, which
+ * compares the thread in the URL against the descriptor's and calls
+ * `clear()` when they differ -- on mount, before any frame can answer. A
+ * descriptor that carried a *stored* thread could therefore disagree with
+ * the address bar and wipe the session the server had just kept. So the
+ * request is the address bar and nothing else, handed in by the host
+ * through `sessionDescriptorSeed`: this package knows nothing about routes.
  */
 
 const navigation = (type: string) => {
@@ -25,23 +26,25 @@ const navigation = (type: string) => {
   ]);
 };
 
-const threadKey = () => `${sessionIdStorage.key}:thread`;
+const legacyThreadKey = `${sessionIdStorage.key}:thread`;
 
 const descriptor = () =>
   snapshot_UNSTABLE().getLoadable(sessionDescriptorState).getValue();
 
-describe('the descriptor a reload comes back with', () => {
+describe('the descriptor a page load comes back with', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    sessionDescriptorSeed.threadId = undefined;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    sessionDescriptorSeed.threadId = undefined;
   });
 
-  it('carries the stored thread as well as the stored session id', () => {
+  it('restores the session id and asks for the thread the host names', () => {
     sessionStorage.setItem(sessionIdStorage.key, 'session-1');
-    sessionStorage.setItem(threadKey(), 'thread-1');
+    sessionDescriptorSeed.threadId = () => 'thread-1';
     navigation('reload');
 
     expect(descriptor()).toEqual({
@@ -50,50 +53,56 @@ describe('the descriptor a reload comes back with', () => {
     });
   });
 
-  it('carries the id alone when the tab was not in a thread yet', () => {
+  it('asks for the host thread on a fresh id too', () => {
+    // A new tab opened straight onto `/thread/:id`: the id is minted, but
+    // the address still says which conversation the user asked for.
+    sessionDescriptorSeed.threadId = () => 'thread-2';
+    navigation('navigate');
+
+    const restored = descriptor();
+    expect(restored.sessionId).toBeTruthy();
+    expect(restored.threadId).toBe('thread-2');
+  });
+
+  it('carries no thread when the host names none', () => {
+    // The key is absent rather than present-and-undefined: the descriptor is
+    // compared by shape in the transport's `sameSession`.
     sessionStorage.setItem(sessionIdStorage.key, 'session-1');
     navigation('reload');
 
     expect(descriptor()).toEqual({ sessionId: 'session-1' });
   });
 
-  it('inherits nothing on a navigation that is not a reload', () => {
+  it('inherits no session id on a navigation that is not a reload', () => {
     // A tab opened from this one inherits a copy of sessionStorage. Adopting
-    // either value there would hijack the original tab's server session.
+    // the id there would hijack the original tab's server session.
     sessionStorage.setItem(sessionIdStorage.key, 'session-1');
-    sessionStorage.setItem(threadKey(), 'thread-1');
     navigation('navigate');
 
-    const restored = descriptor();
-    expect(restored.sessionId).not.toBe('session-1');
-    expect(restored.threadId).toBeUndefined();
-    // And the thread is dropped, not merely unread: leaving it behind would
-    // have the next reload of *this* tab resume the other tab's thread.
-    expect(sessionStorage.getItem(threadKey())).toBeNull();
+    expect(descriptor().sessionId).not.toBe('session-1');
   });
 
-  it('comes back with the thread the session moved into', () => {
-    // The round trip, written the way the app writes it: the descriptor
-    // never learns the thread of a chat begun at `/` -- the server names it
-    // on `thread.first_interaction` -- so `currentThreadId` is what has to
-    // be written down for the reload to have anything to carry.
+  it('ignores a thread left in storage by an older version', () => {
+    // The second key is gone. A leftover from a version that had one must
+    // not be adopted -- a thread written down beside the session id is a
+    // second answer to "which conversation is this", and the address bar is
+    // the only one.
+    //
+    // The other half of that claim -- that nothing here *recreates* the key
+    // -- is not asserted, deliberately. It would have to observe an atom
+    // effect's `onSet`, which fires only for a write into a live Recoil
+    // store; `snapshot_UNSTABLE(({ set }) => ...)` initialises a snapshot
+    // and fires no effect at all, so a test written that way passes with
+    // the old storage effect still installed (verified: re-adding an
+    // `onSet` to `currentThreadIdState` that writes this key left every
+    // case here green). A live store needs a renderer, and this package has
+    // `react` but neither `react-dom` nor a testing library. The guard that
+    // does hold is the read below: if any thread reaches the descriptor
+    // from storage, this goes red.
     sessionStorage.setItem(sessionIdStorage.key, 'session-1');
-    rememberThreadId('thread-9');
+    sessionStorage.setItem(legacyThreadKey, 'thread-stale');
     navigation('reload');
 
-    expect(descriptor()).toEqual({
-      sessionId: 'session-1',
-      threadId: 'thread-9'
-    });
-  });
-
-  it('forgets the thread when the session leaves it', () => {
-    // What `clear()` does on a new chat: a stale key would have the next
-    // reload resume the conversation the user just walked away from.
-    sessionStorage.setItem(threadKey(), 'thread-9');
-
-    rememberThreadId(undefined);
-
-    expect(sessionStorage.getItem(threadKey())).toBeNull();
+    expect(descriptor()).toEqual({ sessionId: 'session-1' });
   });
 });

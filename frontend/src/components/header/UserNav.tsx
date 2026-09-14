@@ -1,6 +1,7 @@
 import capitalize from 'lodash/capitalize';
 import { LogOut } from 'lucide-react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { useAuth, useConfig } from '@chainlit/react-client';
 
@@ -29,6 +30,7 @@ interface Props {
 export default function UserNav({ collapsed }: Props) {
   const { user, logout } = useAuth();
   const { config } = useConfig();
+  const navigate = useNavigate();
   const [iframeLink, setIframeLink] = useState<{
     name: string;
     url: string;
@@ -92,7 +94,21 @@ export default function UserNav({ collapsed }: Props) {
         );
       })}
       {menuLinks.length > 0 && <DropdownMenuSeparator />}
-      <DropdownMenuItem onClick={() => logout(true)}>
+      <DropdownMenuItem
+        onClick={() => {
+          // Home first, then the logout's reload. The address bar is the
+          // thread request now, so reloading on `/thread/<id>` would hand
+          // the next person to log in here a request for the previous
+          // user's conversation -- the server disowns it, but the address
+          // must not carry it in the first place. Done here rather than in
+          // `logout`: that hook lives in the react-client package, has no
+          // router, and must not grow one. `logout` awaits the network
+          // before it reloads, so the router's replaceState has landed long
+          // before the page goes.
+          navigate('/', { replace: true });
+          logout(true);
+        }}
+      >
         <Translator path="navigation.user.menu.logout" />
         <LogOut className="ml-auto" />
       </DropdownMenuItem>

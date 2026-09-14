@@ -143,7 +143,13 @@ navigation — `target=_blank` tabs, which inherit a copy of sessionStorage, and
 Chromium's `back_forward` for duplicated tabs — gets a fresh uuid, otherwise the new
 tab would hijack the original's server session. `sessionIdStorage.key` is mutable so
 the copilot can scope it (`chainlit-copilot-session-id:<server>`, set in
-`libs/copilot/src/appWrapper.tsx` before `RecoilRoot` mounts).
+`libs/copilot/src/appWrapper.tsx` before `RecoilRoot` mounts). The thread the
+descriptor asks for is never stored: the host seeds it through
+`sessionDescriptorSeed.threadId`, a function read by the same effect on both the
+reload and the fresh-id branch. The web app sets it in `frontend/src/main.tsx` to read
+`/thread/:id` off `window.location` (`frontend/src/lib/threadAddress.ts`), so the
+URL is the only place a request for a thread can come from — synchronously, before
+`AutoResumeThread` compares it on mount.
 
 Other atoms: `messagesState`, `elementState`, `tasklistState`, `actionState`,
 `askUserState`, `loadingState`, `sideViewState`, `firstUserInteraction`,
@@ -171,7 +177,7 @@ wire is a compile error rather than silence at runtime. All 23 server tags:
 
 | Tag                        | Effect on state                                                                                                                                                                                              |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `session.ready`            | clears the one-shot auth-failure guard; adopts `msg.chatProfile`                                                                                                                                             |
+| `session.ready`            | clears the one-shot auth-failure guard; adopts `msg.chatProfile`; writes `msg.threadId` to `currentThreadIdState` — the server's answer to whatever the URL asked                                            |
 | `error`                    | writes `protocolErrorState`, warns                                                                                                                                                                           |
 | `hb`                       | nothing — the socket already answered `hb.ack`                                                                                                                                                               |
 | `reload`                   | sends `session.clear`, removes the persisted id, `location.reload()`                                                                                                                                         |
@@ -250,10 +256,17 @@ issues the resume with `clear({ threadId: id })` — one write for "new session,
 resumes this thread". Its guard is the descriptor itself (`if (idToResume === id)
 return`), which is what makes it safe for the effect to re-run when the profile-keyed
 config refetches after the resume names the thread's profile. A transport `error`
-toasts and goes home; a `protocolError.code === THREAD_NOT_FOUND` does the same and
-clears the error. Both are gated on `id === idToResume`, because on the commit that
-mounts the component the resume has been issued but not rendered, and a leftover error
-from the previous session would be read as this resume's answer. Both call `clear()`
+toasts and goes home, gated on `id === idToResume`, because on the commit that mounts
+the component the resume has been issued but not rendered, and a leftover error from
+the previous session would be read as this resume's answer. A resume the server would
+not grant is not an error at all: `session.ready` names a different thread and
+`ThreadAddressListener` (mounted in `pages/Page.tsx`) moves the address to it with
+`navigate(..., { replace: true })` — `navigate`, because react-router's history
+subscribes to `popstate` only and a bare `history.replaceState` leaves `useParams()`
+stale. The same listener gives a chat begun at `/` its `/thread/<id>` address the
+moment the server names the thread, and only when the config is `threadResumable`: an
+app without resume hooks starts over on a reload, and `Thread.tsx` renders
+`/thread/<id>` read-only for it. The transport-error branch calls `clear()`
 on the way out, releasing the thread — otherwise picking the same thread again would
 find the guard already satisfied and do nothing.
 
@@ -270,8 +283,9 @@ the id the backend parked the hand-off record under. The return listener runs
 `thread.open` through `useOpenThread`, tracks the parent thread from `thread.parent`
 (scoped to the session id) and `thread.resume`, drains the composer's parked
 `openThreadRequestState`, and retires an in-flight transition via
-`shouldRetireTransition` (`frontend/src/lib/openThread.ts`) on success, resume error,
-session error/supersede, or navigation away.
+`shouldRetireTransition` (`frontend/src/lib/openThread.ts`) on success, session
+error/supersede, or navigation away — which is also how a refused resume retires it:
+the address listener has moved the route to the thread the server named instead.
 
 `useOpenThread` probes `/project/thread/:id` with a raw `fetch` (the shared client
 would send a 401 to the global login redirect), then does teardown, kept transcript
@@ -368,6 +382,8 @@ paths; `format` and `lint:fix` write).
 - **One sink, many listeners.** A second handler table would double every
   `step.stream.token`; components needing two or three tags use `transport.onMessage`.
 - **`sessionStorage`, not `localStorage`, and only on a true reload** — anything else
-  lets a duplicated tab hijack a live server session.
+  lets a duplicated tab hijack a live server session. Only the session id lives
+  there; the thread comes from the URL, so a second copy that could disagree with the
+  address bar never exists.
 - **Build order.** A stale `libs/react-client/dist` silently ships old client code into
   `frontend/dist`, and from there into the wheel.

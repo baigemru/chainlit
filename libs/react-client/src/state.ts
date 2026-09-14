@@ -36,11 +36,21 @@ export const protocolErrorState = atom<ProtocolError | undefined>({
 // session.
 export const sessionIdStorage = { key: 'chainlit-session-id' };
 
-// Where the thread the tab is *in* is remembered, derived from the key above
-// rather than a constant of its own: an embedder that moves one moves both,
-// and a copilot sharing a tab with the app must not read the app's thread.
-export const threadIdStorageKey = (): string =>
-  `${sessionIdStorage.key}:thread`;
+// Which thread this page load is *asking* for. A function rather than a
+// value because the host decides where the request comes from -- in the
+// frontend it is the address bar, read at atom initialisation -- and this
+// package knows nothing about routes. Set before RecoilRoot mounts, like
+// `sessionIdStorage.key` above.
+//
+// It has to be synchronous, and that is the whole point: `AutoResumeThread`
+// compares the URL's thread against the descriptor's on mount, before a
+// single frame can arrive, and calls `clear()` when they differ. A
+// descriptor that learned its thread from an effect would always differ on
+// that first commit and send `session.clear` to the session the server had
+// just kept.
+export const sessionDescriptorSeed: {
+  threadId?: () => string | undefined;
+} = {};
 
 // A saved session id is only reused when this page load is a plain reload
 // of the same tab. A brand-new navigation — including tabs opened from this
@@ -66,36 +76,37 @@ const isReloadNavigation = (): boolean => {
 // restored. sessionStorage is deliberate: localStorage would collapse every
 // tab into a single server session.
 //
-// The thread comes back with it, and that is not a convenience. A tab on
-// `/thread/:id` mounts `AutoResumeThread`, which compares the thread in the
-// URL against this descriptor's on mount -- before a single frame can
-// arrive -- and calls `clear()` when they differ. A descriptor restored
-// without its thread therefore always differs: the reload mints a fresh id,
-// sends `session.clear` to the session the server had just kept, and the
-// question that session was holding dies with it. Restoring both is what
-// makes the rescue reachable at all.
+// Only the id. The thread is asked for by the host seed on both branches --
+// storage has no say in it, because two places naming the thread is two
+// answers to the same question, and the one that disagrees with the address
+// bar is the one that wipes a live session.
 const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
   setSelf,
   onSet
 }) => {
+  const requested = () => {
+    const threadId = sessionDescriptorSeed.threadId?.();
+    // Absent, not present-and-undefined: the transport compares descriptors
+    // by shape, and `clear()` writes the key only when it has one.
+    return threadId ? { threadId } : {};
+  };
+
   try {
     const saved = isReloadNavigation()
       ? sessionStorage.getItem(sessionIdStorage.key)
       : null;
     if (saved) {
-      const threadId = sessionStorage.getItem(threadIdStorageKey());
-      setSelf(threadId ? { sessionId: saved, threadId } : { sessionId: saved });
+      setSelf({ sessionId: saved, ...requested() });
     } else {
       const fresh = uuidv4();
       sessionStorage.setItem(sessionIdStorage.key, fresh);
-      // A session nobody may adopt is in no thread either: leaving the
-      // previous tab's thread behind would have this one resume it.
-      sessionStorage.removeItem(threadIdStorageKey());
-      setSelf({ sessionId: fresh });
+      setSelf({ sessionId: fresh, ...requested() });
     }
   } catch (_error) {
-    // Storage unavailable (sandboxed iframe, privacy mode): fall back to the
-    // in-memory id, i.e. the historical behavior.
+    // Storage unavailable (sandboxed iframe, privacy mode): a fresh id, as
+    // ever -- but still the thread the address bar asked for, or a reload
+    // there would be read as "resume something else" and clear the session.
+    setSelf({ sessionId: uuidv4(), ...requested() });
   }
 
   onSet((descriptor) => {
@@ -105,29 +116,6 @@ const sessionStorageSessionIdEffect: AtomEffect<SessionDescriptor> = ({
       // Ignore storage failures; the atom still holds the id.
     }
   });
-};
-
-// The other half: the thread the session actually moved into, which the
-// descriptor does not know. A chat begun at `/` has no `threadId` in its
-// descriptor for its whole life -- the server names the thread on
-// `thread.first_interaction` -- so the descriptor alone would carry nothing
-// across a reload of exactly the conversation most worth carrying.
-export const rememberThreadId = (threadId: string | undefined): void => {
-  try {
-    if (threadId) {
-      sessionStorage.setItem(threadIdStorageKey(), threadId);
-    } else {
-      sessionStorage.removeItem(threadIdStorageKey());
-    }
-  } catch (_error) {
-    // Ignore storage failures; the atom still holds the thread.
-  }
-};
-
-const sessionStorageThreadIdEffect: AtomEffect<string | undefined> = ({
-  onSet
-}) => {
-  onSet(rememberThreadId);
 };
 
 /**
@@ -274,8 +262,15 @@ export const sideViewState = atom<
   default: undefined
 });
 
+/**
+ * The thread the session is actually in, as opposed to the one it was
+ * opened to resume.
+ *
+ * Written from `session.ready` on every connection: the server names the
+ * thread on every branch, and that answer -- not anything this client
+ * remembers -- is what the address bar is then brought into line with.
+ */
 export const currentThreadIdState = atom<string | undefined>({
   key: 'CurrentThreadId',
-  default: undefined,
-  effects: [sessionStorageThreadIdEffect]
+  default: undefined
 });

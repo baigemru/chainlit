@@ -449,12 +449,24 @@ def test_a_resume_replays_the_thread_then_runs_the_hooks_in_order(
 # ---------------------------------------------------- 3. foreign thread resume
 
 
-def test_a_foreign_thread_is_not_replayed_to_another_user(
+def test_another_users_thread_is_a_fresh_chat_too(
     plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
 ) -> None:
+    """Bob asks for Alice's thread: a new chat, and not a word about hers.
+
+    Nothing of Alice's is replayed -- that was always true -- and nothing is
+    *said* either. An ``error`` naming the thread as missing or forbidden is
+    an answer to "does this id exist", which is the one question Bob must
+    not be able to ask; and either answer is the same answer, so the silence
+    has to be unconditional. What he gets is what any new chat gets: a
+    thread of his own in ``session.ready``, and his greeting on top of it.
+    """
     seed_user(db_url, ALICE)
     seed_user(db_url, BOB)
     hooks: List[str] = []
+
+    async def on_chat_start() -> None:
+        await cl.Message(content="hello").send()
 
     async def on_message(msg: cl.Message) -> None:
         await cl.Message(content=f"echo: {msg.content}").send()
@@ -465,6 +477,7 @@ def test_a_foreign_thread_is_not_replayed_to_another_user(
     async def on_thread_ready(thread: Dict[str, Any]) -> None:
         hooks.append("ready")
 
+    test_config.code.on_chat_start = on_chat_start
     test_config.code.on_message = on_message
     test_config.code.on_chat_resume = on_chat_resume
     test_config.code.on_thread_ready = on_thread_ready
@@ -475,16 +488,28 @@ def test_a_foreign_thread_is_not_replayed_to_another_user(
             handshake = open_session(ws)
             send_and_read_reply(ws, "alice's secret")
         thread_id = handshake[0]["threadId"]
-        wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 2)
+        wait_for_thread(db_url, thread_id, lambda d: len(d.steps) == 3)
 
         login(client, auth, BOB)
         with client.websocket_connect("/ws") as ws:
             foreign = open_session(ws, sessionId="s-bob", threadId=thread_id)
+            # Bob's greeting. Whatever ``on_ready`` had to say about the
+            # thread he asked for was said before this frame was launched,
+            # so its absence below is an absence.
+            foreign += read_until(ws, "step.upsert")
             settle()
 
     assert hooks == []
+    assert foreign[0]["threadId"] != thread_id, foreign[0]
+    assert [f for f in foreign if f["t"] == "error"] == [], tags(foreign)
     assert "thread.first_interaction" not in tags(foreign)
-    assert [f for f in foreign if f["t"] == "step.upsert"] == [], tags(foreign)
+    outputs = [f["step"].get("output") for f in foreign if f["t"] == "step.upsert"]
+    assert outputs == ["hello"], outputs
+
+    # Alice's conversation is where she left it.
+    alice = thread_detail(db_url, thread_id)
+    assert alice is not None
+    assert len(alice.steps) == 3, [step.output for step in alice.steps]
 
 
 def test_a_foreign_thread_is_not_written_into_by_another_user(
@@ -959,35 +984,59 @@ def test_a_reconnect_of_a_resumed_session_does_not_start_the_chat_again(
     assert started == 1
 
 
-def test_a_missing_thread_is_reported_after_the_ready_frame(
+def test_opening_an_unknown_thread_starts_a_fresh_chat_silently(
     plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
 ) -> None:
-    """A resume of a thread that is not there is told, not papered over.
+    """An address can outlive its thread. That is a new chat, not an error.
 
-    The client parks on a loader until the thread it asked for becomes
-    current; a server that quietly starts a fresh chat under that id leaves
-    it there for good. ``thread_not_found`` is the frame it acts on -- and
-    it must follow ``session.ready``, like everything else.
+    A bookmark, a shared link, a row somebody deleted: the client asks for
+    whatever its address bar holds, and the server may have nothing under
+    it. Answering ``thread_not_found`` left the client on a loader waiting
+    for a thread that would never become current, while the session went on
+    holding the very id it had been told was missing -- so the first message
+    of the "new" chat was filed under a thread the user never opened. The
+    honest answer is the one ``session.ready`` already carries: a different
+    thread id, which is the client's cue to change its address.
     """
     seed_user(db_url, ALICE)
+    requested = str(uuid.uuid4())
+    started: List[Optional[str]] = []
+
+    async def on_chat_start() -> None:
+        started.append(cl.context.session.thread_id)
+        await cl.Message(content="hello").send()
 
     async def on_message(msg: cl.Message) -> None:
-        pass
+        await cl.Message(content=f"echo: {msg.content}").send()
 
     async def on_chat_resume(thread: Dict[str, Any]) -> None:
         pass
 
+    test_config.code.on_chat_start = on_chat_start
     test_config.code.on_message = on_message
     test_config.code.on_chat_resume = on_chat_resume
 
     with create_test_client(plugins=[plugin]) as client:
         login(client, auth, ALICE)
         with client.websocket_connect("/ws") as ws:
-            frames = open_session(ws, threadId=str(uuid.uuid4()))
-            frames += read_until(ws, "error")
+            frames = open_session(ws, sessionId="s-unknown", threadId=requested)
+            ready = frames[0]
+            assert ready["t"] == "session.ready"
+            assert ready["threadId"] != requested, ready
+            # The greeting, then a turn of the new chat. Anything reported
+            # about the missing thread would be in here: it went out from
+            # ``on_ready``, ahead of the very hook that greets.
+            frames += read_until(ws, "step.upsert")
+            frames += send_and_read_reply(ws, "first words")
+        assert started == [ready["threadId"]]
+        assert [f for f in frames if f["t"] == "error"] == [], tags(frames)
+        assert (
+            first(frames, "thread.first_interaction")["threadId"] == ready["threadId"]
+        )
+        wait_for_thread(db_url, ready["threadId"], lambda d: len(d.steps) == 3)
 
-    assert frames[0]["t"] == "session.ready"
-    assert first(frames, "error")["code"] == "thread_not_found"
+    # And nothing was written under the id the client asked for.
+    assert thread_detail(db_url, requested) is None
 
 
 def test_a_fresh_session_is_not_told_its_own_thread_is_missing(

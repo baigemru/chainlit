@@ -20,8 +20,7 @@ import {
   sessionIdState,
   sessionIdStorage,
   sideViewState,
-  tasklistState,
-  threadIdStorageKey
+  tasklistState
 } from 'src/state';
 import {
   IAction,
@@ -133,6 +132,14 @@ const useChatSession = () => {
       'session.ready': (msg) => {
         authFailureHandledRef.current = false;
         if (msg.chatProfile) setChatProfile(msg.chatProfile);
+        // The server names the thread on every branch of the handshake --
+        // kept, replaced, created, resumed -- and that answer outranks
+        // whatever this client asked for. A resume the server refused comes
+        // back as a *different* thread here rather than an error, and the
+        // address bar follows it (ThreadAddressListener); without this
+        // write the tab would sit on /thread/<refused> with the session in
+        // another thread, and AutoResumeThread would clear it on sight.
+        setCurrentThreadId(msg.threadId ?? undefined);
       },
 
       error: (msg) => {
@@ -149,12 +156,10 @@ const useChatSession = () => {
       reload: () => {
         transport.send({ t: 'session.clear' });
         try {
-          // The server asked for a clean restart (dev hot-reload): drop
-          // the persisted id and the thread that travels with it, so the
-          // reloaded page cannot race the clear and resurrect the session
-          // it was told to leave -- or resume its thread instead.
+          // The server asked for a clean restart (dev hot-reload): drop the
+          // persisted id, so the reloaded page cannot race the clear and
+          // resurrect the session it was told to leave.
           sessionStorage.removeItem(sessionIdStorage.key);
-          sessionStorage.removeItem(threadIdStorageKey());
         } catch (_error) {
           // Storage unavailable — the reload proceeds regardless.
         }

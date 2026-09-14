@@ -89,7 +89,10 @@ class ErrorCode(StrEnum):
     UNAUTHORIZED = "unauthorized"
 
     SESSION_NOT_FOUND = "session_not_found"
-    THREAD_NOT_FOUND = "thread_not_found"
+    # No ``thread_not_found``: a resume that misses is not a failure. The
+    # server gives the session a thread of its own and names it in
+    # ``session.ready``; the client changes its address to match. A code
+    # nobody sends is a promise to a caller that does not exist.
 
     ASK_SLOT_BUSY = "ask_slot_busy"
     """A second concurrent ask was refused; see ``features.strict_ask_slot``."""

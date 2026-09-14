@@ -216,7 +216,14 @@ export function ThreadList({
       // Deleting the open thread blanks the screen; transcripts kept by
       // returns to a parent thread would otherwise linger above it.
       resetKeptTranscript();
+      // Home in the same breath as the clear, like NewChat. Waiting for the
+      // DELETE to answer would put this navigate after the `session.ready`
+      // of the session `clear()` just started -- ThreadAddressListener has
+      // by then replaced the address with `/thread/<new>`, and a late
+      // `navigate('/')` would leave the bar disagreeing with the session, so
+      // the next reload asks for nothing and starts over.
       clear();
+      navigate('/');
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
@@ -229,7 +236,11 @@ export function ThreadList({
           ...prev,
           threads: prev?.threads?.filter((t) => t.id !== threadIdToDelete)
         }));
-        navigate('/');
+        // No navigate here. The open-thread branch above has already gone
+        // home; any other thread was deleted out of the list while the user
+        // sits in a conversation of their own, and sending them to `/` would
+        // strand the live session at an address that no longer names it --
+        // the same disagreement, arrived at from the other side.
         return (
           <Translator path="threadHistory.thread.actions.delete.success" />
         );

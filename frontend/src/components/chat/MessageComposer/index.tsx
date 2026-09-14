@@ -24,7 +24,7 @@ import { useQuery } from '@/hooks/query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useParentThreadId } from '@/hooks/useParentThread';
 
-import { IAttachment, attachmentsState } from 'state/chat';
+import { IAttachment, attachmentsState, composerDraftState } from 'state/chat';
 
 import { Attachments } from './Attachments';
 import Input, { InputMethods } from './Input';
@@ -46,7 +46,10 @@ export default function MessageComposer({
   autoScrollRef
 }: Props) {
   const inputRef = useRef<InputMethods>(null);
-  const [value, setValue] = useState('');
+  // Above this component, not inside it: the composer is remounted by the
+  // route moving under it (see `composerDraftState`), and a draft in
+  // `useState` would go with it.
+  const [value, setValue] = useRecoilState(composerDraftState);
   const [attachments, setAttachments] = useRecoilState(attachmentsState);
   const { t } = useTranslation();
 
@@ -165,13 +168,17 @@ export default function MessageComposer({
     onReply
   ]);
 
-  // The two layouts hang the textarea off different parents, so React
-  // remounts it on every switch and it comes back empty — while `value`, and
-  // with it the enabled send button, still holds the draft. `useIsMobile`
-  // answers false for one render on a phone, so the very first load switches;
-  // dragging a window across 768px mid-sentence does it again. Deliberately
-  // keyed on the layout alone: `value` in the deps would re-inject on every
-  // keystroke.
+  // The textarea keeps its own copy of the draft (`Input` owns the value it
+  // renders, and the composition state with it), so every remount brings it
+  // back empty while `value` — now the Recoil draft — still holds the text:
+  // an enabled send button over an empty-looking box, sending something
+  // nobody can see. Two things remount it. The layouts hang it off different
+  // parents, and `useIsMobile` answers false for one render on a phone, so
+  // the first load on a phone switches and a drag across 768px does it
+  // again; and the route moving from `/` to `/thread/<id>` swaps the whole
+  // page element. The mount run of this effect covers the second — which is
+  // why it must stay keyed on the layout alone and not be guarded on a
+  // change: `value` in the deps would re-inject on every keystroke.
   useEffect(() => {
     if (value) inputRef.current?.setValueExtern(value);
   }, [isMobile]);

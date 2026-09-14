@@ -175,13 +175,16 @@ superseded session down (`teardown`: cancel work, end any ask, close the writer,
 `outbound.abort()`) → then the normal fresh-load branch.
 
 **Resume of a stored thread.** `hello{threadId:T}` → `requested_thread_id = T` → `on_arrival` →
-`_resume`: load `ThreadDetail`; missing or not this user's → `arrival.missing_thread = T` (and,
-if it is someone else's, `_disown_thread` gives the session a fresh id and a fresh writer);
-otherwise `hide_resume_deleted`, state and profile from metadata, transcript loaded,
+`_resume`: load `ThreadDetail`. A miss never produces an error frame: if `T` was the thread of
+the entry this arrival replaced (`Arrival.superseded`) it is the user's own conversation before
+its first row — a reload on a greeting — and the session keeps it; any other miss, and a thread
+that is someone else's, is answered by `_disown_thread` (a fresh id and a fresh writer) and the
+client learns the outcome from `session.ready.thread_id` naming a different thread than it
+asked for. Otherwise `hide_resume_deleted`, state and profile from metadata, transcript loaded,
 `first_interaction = "resume"`, `resumed_thread_id = T`, `chat_started = True`,
 `writer.open_gate()` → `session.ready` → `restore` sends `thread.resume` as a snapshot →
-`on_ready` sends `error{thread_not_found}` if applicable, then launches `on_chat_resume`
-followed by `on_thread_ready` in its own slot (the second runs even if the first raised).
+`on_ready` launches `on_chat_resume` followed by `on_thread_ready` in its own slot (the second
+runs even if the first raised).
 
 **Takeover by a second tab.** The new socket adopts the session, the old writer is detached, and
 the old connection is closed 4409 (`SUPERSEDED`) from inside the new handler's task group. The
@@ -211,7 +214,7 @@ Invariants:
 - **Upserts are idempotent**; `step.update` carries a `StepPatch` where absent means "no
   opinion". A duplicate frame after a mid-write socket loss is harmless.
 - **Failures are addressed.** `error{code,message}` leaves the socket open (`ErrorCode`:
-  `bad_message`, `unknown_tag`, `thread_not_found`, `ask_slot_busy`, …). A failure that must also
+  `bad_message`, `unknown_tag`, `ask_slot_busy`, …). A failure that must also
   close sends a `CloseCode` too: 4400 bad handshake, 4401 unauthenticated, 4403 session
   forbidden, 4404 thread forbidden, 4408 heartbeat timeout, 4409 superseded, 4413 frame too
   large, 4429 backlog exceeded, 4500 internal. 4429 must be retried by the client.

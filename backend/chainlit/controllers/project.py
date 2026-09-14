@@ -45,6 +45,7 @@ and nowhere else.
 
 from __future__ import annotations
 
+import mimetypes
 from typing import (
     AbstractSet,
     Annotated,
@@ -57,10 +58,11 @@ from typing import (
     Set,
     Tuple,
 )
+from urllib.parse import quote
 from uuid import UUID
 
 import msgspec
-from litestar import Controller, delete, get, post, put
+from litestar import Controller, Response, delete, get, post, put
 from litestar.di import NamedDependency
 from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery, JSONBody, QueryParameter
@@ -72,6 +74,7 @@ from chainlit.controllers.caller import (
     caller_identifier,
 )
 from chainlit.controllers.sessions import LiveSession, SessionRegistry
+from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
 from chainlit.persistence.records import (
     ElementRecord,
@@ -90,6 +93,7 @@ from chainlit.persistence.services import (
     from_datetime,
     now,
 )
+from chainlit.persistence.storage.base import BaseStorageClient
 from chainlit.security import AuthedRequest
 
 __all__ = (
@@ -102,7 +106,9 @@ __all__ = (
     "ThreadDelete",
     "ThreadRename",
     "ThreadShare",
+    "content_disposition",
     "doomed_step_ids",
+    "element_mime",
     "hide_resume_deleted",
     "is_resume_delete",
 )
@@ -227,6 +233,45 @@ async def assert_thread_author(
     # second is only a legitimate read when there is nobody to refuse.
     if identifier is not None or await threads.fetch(str(thread_id)) is None:
         raise NotFoundException("Thread not found")
+
+
+def element_mime(record: ElementRecord) -> str:
+    """What the stored blob is, as far as anyone can tell.
+
+    ``mime`` is NULL on every row written before the column was filled in,
+    and a browser handed ``application/octet-stream`` for a PNG downloads it
+    instead of drawing it -- so the name is asked second, and the fallback is
+    only reached when the name has no extension either.
+    """
+    mime = record.mime
+    if isinstance(mime, str) and mime:
+        return mime
+    guessed, _ = mimetypes.guess_type(record.name)
+    return guessed or "application/octet-stream"
+
+
+def content_disposition(name: str, mime: str) -> str:
+    """How the browser should treat the blob, and what to call it.
+
+    ``inline`` for what a browser renders itself and the UI embeds in the
+    conversation; everything else is a download, and a download that opens a
+    spreadsheet as text in a tab is a bug report.
+
+    The filename encoding is Litestar's own (``response/file.py:192-197``),
+    repeated rather than borrowed because ``File`` only serves a path and
+    this serves bytes: a name that survives ``quote`` unchanged goes in the
+    plain ``filename=``, anything else -- which is every Cyrillic name this
+    fork's consumer produces -- in RFC 5987's ``filename*``.
+    """
+    disposition = (
+        "inline"
+        if mime.startswith("image/") or mime == "application/pdf"
+        else "attachment"
+    )
+    quoted = quote(name)
+    if quoted == name:
+        return f'{disposition}; filename="{name}"'
+    return f"{disposition}; filename*=utf-8''{quoted}"
 
 
 def is_resume_delete(step: Any) -> bool:
@@ -600,6 +645,61 @@ class ProjectController(Controller):
         if element is None:
             raise NotFoundException("Element not found")
         return element
+
+    @get("/project/thread/{thread_id:uuid}/element/{element_id:uuid}/file")
+    async def get_thread_element_file(
+        self,
+        request: AuthedRequest,
+        thread_id: FromPath[UUID],
+        element_id: FromPath[UUID],
+        threads: NamedDependency[ThreadService],
+        elements: NamedDependency[ElementService],
+        storage: NamedDependency[Optional[BaseStorageClient]] = None,
+    ) -> Response[bytes]:
+        """The blob behind a stored element, served by the application.
+
+        The bucket is private, so the ``url`` written next to the blob at
+        upload time is not reachable by a browser and never was: until this
+        route existed, every persisted image in a reloaded thread was a
+        broken one. :func:`chainlit.persistence.services.row_to_element`
+        points reloaded elements here instead.
+
+        Read and forward, not redirect to a presigned url. Half the element
+        components (text, dataframe, plotly, the pdf viewer) ``fetch`` their
+        url, which against the bucket's origin is a CORS request it refuses;
+        and a cross-origin ``<a download>`` ignores the filename, which for
+        this fork's consumer is the whole point of the header below.
+
+        Authorised by the thread in the url, like its neighbour: an element
+        id is not a secret, and a read authorised by one would be a read of
+        anybody's element.
+        """
+        await assert_thread_author(threads, thread_id, request)
+        record = await elements.fetch(str(thread_id), str(element_id))
+        # Everything that is not "here are the bytes" is the same 404. The
+        # caller already proved the thread is theirs; what is left to
+        # distinguish is how the row is broken, and that is our problem.
+        if record is None:
+            raise NotFoundException("Element not found")
+        object_key = record.object_key
+        if not isinstance(object_key, str) or not object_key:
+            raise NotFoundException("Element not found")
+        if storage is None:
+            logger.warning(
+                "Element %s has a blob but no storage client is configured", element_id
+            )
+            raise NotFoundException("Element not found")
+
+        data = await storage.read_file(object_key)
+        if data is None:
+            raise NotFoundException("Element not found")
+
+        mime = element_mime(record)
+        return Response(
+            data,
+            media_type=mime,
+            headers={"content-disposition": content_disposition(record.name, mime)},
+        )
 
     @put("/project/element")
     async def update_element(

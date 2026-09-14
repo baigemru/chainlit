@@ -62,6 +62,27 @@ export class APIBase {
     return url.toString();
   }
 
+  /**
+   * Point an element's url at this client's server.
+   *
+   * A persisted element whose bytes live in object storage now arrives with
+   * an app-relative url (`/project/thread/…/element/…/file`) — the stored
+   * absolute one is dead. The browser would resolve that against the page
+   * origin, which loses the `root_path` prefix `httpEndpoint` carries and,
+   * in copilot, points at the host page instead of the chainlit server.
+   *
+   * Everything else is returned untouched: an element created with an
+   * external url (`cl.Image(url="https://…")`) owns its url, and so does a
+   * protocol-relative or data one. Absent stays absent — a live element
+   * arrives with a `chainlitKey` and no url at all, and the session url is
+   * minted for it elsewhere. Idempotent, so two ingress points that overlap
+   * may both apply it.
+   */
+  resolveElementUrl(url?: string): string | undefined {
+    if (!url || !url.startsWith('/') || url.startsWith('//')) return url;
+    return this.buildEndpoint(url);
+  }
+
   private async getDetailFromErrorResponse(
     res: Response
   ): Promise<string | undefined> {

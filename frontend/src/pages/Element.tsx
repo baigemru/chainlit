@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import Page from 'pages/Page';
 
 import {
+  ChainlitContext,
   IMessageElement,
   useApi,
   useChatData,
@@ -21,6 +22,7 @@ export default function Element() {
   const query = useQuery();
   const { elements } = useChatData();
   const { config } = useConfig();
+  const apiClient = useContext(ChainlitContext);
 
   const [element, setElement] = useState<IMessageElement | null>(null);
   const navigate = useNavigate();
@@ -35,9 +37,20 @@ export default function Element() {
       : null
   );
 
+  // A copy, not a mutation: `data` is SWR's cached object. The persisted url
+  // is app-relative and the page origin is the wrong base for it. Memoized
+  // because the effect below lists `element` among its dependencies —
+  // building the copy inside it would set a new object on every run and
+  // re-enter through its own state change until React gives up.
+  const resolved = useMemo(
+    () =>
+      data ? { ...data, url: apiClient.resolveElementUrl(data.url) } : null,
+    [data, apiClient]
+  );
+
   useEffect(() => {
-    if (data) {
-      setElement(data);
+    if (resolved) {
+      setElement(resolved);
     } else if (id && !dataPersistence && !element) {
       const foundElement = elements.find((element) => element.id === id);
 
@@ -45,7 +58,7 @@ export default function Element() {
         setElement(foundElement);
       }
     }
-  }, [data, element, elements, id, threadId]);
+  }, [resolved, dataPersistence, element, elements, id, threadId]);
 
   return (
     <Page>

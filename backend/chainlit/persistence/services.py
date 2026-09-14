@@ -549,14 +549,34 @@ def row_to_step(row: Row[Any]) -> StepRecord:
 
 
 def row_to_element(row: Row[Any]) -> ElementRecord:
-    """An ``elements`` row as the record the UI renders."""
+    """An ``elements`` row as the record the UI renders.
+
+    The stored ``url`` is not handed back when there is a blob behind the
+    row. It points into the object store, which is private, so every url
+    ever written there is dead in a browser; what replaces it is this
+    application's own element route, which reads the blob and forwards it.
+
+    App-relative on purpose: the client's ``buildEndpoint`` prepends the
+    root path, exactly as it does for ``/project/file/{id}``, and a prefix
+    added here would be applied twice.
+
+    A row with an empty ``objectKey`` was never uploaded -- it is an element
+    given a url it already had (``cl.Image(url=...)``) -- and that url is the
+    real one. ``chainlitKey`` is untouched either way: the live path serves
+    elements out of the session's spool through it, and that still works.
+    """
     mapping: RowMapping = row._mapping
+    thread_id = from_uuid(mapping["threadId"])
+    element_id = str(mapping["id"])
+    url = mapping["url"]
+    if mapping["objectKey"] and thread_id is not None:
+        url = f"/project/thread/{thread_id}/element/{element_id}/file"
     return ElementRecord(
-        id=str(mapping["id"]),
-        thread_id=from_uuid(mapping["threadId"]),
+        id=element_id,
+        thread_id=thread_id,
         type=mapping["type"] or "file",
         chainlit_key=mapping["chainlitKey"],
-        url=mapping["url"],
+        url=url,
         object_key=mapping["objectKey"],
         name=mapping["name"],
         display=mapping["display"],

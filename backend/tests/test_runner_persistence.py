@@ -671,7 +671,10 @@ def test_an_element_blob_goes_to_storage_and_the_row_points_at_it(
     assert storage.uploads[0]["object_key"] == f"{ALICE}/{row.id}/pic"
     assert row.name == "pic"
     assert row.object_key == f"{ALICE}/{row.id}/pic"
-    assert row.url == f"https://bucket.test/{ALICE}/{row.id}/pic"
+    # The reader substitutes the app's own element route for any row with a
+    # blob -- the storage url lands in the column (asserted at the column
+    # level in test_writer.py) but never reaches the UI again.
+    assert row.url == f"/project/thread/{thread_id}/element/{row.id}/file"
     assert row.thread_id == thread_id
     # The frame goes out before the upload: it carries the session's spool
     # key, never the storage URL.

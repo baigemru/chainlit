@@ -15,7 +15,7 @@ from chainlit.persistence import (
     UnitOfWork,
 )
 from chainlit.persistence.models import ELEMENTS, STEPS, THREADS
-from chainlit.persistence.services import _column_values
+from chainlit.persistence.services import _column_values, to_uuid
 from tests.persistence.conftest import at, iso, make_thread, new_id
 
 
@@ -123,7 +123,16 @@ async def test_an_element_write_leaves_the_columns_it_omits_alone(
 
     stored = await uow.elements.fetch(thread_id, element_id)
     assert stored is not None
-    assert stored.url == "https://cdn.example/chart.png"
+    # The merge is asserted on the column itself: the reader substitutes the
+    # app's element route for any row with a blob, so ``stored.url`` no
+    # longer shows what the write left behind.
+    row = (
+        await uow.session.execute(
+            select(ELEMENTS.c["url"]).where(ELEMENTS.c["id"] == to_uuid(element_id))
+        )
+    ).one()
+    assert row.url == "https://cdn.example/chart.png"
+    assert stored.url == f"/project/thread/{thread_id}/element/{element_id}/file"
     assert stored.object_key == "threads/abc/chart.png"
     assert stored.mime == "image/png"
     assert stored.props == {"width": 400}

@@ -272,6 +272,39 @@ class TestGCSStorageClient:
             binary_data, content_type="text/plain"
         )
 
+    @pytest.mark.asyncio
+    async def test_read_file(self, mock_gcs_client):
+        """The bytes back out, for the route that serves elements itself."""
+        mock_gcs_client["blob"].download_as_bytes.return_value = b"\x89PNG bytes"
+
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+        mock_gcs_client["bucket"].reset_mock()
+        mock_gcs_client["blob"].reset_mock()
+
+        data = await client.read_file("test/path/file.png")
+
+        mock_gcs_client["bucket"].blob.assert_called_once_with("test/path/file.png")
+        assert data == b"\x89PNG bytes"
+
+    @pytest.mark.asyncio
+    async def test_read_file_that_is_not_there(self, mock_gcs_client):
+        """``None``, not an exception: the caller turns this into a 404."""
+        mock_gcs_client["blob"].download_as_bytes.side_effect = ValueError("404")
+
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+
+        assert await client.read_file("test/path/missing.png") is None
+
     def test_sync_delete_file(self, mock_gcs_client):
         """Test deleting a file from GCS."""
         client = GCSStorageClient(

@@ -11,9 +11,12 @@ from typing import Any, Dict, List, Optional
 
 import msgspec
 import pytest
+from sqlalchemy import select
 
 from chainlit.persistence import Persistence, UnitOfWork
+from chainlit.persistence.models import ELEMENTS
 from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
+from chainlit.persistence.services import to_uuid
 from chainlit.persistence.writer import (
     DeleteElement,
     Op,
@@ -346,8 +349,16 @@ async def test_the_row_is_written_from_what_the_upload_returns(
 
     stored = await uow.elements.fetch(thread_id, attachment.id)
     assert stored is not None
-    assert stored.url == "https://bucket.example/threads/x/files/y"
     assert stored.object_key == "threads/x/files/y"
+    # On the column, not through the reader: ``fetch`` substitutes the app's
+    # element route for any row with a blob, and this test is about what the
+    # upload wrote, not about what the UI is handed.
+    row = (
+        await uow.session.execute(
+            select(ELEMENTS.c["url"]).where(ELEMENTS.c["id"] == to_uuid(attachment.id))
+        )
+    ).one()
+    assert row.url == "https://bucket.example/threads/x/files/y"
 
 
 async def test_a_failed_upload_drops_the_row_and_nothing_else(

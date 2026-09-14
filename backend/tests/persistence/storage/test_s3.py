@@ -38,10 +38,32 @@ async def test_upload_file(s3_mock):
         object_key="test.txt", data="This is a test file", mime="text/plain"
     )
 
-    # Assert that the file upload returned the correct URL
+    # The url is built from the endpoint boto3 was configured with, path
+    # style. It used to be an AWS hostname with DEV_AWS_ENDPOINT spliced into
+    # it, which on any other S3 -- Yandex Object Storage, MinIO -- named a
+    # bucket on a host the deployment has never talked to.
     assert result["object_key"] == "test.txt"
-    assert result["url"] == "https://my-test-bucket.s3.amazonaws.com/test.txt"
+    assert result["url"] == "https://s3.amazonaws.com/my-test-bucket/test.txt"
 
     # Verify that the file exists in the mock S3
     response = s3_mock.get_object(Bucket="my-test-bucket", Key="test.txt")
     assert response["Body"].read().decode() == "This is a test file"
+
+
+@pytest.mark.asyncio
+async def test_read_file(s3_mock):
+    """The bytes back out, for the route that serves elements itself."""
+    s3_mock.put_object(
+        Bucket="my-test-bucket", Key="report.bin", Body=b"\x89PNG some bytes"
+    )
+    client = S3StorageClient(bucket="my-test-bucket")
+
+    assert await client.read_file("report.bin") == b"\x89PNG some bytes"
+
+
+@pytest.mark.asyncio
+async def test_read_file_that_is_not_there(s3_mock):
+    """``None``, not an exception: the caller turns this into a 404."""
+    client = S3StorageClient(bucket="my-test-bucket")
+
+    assert await client.read_file("never-uploaded.bin") is None

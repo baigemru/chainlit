@@ -1,5 +1,5 @@
-import os
-from typing import Any, Dict, Union
+import contextlib
+from typing import Any, Dict, Optional, Union
 
 import boto3  # type: ignore
 from litestar.concurrency import sync_to_thread
@@ -57,8 +57,14 @@ class S3StorageClient(BaseStorageClient):
                 self.client.put_object(
                     Bucket=self.bucket, Key=object_key, Body=data, ContentType=mime
                 )
-            endpoint = os.environ.get("DEV_AWS_ENDPOINT", "amazonaws.com")
-            url = f"https://{self.bucket}.s3.{endpoint}/{object_key}"
+            # The endpoint boto3 was actually configured with, path-style.
+            # The old form interpolated ``DEV_AWS_ENDPOINT`` into an AWS
+            # hostname, so every deployment on another S3 -- Yandex Object
+            # Storage, MinIO -- wrote a url pointing at a bucket nobody
+            # owns. Nothing reads this column any more (elements are served
+            # by ``/project/thread/{id}/element/{id}/file``); it is kept
+            # because it is the only record of where a blob went.
+            url = f"{self.client.meta.endpoint_url}/{self.bucket}/{object_key}"
             return {"object_key": object_key, "url": url}
         except Exception as e:
             logger.warning(f"S3StorageClient, upload_file error: {e}")
@@ -80,6 +86,21 @@ class S3StorageClient(BaseStorageClient):
             overwrite,
             content_disposition,
         )
+
+    def sync_read_file(self, object_key: str) -> Optional[bytes]:
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=object_key)
+            # The body holds the connection until it is drained or closed,
+            # and a leaked one starves the urllib3 pool a request at a time.
+            with contextlib.closing(response["Body"]) as body:
+                data: bytes = body.read()
+            return data
+        except Exception as e:
+            logger.warning(f"S3StorageClient, read_file error: {e}")
+            return None
+
+    async def read_file(self, object_key: str) -> Optional[bytes]:
+        return await sync_to_thread(self.sync_read_file, object_key)
 
     def sync_delete_file(self, object_key: str) -> bool:
         try:

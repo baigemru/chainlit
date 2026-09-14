@@ -89,6 +89,17 @@ class GCSStorageClient(BaseStorageClient):
             self.sync_upload_file, object_key, data, mime, overwrite
         )
 
+    def sync_read_file(self, object_key: str) -> Optional[bytes]:
+        try:
+            data: bytes = self.bucket.blob(object_key).download_as_bytes()
+            return data
+        except Exception as e:
+            logger.warning(f"GCSStorageClient, read_file error: {e}")
+            return None
+
+    async def read_file(self, object_key: str) -> Optional[bytes]:
+        return await sync_to_thread(self.sync_read_file, object_key)
+
     def sync_delete_file(self, object_key: str) -> bool:
         try:
             self.bucket.blob(object_key).delete()

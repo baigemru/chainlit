@@ -65,6 +65,12 @@ export interface IChainlitConfig {
     cot: 'hidden' | 'tool_call' | 'full';
     cot_display?: 'list' | 'compact';
     show_step_details?: boolean;
+    /**
+     * Whether the composer offers the way back to the chat a profile hand-off
+     * came from. Off unless the deployment says otherwise; the return itself
+     * keeps working either way.
+     */
+    show_parent_thread_button?: boolean;
     github?: string;
     custom_css?: string;
     custom_js?: string;

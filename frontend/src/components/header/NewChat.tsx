@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog';
+import { useSidebar } from '@/components/ui/sidebar';
 import {
   Tooltip,
   TooltipContent,
@@ -80,6 +81,7 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
   const { clear } = useChatInteract();
   const { config } = useConfig();
   const resetKeptTranscript = useResetKeptTranscript();
+  const { setOpenMobile } = useSidebar();
 
   const handleClickOpen = () => {
     if (config?.ui?.confirm_new_chat === false) {
@@ -112,6 +114,11 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
       clear(fallback ? { chatProfile: fallback } : {});
       navigate?.('/');
     }
+    // This button is also rendered inside the mobile sheet, and a new chat
+    // started from `/` leaves the address where it was — so the sheet's own
+    // effect on the pathname never fires and it would stay open over the blank
+    // chat. The only site that has to close it by hand.
+    setOpenMobile(false);
     handleClose();
   };
 

@@ -333,10 +333,37 @@ the new address as the request and clears the session into it. The composer's
 `OpenParentThreadButton` calls it directly; it used to park a request in an atom for
 `ThreadReturnListener` to drain, because the composer also rendered in an embedder
 with no router. The button is split in two so the hook (which reaches for the router
-and the API client) is only mounted in a chat that actually has a parent. `NewChat.tsx` resets kept transcripts, calls
+and the API client) is only mounted in a chat that actually has a parent. Whether it is
+drawn at all is `ui.show_parent_thread_button`, default `false`, read once inside
+`useParentThreadId` — both display sites (the button and the composer's empty-left-slot
+test) go through that hook, so the flag has no second copy to disagree with. Only the
+button is hidden: a server-sent `thread.open` still returns the user to the parent. `NewChat.tsx` resets kept transcripts, calls
 `clear()` and navigates home. `LeftSidebar/ThreadHistory.tsx` pages threads and
 navigates to `/thread/:id`; it refreshes on `firstInteraction` and reorders on a new
 user message.
+
+**Sidebar state.** The vendored shadcn provider has always written `sidebar:state` on
+every toggle (`components/ui/sidebar.tsx`); the missing half was reading it back, which
+`Page` now does through `lib/sidebarState.ts` —
+`defaultOpen={resolveSidebarDefault(document.cookie, config.ui.default_sidebar_state)}`.
+So the cookie is the user's last state and `default_sidebar_state` is only the default
+for a browser that has never toggled; a value in that jar we did not write counts as
+none. `defaultOpen` is a `useState` initialiser, so the read happens again on every
+remount — which is what carries the state across `/` → `/thread/<id>`, where the flat
+routes swap the whole page element. The lifetime is a year, one constant in
+`ui/sidebar.tsx`: a "last state" that forgets itself after a quiet week is a surprise.
+There is no `localStorage` key and no Recoil atom beside it — a second store for a value
+the provider already persists would leave the cookie written and ignored. Two open tabs
+may disagree until one of them toggles; accepted.
+
+Mobile is deliberately outside all of that. `openMobile` is plain provider state, never
+persisted: a modal sheet that reopened itself on load would be a defect, not a memory.
+Instead one effect in `LeftSidebar` closes it on `useLocation().key` — every navigation
+mints a fresh key, a push to the address already shown included, which is the case
+`ThreadList`'s `<Link to="">` for the current thread produces. That one effect answers
+for every way out of the sheet (a thread, a search hit, a delete that walks away), so
+the call sites stay ignorant of it; only `NewChat` closes the sheet by hand, because a
+new chat started from `/` does not navigate at all.
 
 ## 6. Sequences
 

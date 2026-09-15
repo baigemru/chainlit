@@ -169,6 +169,10 @@ name = "Assistant"
 
 # default_sidebar_state = "open"  # Options: "open", "closed", "hidden"
 
+# Offer the way back to the chat a profile hand-off came from. Hiding the button
+# does not disable the return: a server-sent thread.open still reaches the parent.
+# show_parent_thread_button = false
+
 # Chat settings display location: "message_composer" (default) or "sidebar" (header)
 # chat_settings_location = "message_composer"
 
@@ -442,6 +446,13 @@ class UISettings(Settings):
     cot: Literal["hidden", "tool_call", "full"] = "full"
     cot_display: Literal["list", "compact"] = "list"
     show_step_details: bool = True
+    # The composer's way back to the chat a profile hand-off came from. Off
+    # unless a deployment asks for it: on a phone the button competes for the
+    # pill's single left slot, and an app without hand-offs has nothing to
+    # return to. Off is also the only useful direction -- ``_overlay`` counts a
+    # field as overridden when it differs from its class default, so a profile
+    # can switch this on and could never switch a ``True`` one off.
+    show_parent_thread_button: bool = False
     default_theme: Optional[Literal["light", "dark"]] = "dark"
     language: Optional[str] = None
     layout: Optional[Literal["default", "wide"]] = "default"

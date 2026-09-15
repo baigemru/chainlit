@@ -1,8 +1,9 @@
+import { resolveSidebarDefault } from '@/lib/sidebarState';
 import { requiredEnvPresent } from '@/lib/userEnv';
 import { Navigate } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 
-import { sideViewState, useAuth, useConfig } from '@chainlit/react-client';
+import { sideViewState, useConfig } from '@chainlit/react-client';
 
 import ChatProfileSwitchListener from '@/components/ChatProfileSwitchListener';
 import ElementSideView from '@/components/ElementSideView';
@@ -15,6 +16,8 @@ import { Header } from '@/components/header';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 
+import { useHasLeftSidebar } from '@/hooks/useHasLeftSidebar';
+
 import { userEnvState } from 'state/user';
 
 type Props = {
@@ -23,9 +26,9 @@ type Props = {
 
 const Page = ({ children }: Props) => {
   const { config } = useConfig();
-  const { data } = useAuth();
   const userEnv = useRecoilValue(userEnvState);
   const sideView = useRecoilValue(sideViewState);
+  const hasLeftSidebar = useHasLeftSidebar();
 
   if (!requiredEnvPresent(config?.userEnv, userEnv)) {
     return <Navigate to="/env" />;
@@ -52,9 +55,6 @@ const Page = ({ children }: Props) => {
     </div>
   );
 
-  const historyEnabled = config?.dataPersistence && data?.requireLogin;
-  const sidebarHidden = config?.ui?.default_sidebar_state === 'hidden';
-
   // `viewport-fit=cover` in index.html is global, so on a notched phone the
   // viewport runs under the sensor housing in every orientation. The composer
   // already compensates for the bottom inset; the left and right ones only bite
@@ -63,13 +63,19 @@ const Page = ({ children }: Props) => {
   return (
     <SidebarProvider
       className="pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
-      defaultOpen={config?.ui.default_sidebar_state !== 'closed'}
+      // The cookie the provider itself writes on every toggle is the user's
+      // last state; the config is only the default for a browser that has
+      // never said otherwise.
+      defaultOpen={resolveSidebarDefault(
+        document.cookie,
+        config?.ui?.default_sidebar_state
+      )}
     >
       <ChatProfileSwitchListener />
       <MobileNotice />
       <ThreadReturnListener />
       <ThreadAddressSync />
-      {historyEnabled && !sidebarHidden ? (
+      {hasLeftSidebar ? (
         <>
           <LeftSidebar />
           <SidebarInset className="max-h-svh min-w-0">

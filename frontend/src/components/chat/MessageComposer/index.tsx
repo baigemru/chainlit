@@ -1,4 +1,3 @@
-import { ChevronRight } from 'lucide-react';
 import {
   MutableRefObject,
   useCallback,
@@ -27,6 +26,7 @@ import { useParentThreadId } from '@/hooks/useParentThread';
 import { IAttachment, attachmentsState, composerDraftState } from 'state/chat';
 
 import { Attachments } from './Attachments';
+import ComposerChevron from './ComposerChevron';
 import Input, { InputMethods } from './Input';
 import OpenParentThreadButton from './OpenParentThreadButton';
 import SubmitButton from './SubmitButton';
@@ -64,10 +64,9 @@ export default function MessageComposer({
   const parentThreadId = useParentThreadId();
 
   // The pill's left slot: with uploads off and no parent thread both left
-  // buttons render null, and a Telegram-shaped pill whose text starts flush
-  // at the rounded edge reads as a defect. A mute ">" — the oldest prompt
-  // glyph there is — holds the slot instead. Desktop keeps its empty
-  // toolbar; only the one-row layout needs the stand-in.
+  // buttons render null and `ComposerChevron` stands in for them — see there
+  // for why. Desktop keeps its empty toolbar; only the one-row layout needs
+  // the stand-in.
   const leftSlotEmpty =
     !config?.features.spontaneous_file_upload?.enabled && !parentThreadId;
 
@@ -249,13 +248,7 @@ export default function MessageComposer({
         // line being typed.
         <div className="flex items-end gap-1">
           {leftSlotEmpty ? (
-            <span
-              id="composer-chevron"
-              aria-hidden="true"
-              className="flex h-8 w-8 flex-none items-center justify-center text-muted-foreground"
-            >
-              <ChevronRight className="!size-6" />
-            </span>
+            <ComposerChevron />
           ) : (
             <>
               {uploadButton}

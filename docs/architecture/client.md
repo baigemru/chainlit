@@ -54,6 +54,50 @@ with `hover` and `disabled` variants. To extend it, add to the relevant regex, k
 the guarantee in mind: anything a host element may use must be matched here, and
 anything matched here ships in every build forever.
 
+### What a custom element may rely on
+
+A mounted element keeps its React state. `CustomElement/` compiles the source
+once per instance with `react-runner`'s `generateElement`, unwraps the result to
+a component **type** (`compile.ts`) and renders that type inside the shared
+`ErrorBoundary`; the scope the element closes over is one object built per
+`element.id` and mutated in place afterwards. So a run starting or finishing, an
+Ask opening or closing, an `element.update` from the server, and a parent that
+hides and shows the element all leave it mounted. It is remounted by exactly two
+things: a change of `element.id`, and a change of the source text.
+
+The consequences for an element's author, benefits and costs together:
+
+- `props` is **one object for the element's lifetime**, never replaced. Reading
+  `props.foo` during render always sees the current value, and
+  `updateElement(Object.assign(props, { … }))` still works.
+- `useState(props.foo)` is the standard React trap and now bites for real: an
+  initialiser runs once, and since the element no longer remounts on every update
+  the state will never catch up with the prop. Derive from `props` during render,
+  or key off the value yourself.
+- For the same reason `useEffect(…, [props])` fires **once and never again**, and
+  a memoized child handed `props` directly never re-renders. The sync deep-copies
+  the server's object, so nested values do get a new identity on each update:
+  depend on `[props.items]`, not on `[props]`.
+- The element file must export a **function**. `export default memo(Component)`
+  renders nothing, and always has — `generateElement` accepts a function, an
+  element or a string, and a `memo` object is none of those. A file that is a
+  bare JSX expression is worse: react-runner wraps it into a default export, the
+  values in it were evaluated once at compile time, and nothing can update it
+  afterwards.
+- The source is fetched once per element **name** per page (`source.ts`) and
+  shared by every instance. A failed fetch is _not_ remembered (`get` rejects on
+  any non-2xx, and a 401 mid-refresh must not pin the Alert), so the next mount
+  of that name tries again. A _successful_ one is remembered for the life of the
+  page: editing `public/elements/<name>.jsx` in a dev server needs a browser
+  reload, because the backend's watcher only reloads on `.py`, `chainlit.md` and
+  `config.toml` (`backend/chainlit/cli/__init__.py:96`).
+- A throw inside an element's own render is contained: the boundary shows an
+  Alert in place of that card and logs the throw, and the rest of the message
+  list survives. It does not recover — the boundary is keyed on `element.id`, so
+  a card that throws once is an Alert until the page is reloaded. HEAD latched in
+  the same way, one level up: its `onRendered` wrote an error the fetch effect
+  never cleared, replacing the whole card.
+
 ## 2. Transport
 
 Two objects, in two files, with a clear split of duties.

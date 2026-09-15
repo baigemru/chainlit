@@ -34,6 +34,5 @@
     }
   },
   "exclude": ["**/test", "**/dist", "**/__tests__"],
-  "include": ["src/**/*"],
-  "types": ["@testing-library/jest-dom", "node"]
+  "include": ["src/**/*"]
 }

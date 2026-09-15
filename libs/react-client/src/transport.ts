@@ -165,6 +165,8 @@ export class ChatTransport {
    * publish a phase over the connection that succeeded it.
    */
   private generation = 0;
+  /** Whether the hello this connection opened with carried `pageLoad`. */
+  private openedOnPageLoad = false;
 
   constructor(client: ChainlitAPI) {
     this.client = client;
@@ -215,6 +217,25 @@ export class ChatTransport {
   /** The descriptor currently attached, if any. */
   get attached(): SessionDescriptor | undefined {
     return this.descriptor;
+  }
+
+  /**
+   * What the last `hello` said about the connection it opened.
+   *
+   * One fact a *frame handler* cannot work out for itself: whether this
+   * connection is the one a page load made. The module flag behind it flips
+   * on the first `session.ready`, so by the time any other frame arrives the
+   * answer is gone. The element panel's mobile rule reads it — a restore
+   * after F5 must not drop a 95%-wide sheet over the chat, while a healed
+   * network blip must leave the screen alone.
+   *
+   * Deliberately not the `device` label: that is what the host computed for
+   * the funnel, and `?device=pc` can pin it against the viewport the layout
+   * actually uses. Whether the panel is a sheet is a question about width,
+   * and `breakpoint.ts` is where it is asked.
+   */
+  get opening(): { pageLoad: boolean } {
+    return { pageLoad: this.openedOnPageLoad };
   }
 
   // ---------------------------------------------------------------- stores
@@ -322,6 +343,9 @@ export class ChatTransport {
 
   private hello(): Hello {
     const descriptor = this.descriptor;
+    // Latched, because the module flag flips on the first `session.ready`
+    // and a frame handler asking afterwards would always be told "no".
+    this.openedOnPageLoad = !pageHasEstablishedConnection;
     return {
       t: 'hello',
       clientType: this.client.type,
@@ -333,7 +357,7 @@ export class ChatTransport {
       // True only on the very first connect after a full page load: the
       // server restores the old session then only to rescue a live pending
       // ask; otherwise a reload means a fresh chat.
-      pageLoad: !pageHasEstablishedConnection
+      pageLoad: this.openedOnPageLoad
     };
   }
 

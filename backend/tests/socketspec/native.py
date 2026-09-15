@@ -431,6 +431,18 @@ class _Run:
             session.parked_replies.append(
                 {"stepId": "earlier-step", "value": {"kind": "action"}}
             )
+        for slot in given.sidebar:
+            session.sidebar.set_slot(
+                slot.id,
+                [_element({"id": element_id}) for element_id in slot.elements],
+                title=slot.title,
+                closable=slot.closable,
+                canvas=slot.canvas,
+            )
+        if given.sidebar and given.sidebar_hidden:
+            session.sidebar.hide()
+        elif given.sidebar:
+            session.sidebar.show()
         for step in given.transcript:
             wait = msgspec.convert(dict(step.wait), Wait) if step.wait else None
             entry = TranscriptEntry(
@@ -647,6 +659,12 @@ class _Run:
         payload: Dict[str, Any] = dict(incoming.payload)
         if incoming.tag == "ask.reply" and "value" in payload:
             payload["value"] = self._reply_value(payload["value"])
+        if incoming.tag == "sidebar.user" and "rev" not in payload:
+            # What a real client quotes: the revision of the last panel it
+            # was shown. A row states one itself only when it is about a
+            # click made against a screen that has since moved on.
+            session = self.session
+            payload["rev"] = session.sidebar.rev if session is not None else 0
         return msgspec.json.encode({"t": incoming.tag, **payload})
 
     async def _frame(self, incoming: Incoming) -> None:
@@ -726,6 +744,11 @@ class _Run:
                 if bystander.id not in self.registry
             ],
             "live_sessions": [entry.id for entry in self.registry],
+            "sidebar_slots": (
+                [slot.id for slot in session.sidebar.slots] if session else []
+            ),
+            "sidebar_active": session.sidebar.active if session else None,
+            "sidebar_visible": session.sidebar.visible if session else False,
             "deleted_steps": list(self.records.deleted_steps),
             "deleted_elements": list(self.records.deleted_elements),
         }

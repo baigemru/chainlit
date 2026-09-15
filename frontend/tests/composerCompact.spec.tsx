@@ -3,7 +3,6 @@ import { RecoilRoot } from 'recoil';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import MessageComposer from '@/components/chat/MessageComposer';
-import { SidebarProvider, useSidebar } from '@/components/ui/sidebar';
 
 import { IAttachment, attachmentsState } from '@/state/chat';
 
@@ -11,6 +10,7 @@ const mockUseIsMobile = vi.fn();
 const mockSpontaneousUpload = vi.fn();
 const mockSidebarAvailable = vi.fn();
 const mockParentThreadId = vi.fn();
+const mockSidebarDispatch = vi.fn();
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mockUseIsMobile()
@@ -33,6 +33,10 @@ vi.mock('@chainlit/react-client', () => ({
     uploadFile: vi.fn()
   }),
   useChatMessages: () => ({ firstInteraction: undefined }),
+  useElementSidebar: () => ({
+    state: { slots: [], active: null, visible: false },
+    dispatch: mockSidebarDispatch
+  }),
   // `features` is read without an optional chain by UploadButton; the upload
   // button is the first thing in the mobile row, so it defaults to enabled —
   // the chevron cases turn it off per test.
@@ -84,30 +88,6 @@ const renderComposer = (attachments: IAttachment[] = []) =>
     </RecoilRoot>
   );
 
-// Reading the provider's own state rather than the DOM: on a phone the
-// sidebar is a Sheet, and whether it is open is a fact about the context, not
-// about anything the composer renders.
-let openMobile = false;
-const SidebarProbe = () => {
-  openMobile = useSidebar().openMobile;
-  return null;
-};
-
-const renderComposerWithSidebar = () =>
-  render(
-    <RecoilRoot>
-      <SidebarProvider>
-        <SidebarProbe />
-        <MessageComposer
-          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
-          onFileUpload={noop}
-          onFileUploadError={noop}
-          autoScrollRef={{ current: true }}
-        />
-      </SidebarProvider>
-    </RecoilRoot>
-  );
-
 const composer = () => document.querySelector('#message-composer')!;
 const submit = () => document.querySelector('#chat-submit')!;
 const input = () => document.querySelector('#chat-input')!;
@@ -118,7 +98,6 @@ beforeEach(() => {
   mockSpontaneousUpload.mockReturnValue(true);
   mockSidebarAvailable.mockReturnValue(false);
   mockParentThreadId.mockReturnValue(undefined);
-  openMobile = false;
 });
 
 describe('MessageComposer, compact on a phone', () => {
@@ -188,10 +167,23 @@ describe('MessageComposer, compact on a phone', () => {
     expect((input() as HTMLTextAreaElement).value).toBe('draft');
   });
 
-  it('fills an empty left slot with a chevron', () => {
-    // Uploads off and no parent thread: both left buttons render null, and
-    // the pill's text would start flush at the rounded edge. The mute ">"
-    // holds the slot.
+  it('keeps the chevron in the left slot whatever else is there', () => {
+    // Always, on both layouts. The panel is the one control here that is
+    // always available -- with nothing in it the chevron opens an empty one,
+    // which is a legal state -- and a control that comes and goes teaches
+    // nobody it exists.
+    mockUseIsMobile.mockReturnValue(true);
+    mockSpontaneousUpload.mockReturnValue(true);
+    mockParentThreadId.mockReturnValue('parent-thread');
+
+    renderComposer();
+
+    expect(chevron()).not.toBeNull();
+    expect(document.querySelector('#upload-button')).not.toBeNull();
+    expect(document.querySelector('#open-parent-thread')).not.toBeNull();
+  });
+
+  it('renders the chevron with an empty left slot too', () => {
     mockUseIsMobile.mockReturnValue(true);
     mockSpontaneousUpload.mockReturnValue(false);
 
@@ -199,58 +191,53 @@ describe('MessageComposer, compact on a phone', () => {
 
     expect(chevron()).not.toBeNull();
     expect(document.querySelector('#upload-button')).toBeNull();
-    // With no thread history to open there is nothing to click: a decorative
-    // glyph, hidden from the accessibility tree, and no `useSidebar` call on
-    // the path — which is why this case needs no provider around it.
-    expect(chevron()!.tagName).toBe('SPAN');
-    expect(chevron()!.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('makes the chevron the thumb’s way into the thread history', () => {
-    // The header's trigger is at the top of a phone screen; this is the same
-    // action where the hand already is.
+  it('puts the chevron last in the row, after the other two', () => {
+    // The buttons whose position people have learned must not shift when a
+    // panel appears or goes away.
     mockUseIsMobile.mockReturnValue(true);
-    mockSpontaneousUpload.mockReturnValue(false);
-    mockSidebarAvailable.mockReturnValue(true);
-
-    renderComposerWithSidebar();
-
-    expect(chevron()!.tagName).toBe('BUTTON');
-    expect(chevron()!.getAttribute('aria-hidden')).toBeNull();
-    expect(chevron()!.getAttribute('aria-label')).toBe('Open sidebar');
-
-    fireEvent.click(chevron()!);
-
-    expect(openMobile).toBe(true);
-  });
-
-  it('yields the slot to the return button when the chat has a parent', () => {
-    mockUseIsMobile.mockReturnValue(true);
-    mockSpontaneousUpload.mockReturnValue(false);
+    mockSpontaneousUpload.mockReturnValue(true);
     mockParentThreadId.mockReturnValue('parent-thread');
 
     renderComposer();
 
-    expect(document.querySelector('#open-parent-thread')).not.toBeNull();
-    expect(chevron()).toBeNull();
+    const row = Array.from(chevron()!.parentElement!.children);
+    expect(row.indexOf(document.querySelector('#upload-button')!)).toBeLessThan(
+      row.indexOf(chevron()!)
+    );
+    expect(
+      row.indexOf(document.querySelector('#open-parent-thread')!)
+    ).toBeLessThan(row.indexOf(chevron()!));
   });
 
-  it('keeps the chevron out while the upload button is there', () => {
+  it('opens the element panel when it is clicked', () => {
+    mockUseIsMobile.mockReturnValue(true);
+
+    renderComposer();
+    fireEvent.click(chevron()!);
+
+    expect(mockSidebarDispatch).toHaveBeenCalledWith({ op: 'show' });
+  });
+
+  it('names itself for a screen reader', () => {
     mockUseIsMobile.mockReturnValue(true);
 
     renderComposer();
 
-    expect(document.querySelector('#composer-chevron')).toBeNull();
-    expect(document.querySelector('#upload-button')).not.toBeNull();
+    expect(chevron()!.tagName).toBe('BUTTON');
+    expect(chevron()!.getAttribute('aria-hidden')).toBeNull();
+    expect(chevron()!.getAttribute('aria-label')).toBe('Open the side panel');
   });
 
-  it('never puts the chevron on the desktop card', () => {
+  it('puts the chevron on the desktop card as well', () => {
     mockUseIsMobile.mockReturnValue(false);
-    mockSpontaneousUpload.mockReturnValue(false);
 
     renderComposer();
 
-    expect(document.querySelector('#composer-chevron')).toBeNull();
+    expect(chevron()).not.toBeNull();
+    // In the toolbar row, not next to the send button.
+    expect(chevron()!.parentElement!.contains(submit())).toBe(false);
   });
 
   it('leaves the desktop card alone', () => {

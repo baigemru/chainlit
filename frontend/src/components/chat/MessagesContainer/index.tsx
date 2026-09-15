@@ -18,13 +18,13 @@ import {
   IStep,
   messagesState,
   sessionIdState,
-  sideViewState,
   updateMessageById,
   useChatData,
   useChatInteract,
   useChatMessages,
   useChatTransport,
-  useConfig
+  useConfig,
+  useElementSidebar
 } from '@chainlit/react-client';
 
 import { Messages } from '@/components/chat/Messages';
@@ -51,7 +51,7 @@ const MessagesContainer = ({ navigate }: Props) => {
   const { messages } = useChatMessages();
   const { uploadFile: _uploadFile } = useChatInteract();
   const setMessages = useSetRecoilState(messagesState);
-  const setSideView = useSetRecoilState(sideViewState);
+  const { dispatch } = useElementSidebar();
   const sessionId = useRecoilValue(sessionIdState);
   const boundaries = useRecoilValue(chatBoundariesState);
   const excursions = useRecoilValue(keptExcursionsState);
@@ -121,53 +121,17 @@ const MessagesContainer = ({ navigate }: Props) => {
     []
   );
 
-  const knownSideElementsRef = useRef<Map<string, IMessageElement>>(new Map());
-  const knownSideOrderRef = useRef<string[]>([]);
-
-  useEffect(() => {
-    const sideElements = elements.filter((e) => e.display === 'side');
-
-    if (sideElements.length === 0) {
-      // Only clear a side view this effect put there. The sidebar is also
-      // driven straight from the socket (ElementSidebar.set_elements), and
-      // when those events arrive before this component mounts, clearing
-      // unconditionally would wipe a sidebar that has no message elements
-      // behind it at all.
-      const ownedBySideElements = knownSideOrderRef.current.length > 0;
-      knownSideElementsRef.current = new Map();
-      knownSideOrderRef.current = [];
-      if (ownedBySideElements) setSideView(undefined);
-      return;
-    }
-
-    const prevMap = knownSideElementsRef.current;
-    const prevOrder = knownSideOrderRef.current;
-    const currentIds = sideElements.map((e) => e.id);
-
-    const hasChanged =
-      currentIds.length !== prevOrder.length ||
-      currentIds.some((id, i) => prevOrder[i] !== id) ||
-      sideElements.some((e) => prevMap.get(e.id) !== e);
-
-    if (hasChanged) {
-      const newMap = new Map<string, IMessageElement>();
-      sideElements.forEach((e) => newMap.set(e.id, e));
-      knownSideElementsRef.current = newMap;
-      knownSideOrderRef.current = currentIds;
-      setSideView({
-        title: sideElements[sideElements.length - 1].name,
-        elements: sideElements
-      });
-    }
-  }, [elements]);
-
   const onElementRefClick = useCallback(
     (element: IMessageElement) => {
       if (
         element.display === 'side' ||
         (element.display === 'page' && !navigate)
       ) {
-        setSideView({ title: element.name, elements: [element] });
+        // A click, and only a click. The effect that used to open the panel
+        // the moment a `display: 'side'` element appeared in the feed was
+        // the panel's second writer: it raced the server's own frame and
+        // retitled the panel after whichever file had last arrived.
+        dispatch({ op: 'preview', element });
         return;
       }
 
@@ -179,7 +143,7 @@ const MessagesContainer = ({ navigate }: Props) => {
 
       return navigate?.(element.display === 'page' ? path : '#');
     },
-    [setSideView, navigate]
+    [dispatch, navigate]
   );
 
   const onError = useCallback((error: string) => toast.error(error), [toast]);

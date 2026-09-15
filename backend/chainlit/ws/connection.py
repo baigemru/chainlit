@@ -40,6 +40,7 @@ from chainlit.protocol.client import (
     Hello,
     MessageSend,
     SessionClear,
+    SidebarUser,
     Stop,
 )
 from chainlit.protocol.codec import MAX_FRAME_BYTES, CloseCode, ErrorCode, decode_client
@@ -48,6 +49,7 @@ from chainlit.ws.handshake import Arrival, ThreadStore, arrive, ready_frame, res
 from chainlit.ws.outbound import FORCE_CLOSE_GRACE
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import Session
+from chainlit.ws.sidebar import apply_user_op, state_frame
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +476,7 @@ async def _read_loop(connection: Connection, scope: anyio.CancelScope) -> None:
 
 
 async def _dispatch(session: Session, message: ClientMsg) -> None:
-    """Five tags. The sixth, ``hb.ack``, is the connection's and never
+    """Six tags. The seventh, ``hb.ack``, is the connection's and never
     reaches here. Everything else the client can say, it cannot say twice.
 
     ``session.clear`` is the one that ends things. "New chat" is the user
@@ -515,6 +517,13 @@ async def _dispatch(session: Session, message: ClientMsg) -> None:
 
     if isinstance(message, AskReply):
         _deliver_reply(session, message)
+        return
+
+    if isinstance(message, SidebarUser):
+        # No runner involved: the panel is session state, and what the user
+        # did to it is true whether or not an application is listening.
+        if apply_user_op(session, message):
+            session.send(state_frame(session.sidebar))
         return
 
     if isinstance(message, SessionClear):

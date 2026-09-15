@@ -13,15 +13,13 @@ import {
   IStep,
   useAuth,
   useChatData,
-  useChatInteract,
-  useConfig
+  useChatInteract
 } from '@chainlit/react-client';
 
 import { useTranslation } from 'components/i18n/Translator';
 
 import { useQuery } from '@/hooks/query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useParentThreadId } from '@/hooks/useParentThread';
 
 import { IAttachment, attachmentsState, composerDraftState } from 'state/chat';
 
@@ -60,15 +58,6 @@ export default function MessageComposer({
   const disabled = _disabled || !!attachments.find((a) => !a.uploaded);
 
   const isMobile = useIsMobile();
-  const { config } = useConfig();
-  const parentThreadId = useParentThreadId();
-
-  // The pill's left slot: with uploads off and no parent thread both left
-  // buttons render null and `ComposerChevron` stands in for them — see there
-  // for why. Desktop keeps its empty toolbar; only the one-row layout needs
-  // the stand-in.
-  const leftSlotEmpty =
-    !config?.features.spontaneous_file_upload?.enabled && !parentThreadId;
 
   let promptValue = '';
   try {
@@ -247,14 +236,12 @@ export default function MessageComposer({
         // line the buttons must stay on the pill's bottom edge, next to the
         // line being typed.
         <div className="flex items-end gap-1">
-          {leftSlotEmpty ? (
-            <ComposerChevron />
-          ) : (
-            <>
-              {uploadButton}
-              <OpenParentThreadButton />
-            </>
-          )}
+          {uploadButton}
+          <OpenParentThreadButton />
+          {/* Last in the left slot, after whichever of the two above render:
+              the panel is the one control here that is always available, and
+              it must not shift the buttons whose position people learn. */}
+          <ComposerChevron />
           {textarea}
           {submitButton}
         </div>
@@ -265,6 +252,7 @@ export default function MessageComposer({
             <div className="flex items-center -ml-1.5">
               {uploadButton}
               <OpenParentThreadButton />
+              <ComposerChevron />
             </div>
             <div className="flex items-center gap-1">{submitButton}</div>
           </div>

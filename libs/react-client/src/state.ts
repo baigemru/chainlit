@@ -8,6 +8,7 @@ import {
   IAsk,
   IAuthConfig,
   IChainlitConfig,
+  IElementSidebarState,
   IMessageElement,
   IStep,
   ITasklistElement,
@@ -196,11 +197,22 @@ export const threadHistoryState = atom<ThreadHistory | undefined>({
   ]
 });
 
-export const sideViewState = atom<
-  { title: string; elements: IMessageElement[]; key?: string } | undefined
->({
-  key: 'SideView',
-  default: undefined
+/**
+ * The element panel, as the server holds it.
+ *
+ * Replaces `sideViewState`, which was one `{title, elements, key}` object —
+ * one slot, and `undefined` for "closed". Closing it therefore *destroyed*
+ * what was in it, nothing survived a reload, and two writers (the socket and
+ * the feed's `display: 'side'` effect) fought over the same field.
+ *
+ * Never `undefined`: an empty panel is `{slots: [], active: null, visible:
+ * false}`, so every reader is reading a state rather than testing for one.
+ * The server owns it; this atom is a projection, written whole by the
+ * `sidebar.state` handler and locally by `useElementSidebar`'s dispatch.
+ */
+export const elementSidebarState = atom<IElementSidebarState>({
+  key: 'ElementSidebar',
+  default: { slots: [], active: null, visible: false, rev: 0 }
 });
 
 /**

@@ -4,6 +4,7 @@ import {
   actionState,
   askUserState,
   currentThreadIdState,
+  elementSidebarState,
   elementState,
   firstUserInteraction,
   loadingState,
@@ -11,7 +12,6 @@ import {
   protocolErrorState,
   sessionDescriptorState,
   sessionIdState,
-  sideViewState,
   tasklistState,
   threadIdToResumeState
 } from 'src/state';
@@ -41,7 +41,7 @@ const useChatInteract = () => {
   const setTasklists = useSetRecoilState(tasklistState);
   const setActions = useSetRecoilState(actionState);
   const setIdToResume = useSetRecoilState(threadIdToResumeState);
-  const setSideView = useSetRecoilState(sideViewState);
+  const setElementSidebar = useSetRecoilState(elementSidebarState);
   const setCurrentThreadId = useSetRecoilState(currentThreadIdState);
   const setAskUser = useSetRecoilState(askUserState);
   const setProtocolError = useSetRecoilState(protocolErrorState);
@@ -84,7 +84,9 @@ const useChatInteract = () => {
       setElements([]);
       setTasklists([]);
       setActions([]);
-      setSideView(undefined);
+      // Back to the default, not to `undefined`: the panel is a state,
+      // and every reader below it is reading one.
+      setElementSidebar({ slots: [], active: null, visible: false, rev: 0 });
       setCurrentThreadId(undefined);
     },
     [
@@ -98,7 +100,7 @@ const useChatInteract = () => {
       setElements,
       setTasklists,
       setActions,
-      setSideView,
+      setElementSidebar,
       setCurrentThreadId
     ]
   );

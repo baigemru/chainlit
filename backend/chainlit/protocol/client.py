@@ -21,6 +21,8 @@ __all__ = [
     "Hello",
     "MessageSend",
     "SessionClear",
+    "SidebarOp",
+    "SidebarUser",
     "Stop",
 ]
 
@@ -104,6 +106,44 @@ class AskReply(_Msg, tag="ask.reply"):
     value: AskReplyValue
 
 
+# --------------------------------------------------------------------------
+# The element panel
+# --------------------------------------------------------------------------
+
+
+SidebarOp = Literal["hide", "show", "activate", "close", "preview"]
+
+
+class SidebarUser(_Msg, tag="sidebar.user"):
+    """Something the user did to the element panel.
+
+    New, and the half the old wire never had: the panel was a frame the
+    server sent and forgot, so "closed" was spelled by the client throwing
+    its own copy away, and "open it again" could not be spelled at all.
+
+    The server answers it by *silence* when the operation only moves a
+    scalar -- ``hide``, ``show``, ``activate``. The client has already
+    applied those, and an echo would redraw the intermediate state of a
+    fast hide-then-show. ``close`` and ``preview`` change the slot list, and
+    so does every refusal, and both answer with the whole ``sidebar.state``.
+
+    ``slot`` addresses ``activate`` and ``close``; ``elementId`` addresses
+    ``preview`` and names an element of the conversation, which the server
+    resolves for itself rather than trusting a payload from the browser;
+    ``rev`` says which state the user was looking at when they acted.
+    """
+
+    op: SidebarOp
+    slot: str | None = None
+    element_id: str | None = None
+    #: The ``rev`` of the last ``sidebar.state`` this client was shown. A
+    #: scalar operation is answered with silence only while it still
+    #: matches: otherwise the click was made against a screen a frame in
+    #: flight has already replaced, and silence would leave the two sides
+    #: parted with nothing left to correct them.
+    rev: int = 0
+
+
 ClientMsg = Union[
     Hello,
     HeartbeatAck,
@@ -111,6 +151,7 @@ ClientMsg = Union[
     Stop,
     MessageSend,
     AskReply,
+    SidebarUser,
 ]
 
 CLIENT_TAGS: frozenset[str] = frozenset(

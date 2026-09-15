@@ -121,10 +121,13 @@ SERVER_MAPPING: dict[str, str] = {
     # successor id, which "set_chat_profile" did not say and which made it
     # one letter away from the in-place switch_chat_profile.
     "set_chat_profile": "session.handoff",
-    # Collapsed pair: the client reconciled both into one sideView atom,
-    # each event reading the other's half out of the previous state.
-    "set_sidebar_title": "sidebar.set",
-    "set_sidebar_elements": "sidebar.set",
+    # Collapsed pair, then promoted from a frame to a state. Both events
+    # said "the panel is now this"; neither could say "the panel is put
+    # away but still holds what it held", which is why closing it used to
+    # destroy the contents. `sidebar.state` is the whole panel, and the
+    # user's own half of it is the new `sidebar.user`.
+    "set_sidebar_title": "sidebar.state",
+    "set_sidebar_elements": "sidebar.state",
     "toast": "toast",
     "reload": "reload",
 }
@@ -198,7 +201,7 @@ INTENTIONALLY_DROPPED: dict[str, str] = {
 
 # Tags with no counterpart in today's protocol — additions, not renames.
 NEW_SERVER_TAGS: frozenset[str] = frozenset({"session.ready", "error", "hb"})
-NEW_CLIENT_TAGS: frozenset[str] = frozenset({"hb.ack"})
+NEW_CLIENT_TAGS: frozenset[str] = frozenset({"hb.ack", "sidebar.user"})
 
 
 def test_every_old_server_event_is_mapped_or_dropped() -> None:

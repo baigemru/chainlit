@@ -6,6 +6,7 @@ import {
   askUserState,
   chatProfileState,
   currentThreadIdState,
+  elementSidebarState,
   elementState,
   firstUserInteraction,
   loadingState,
@@ -13,7 +14,6 @@ import {
   protocolErrorState,
   sessionDescriptorState,
   sessionIdState,
-  sideViewState,
   tasklistState
 } from 'src/state';
 import {
@@ -42,6 +42,7 @@ import {
   toWireStep
 } from 'src/utils/wire';
 
+import { isMobileViewport } from './breakpoint';
 import { ChainlitContext, useChatTransport } from './context';
 import type {
   AskReplyValue,
@@ -85,7 +86,6 @@ const useChatSession = () => {
   const setLoading = useSetRecoilState(loadingState);
   const setMessages = useSetRecoilState(messagesState);
   const setAskUser = useSetRecoilState(askUserState);
-  const setSideView = useSetRecoilState(sideViewState);
   const setElements = useSetRecoilState(elementState);
   const setTasklists = useSetRecoilState(tasklistState);
   const setActions = useSetRecoilState(actionState);
@@ -128,6 +128,69 @@ const useChatSession = () => {
     []
   );
 
+  // True from a `session.ready` until the first `sidebar.state` that follows
+  // it: the restore's panel frame, and the only one the mobile rule below
+  // may act on. Reset per connection rather than per page, because that is
+  // the question being asked — "is this the panel a reload just got back?".
+  const restoringSidebar = useRef(false);
+
+  const applySidebarFrame = useRecoilCallback(
+    ({ set, snapshot }) =>
+      (msg: Extract<ServerMsg, { t: 'sidebar.state' }>) => {
+        const known = new Map(
+          (snapshot.getLoadable(elementState).valueMaybe() ?? []).map(
+            (element) => [element.id, element]
+          )
+        );
+        const slots = (msg.slots ?? []).map((slot) => ({
+          id: slot.id,
+          title: slot.title ?? '',
+          closable: slot.closable ?? true,
+          canvas: slot.canvas ?? false,
+          elements: (slot.elementIds ?? [])
+            .map((id) => {
+              const element = known.get(id);
+              if (!element) {
+                console.warn(
+                  `sidebar.state names element ${id}, which never arrived`
+                );
+              }
+              return element;
+            })
+            .filter((element): element is IMessageElement => !!element)
+        }));
+
+        const wasRestore = restoringSidebar.current;
+        restoringSidebar.current = false;
+        // The one place this client branches on the screen. The panel is a
+        // 95%-wide sheet on a phone, so a reload that put it straight back
+        // would cover the question the user reloaded to answer. The
+        // *viewport*, through the shared breakpoint -- the same question
+        // `useIsMobile` answers when it decides to draw that sheet, and not
+        // the `device` label the hello carries, which a `?device=pc` pin can
+        // set against the layout. Hidden locally *and* on the server,
+        // because the server must never decide anything by device: the same
+        // conversation opened on a laptop has to behave the same way.
+        const hideOnMobile =
+          wasRestore &&
+          msg.visible === true &&
+          transport.opening.pageLoad &&
+          isMobileViewport();
+
+        const rev = msg.rev ?? 0;
+        set(elementSidebarState, {
+          slots,
+          active: msg.active ?? null,
+          visible: hideOnMobile ? false : (msg.visible ?? false),
+          rev
+        });
+        if (hideOnMobile) {
+          transport.send({ t: 'sidebar.user', op: 'hide', rev });
+        }
+      },
+    [transport]
+  );
+
   const handlers: ServerMsgHandlers = useMemo(
     () => ({
       // ---- lifecycle -------------------------------------------------
@@ -145,6 +208,8 @@ const useChatSession = () => {
         // tab would sit on /thread/<refused> with the session in another
         // thread, and the same component would clear it on sight.
         setCurrentThreadId(msg.threadId ?? undefined);
+        // The next `sidebar.state` is this connection's restore frame.
+        restoringSidebar.current = true;
       },
 
       error: (msg) => {
@@ -354,54 +419,13 @@ const useChatSession = () => {
         // Router-dependent: ChatProfileSwitchListener owns it.
       },
 
-      'sidebar.set': (msg) => {
-        setSideView((prev) => {
-          // Absence and null are different instructions here: a field the
-          // frame leaves out means "leave it alone", an explicit null on
-          // the title or the key clears it.
-          const hasTitle = 'title' in msg;
-          const hasKey = 'key' in msg;
-          const hasElements = 'elements' in msg;
-
-          const incoming = hasElements
-            ? (msg.elements ?? []).map((raw) => {
-                const element = toElement(raw) as IMessageElement;
-                if (!element.url && element.chainlitKey) {
-                  element.url = client.getElementUrl(
-                    element.chainlitKey,
-                    sessionIdRef.current!
-                  );
-                }
-                element.url = client.resolveElementUrl(element.url);
-                return element;
-              })
-            : undefined;
-
-          // `elements` has no null form: an empty list closes the sidebar.
-          if (incoming && !incoming.length) return undefined;
-
-          const title = hasTitle ? (msg.title ?? '') : prev?.title || '';
-          const key = hasKey ? (msg.key ?? undefined) : prev?.key;
-
-          // A sidebar already open under this key keeps the elements it is
-          // showing: `ElementSidebar.set_elements(key=...)` promises that,
-          // and replacing the array would remount a custom element and
-          // throw away whatever the user had typed into it.
-          const keepElements =
-            !!incoming && !!prev && key !== undefined && prev.key === key;
-          const elements =
-            incoming && !keepElements ? incoming : prev?.elements || [];
-
-          if (
-            prev &&
-            prev.title === title &&
-            prev.key === key &&
-            prev.elements === elements
-          ) {
-            return prev;
-          }
-          return { title, elements, key };
-        });
+      'sidebar.state': (msg) => {
+        // Written whole, with the slots' elements looked up in the atom the
+        // `element.upsert` handler above fills. The server sends those
+        // upserts ahead of this frame on one FIFO queue, so an id it names
+        // is an id we have — an id we do not is a server bug, and drawing a
+        // hole for it would hide that.
+        applySidebarFrame(msg);
       },
 
       // ---- misc ------------------------------------------------------
@@ -430,6 +454,7 @@ const useChatSession = () => {
       }
     }),
     [
+      applySidebarFrame,
       chatProfile,
       client,
       endAsk,
@@ -445,7 +470,6 @@ const useChatSession = () => {
       setMessages,
       setProtocolError,
       setSessionId,
-      setSideView,
       setTasklists,
       transport
     ]

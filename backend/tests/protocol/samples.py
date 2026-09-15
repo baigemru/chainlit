@@ -16,6 +16,7 @@ from chainlit.protocol.payloads import (
     CustomElement,
     Feedback,
     FileRef,
+    SidebarSlotRef,
     Step,
     StepPatch,
     TextElement,
@@ -121,10 +122,18 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
         keep_transcript=True,
         has_transit_message=True,
     ),
-    "sidebar.set": s.SidebarSet(
-        title="Sources",
-        elements=[TextElement(id="el-3", name="src", language="markdown")],
-        key="sources-v1",
+    "sidebar.state": s.SidebarState(
+        slots=[
+            SidebarSlotRef(
+                id="sources",
+                title="Sources",
+                element_ids=["el-3", "el-4"],
+            ),
+            SidebarSlotRef(id="board", title="Board", closable=False, canvas=True),
+        ],
+        active="sources",
+        visible=True,
+        rev=7,
     ),
     "toast": s.Toast(message="Saved", type="success"),
 }
@@ -149,4 +158,5 @@ CLIENT_SAMPLES: dict[str, c.ClientMsg] = {
         step_id=SAMPLE_STEP.id,
         value=AskElementReply(submitted=True, props={"choice": "b"}),
     ),
+    "sidebar.user": c.SidebarUser(op="preview", element_id="el-3", rev=7),
 }

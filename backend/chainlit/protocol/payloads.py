@@ -54,6 +54,7 @@ __all__ = [
     "ModeOption",
     "PdfElement",
     "PlotlyElement",
+    "SidebarSlotRef",
     "Step",
     "StepPatch",
     "StepType",
@@ -293,6 +294,32 @@ Element = Union[
     CustomElement,
     TasklistElement,
 ]
+
+
+# --------------------------------------------------------------------------
+# The element panel
+# --------------------------------------------------------------------------
+
+
+class SidebarSlotRef(msgspec.Struct, rename="camel", omit_defaults=True):
+    """One tab of the element panel, naming its contents rather than carrying them.
+
+    By reference on purpose. The panel's frame is a full state and goes out
+    again on every structural change and every reconnect; carrying the
+    elements would re-send a fifty-card composer each time somebody closed a
+    preview tab next to it. The elements travel once, as ``element.upsert``
+    ahead of the frame on the session's single FIFO queue, so an id named
+    here is an id the client already has.
+    """
+
+    id: str
+    title: str = ""
+    element_ids: list[str] = []
+    closable: bool = True
+    #: Drawn without a frame or a header, the way a canvas is. A field, not
+    #: the old ``title == "canvas"`` convention, which made a panel titled
+    #: "canvas" in any language a different widget.
+    canvas: bool = False
 
 
 # --------------------------------------------------------------------------

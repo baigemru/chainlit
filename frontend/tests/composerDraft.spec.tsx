@@ -31,6 +31,12 @@ vi.mock('@chainlit/react-client', () => ({
     uploadFile: vi.fn()
   }),
   useChatMessages: () => ({ firstInteraction: undefined }),
+  // The composer's chevron opens the element panel; the draft is the
+  // subject here, so the panel is inert.
+  useElementSidebar: () => ({
+    state: { slots: [], active: null, visible: false },
+    dispatch: vi.fn()
+  }),
   useConfig: () => ({
     config: { features: { spontaneous_file_upload: { enabled: true } } }
   })

@@ -20,10 +20,9 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
 import msgspec
-from msgspec import UNSET, UnsetType
 
 from chainlit.logger import logger
 from chainlit.protocol.payloads import (
@@ -48,7 +47,6 @@ from chainlit.protocol.server import (
     ElementUpsert,
     Error,
     SessionHandoff,
-    SidebarSet,
     StepDelete,
     StepStreamStart,
     StepStreamToken,
@@ -62,6 +60,7 @@ from chainlit.protocol.server import (
 )
 from chainlit.types import AskSlotBusyError
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
+from chainlit.ws.sidebar import state_frame
 
 if TYPE_CHECKING:
     from chainlit.transit_store import TransitStore
@@ -387,19 +386,15 @@ class Emitter:
 
     # ------------------------------------------------------------------- misc
 
-    def set_sidebar(
-        self,
-        *,
-        title: Union[str, UnsetType, None] = UNSET,
-        elements: Union[Sequence[Mapping[str, Any]], UnsetType] = UNSET,
-        key: Union[str, UnsetType, None] = UNSET,
-    ) -> None:
-        converted: Union[List[Element], UnsetType] = (
-            UNSET
-            if isinstance(elements, UnsetType)
-            else [_as_element(e) for e in elements]
-        )
-        self.session.send(SidebarSet(title=title, elements=converted, key=key))
+    def sidebar_state(self) -> None:
+        """Say what the element panel is, whole.
+
+        Built from ``session.sidebar`` rather than from the arguments of
+        whatever call produced it: the model is the truth and the frame is
+        its projection, which is the entire difference between this and the
+        ``sidebar.set`` it replaces.
+        """
+        self.session.send(state_frame(self.session.sidebar))
 
     def send_toast(self, message: str, type: ToastType = "info") -> None:
         self.session.send(Toast(message=message, type=type))

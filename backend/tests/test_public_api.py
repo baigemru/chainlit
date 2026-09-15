@@ -32,7 +32,6 @@ EXPECTED_EXPORTS = {
     "ChatProfile",
     "CustomElement",
     "Dataframe",
-    "ElementSidebar",
     "ErrorMessage",
     "File",
     "Image",
@@ -43,6 +42,7 @@ EXPECTED_EXPORTS = {
     "PersistedUser",
     "Plotly",
     "Pyplot",
+    "Sidebar",
     "Starter",
     "StarterCategory",
     "Step",
@@ -94,7 +94,7 @@ CONSUMER_SURFACE = {
     "Step",
     "Starter",
     "Image",
-    "ElementSidebar",
+    "Sidebar",
     "chat_context",
     "User",
     "ChatProfile",
@@ -127,6 +127,18 @@ def test_exports_match_the_snapshot():
 
 def test_the_consumer_surface_is_exported():
     assert CONSUMER_SURFACE <= set(chainlit.__all__)
+
+
+def test_the_old_sidebar_helper_is_gone_rather_than_shimmed():
+    """``ElementSidebar`` is deleted, not kept as a facade over ``Sidebar``.
+
+    The fork has one consumer and it migrates on the bump; a facade would
+    have had to carry the old semantics (``key`` meaning "do not update",
+    ``set_title`` opening an empty panel) into a model that has no room for
+    them. The migration is four lines of release notes instead.
+    """
+    assert not hasattr(chainlit, "ElementSidebar")
+    assert "ElementSidebar" not in chainlit.__all__
 
 
 def test_every_export_resolves():

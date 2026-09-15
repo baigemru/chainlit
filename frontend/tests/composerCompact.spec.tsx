@@ -3,11 +3,14 @@ import { RecoilRoot } from 'recoil';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import MessageComposer from '@/components/chat/MessageComposer';
+import { SidebarProvider, useSidebar } from '@/components/ui/sidebar';
 
 import { IAttachment, attachmentsState } from '@/state/chat';
 
 const mockUseIsMobile = vi.fn();
 const mockSpontaneousUpload = vi.fn();
+const mockSidebarAvailable = vi.fn();
+const mockParentThreadId = vi.fn();
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mockUseIsMobile()
@@ -16,7 +19,13 @@ vi.mock('@/hooks/use-mobile', () => ({
 // The composer's own data, all of it inert: what is under test is where the
 // three controls land, not what they do.
 vi.mock('@chainlit/react-client', () => ({
-  useAuth: () => ({ user: undefined }),
+  // A login and somewhere to persist to is what `useHasLeftSidebar` asks for;
+  // one switch drives both, because what the cases care about is whether a
+  // thread history exists at all, not which half of the predicate is missing.
+  useAuth: () => ({
+    user: undefined,
+    data: mockSidebarAvailable() ? { requireLogin: true } : undefined
+  }),
   useChatData: () => ({ askUser: undefined, disabled: false, loading: false }),
   useChatInteract: () => ({
     sendMessage: vi.fn(),
@@ -29,6 +38,7 @@ vi.mock('@chainlit/react-client', () => ({
   // the chevron cases turn it off per test.
   useConfig: () => ({
     config: {
+      dataPersistence: mockSidebarAvailable(),
       features: {
         spontaneous_file_upload: { enabled: mockSpontaneousUpload() }
       }
@@ -36,11 +46,17 @@ vi.mock('@chainlit/react-client', () => ({
   })
 }));
 
-// The return button reaches for session and thread ids that live in the
-// mocked client module; it has no parent thread in any case below, so it
-// answers for itself.
+// The hook reaches for session and thread ids that live in the mocked client
+// module, and for the config flag that gates it; what the composer does with
+// its answer is the subject here, so the answer is handed to it directly. The
+// flag itself is tested where it is defined, in `parentThreadFlag.spec.tsx`.
 vi.mock('@/hooks/useParentThread', () => ({
-  useParentThreadId: () => undefined
+  useParentThreadId: () => mockParentThreadId()
+}));
+
+// The return button's own hook reaches for the router and the API client.
+vi.mock('@/hooks/useOpenThread', () => ({
+  useOpenThread: () => vi.fn()
 }));
 
 vi.mock('react-i18next', () => ({
@@ -68,13 +84,41 @@ const renderComposer = (attachments: IAttachment[] = []) =>
     </RecoilRoot>
   );
 
+// Reading the provider's own state rather than the DOM: on a phone the
+// sidebar is a Sheet, and whether it is open is a fact about the context, not
+// about anything the composer renders.
+let openMobile = false;
+const SidebarProbe = () => {
+  openMobile = useSidebar().openMobile;
+  return null;
+};
+
+const renderComposerWithSidebar = () =>
+  render(
+    <RecoilRoot>
+      <SidebarProvider>
+        <SidebarProbe />
+        <MessageComposer
+          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
+          onFileUpload={noop}
+          onFileUploadError={noop}
+          autoScrollRef={{ current: true }}
+        />
+      </SidebarProvider>
+    </RecoilRoot>
+  );
+
 const composer = () => document.querySelector('#message-composer')!;
 const submit = () => document.querySelector('#chat-submit')!;
 const input = () => document.querySelector('#chat-input')!;
+const chevron = () => document.querySelector('#composer-chevron');
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockSpontaneousUpload.mockReturnValue(true);
+  mockSidebarAvailable.mockReturnValue(false);
+  mockParentThreadId.mockReturnValue(undefined);
+  openMobile = false;
 });
 
 describe('MessageComposer, compact on a phone', () => {
@@ -153,8 +197,42 @@ describe('MessageComposer, compact on a phone', () => {
 
     renderComposer();
 
-    expect(document.querySelector('#composer-chevron')).not.toBeNull();
+    expect(chevron()).not.toBeNull();
     expect(document.querySelector('#upload-button')).toBeNull();
+    // With no thread history to open there is nothing to click: a decorative
+    // glyph, hidden from the accessibility tree, and no `useSidebar` call on
+    // the path — which is why this case needs no provider around it.
+    expect(chevron()!.tagName).toBe('SPAN');
+    expect(chevron()!.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('makes the chevron the thumb’s way into the thread history', () => {
+    // The header's trigger is at the top of a phone screen; this is the same
+    // action where the hand already is.
+    mockUseIsMobile.mockReturnValue(true);
+    mockSpontaneousUpload.mockReturnValue(false);
+    mockSidebarAvailable.mockReturnValue(true);
+
+    renderComposerWithSidebar();
+
+    expect(chevron()!.tagName).toBe('BUTTON');
+    expect(chevron()!.getAttribute('aria-hidden')).toBeNull();
+    expect(chevron()!.getAttribute('aria-label')).toBe('Open sidebar');
+
+    fireEvent.click(chevron()!);
+
+    expect(openMobile).toBe(true);
+  });
+
+  it('yields the slot to the return button when the chat has a parent', () => {
+    mockUseIsMobile.mockReturnValue(true);
+    mockSpontaneousUpload.mockReturnValue(false);
+    mockParentThreadId.mockReturnValue('parent-thread');
+
+    renderComposer();
+
+    expect(document.querySelector('#open-parent-thread')).not.toBeNull();
+    expect(chevron()).toBeNull();
   });
 
   it('keeps the chevron out while the upload button is there', () => {

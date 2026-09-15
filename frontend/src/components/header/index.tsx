@@ -14,6 +14,7 @@ import {
 import { useSidebar } from '@/components/ui/sidebar';
 
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useHasLeftSidebar } from '@/hooks/useHasLeftSidebar';
 
 import ApiKeys from './ApiKeys';
 import ChatProfiles from './ChatProfiles';
@@ -54,7 +55,7 @@ export function staysInHeader(name: string, mobileHeader?: string[]): boolean {
 
 const Header = memo(() => {
   const navigate = useNavigate();
-  const { data, user } = useAuth();
+  const { user } = useAuth();
   const { config } = useConfig();
   const { open, openMobile, isMobile: sidebarIsMobile } = useSidebar();
   // The layout is decided by the viewport, never by the `device` label: the
@@ -63,9 +64,7 @@ const Header = memo(() => {
 
   const sidebarOpen = sidebarIsMobile ? openMobile : open;
 
-  const historyEnabled = data?.requireLogin && config?.dataPersistence;
-  const sidebarHidden = config?.ui?.default_sidebar_state === 'hidden';
-  const inSidebar = Boolean(historyEnabled && !sidebarHidden);
+  const inSidebar = useHasLeftSidebar();
   const showNewChat = inSidebar ? !sidebarOpen : true;
 
   const links = (config?.ui?.header_links || []).filter(

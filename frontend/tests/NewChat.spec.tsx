@@ -11,10 +11,17 @@ import NewChatButton from '@/components/header/NewChat';
 
 const mockClear = vi.fn();
 const mockUseConfig = vi.fn();
+const mockSetOpenMobile = vi.fn();
 
 vi.mock('@chainlit/react-client', () => ({
   useChatInteract: () => ({ clear: mockClear }),
   useConfig: () => mockUseConfig()
+}));
+
+// The button also renders inside the mobile sheet, so it reaches for the
+// sidebar; here it renders bare, where there is no provider to reach.
+vi.mock('@/components/ui/sidebar', () => ({
+  useSidebar: () => ({ setOpenMobile: mockSetOpenMobile })
 }));
 
 vi.mock('@/components/i18n', () => ({
@@ -104,6 +111,20 @@ describe('NewChatButton', () => {
       screen.getByText('navigation.newChat.dialog.title')
     ).toBeInTheDocument();
     expect(mockClear).not.toHaveBeenCalled();
+  });
+
+  it('closes the mobile sheet it may have been pressed in', () => {
+    // A new chat from `/` leaves the address where it was, so the sheet's own
+    // effect on the pathname never fires: this is the one site that has to
+    // close it by hand.
+    mockUseConfig.mockReturnValue({
+      config: { ui: { confirm_new_chat: false } }
+    });
+
+    render(<NewChatButton navigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(mockSetOpenMobile).toHaveBeenCalledWith(false);
   });
 
   it('uses custom onConfirm handler if provided', () => {

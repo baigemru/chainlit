@@ -19,7 +19,10 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar:state';
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+// A year, not shadcn's week: this cookie is now read back as the sidebar's
+// last state (`lib/sidebarState.ts`), and a last state that forgets itself
+// after a quiet week is a surprise, not a policy.
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const SIDEBAR_WIDTH = '16rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
 const SIDEBAR_WIDTH_ICON = '3rem';

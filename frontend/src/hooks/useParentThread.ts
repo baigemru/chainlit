@@ -1,7 +1,11 @@
 import { useCallback } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 
-import { currentThreadIdState, sessionIdState } from '@chainlit/react-client';
+import {
+  currentThreadIdState,
+  sessionIdState,
+  useConfig
+} from '@chainlit/react-client';
 
 import {
   collapsedExcursionsState,
@@ -15,12 +19,21 @@ import {
  * anything that starts another chat (clear() resets both scopes) hides the
  * parent without explicit cleanup — a stale parent never leaks into an
  * unrelated chat.
+ *
+ * `ui.show_parent_thread_button` is read here and nowhere else. Both display
+ * sites ask this hook — the return button itself and the composer's "is the
+ * left slot empty" — and a second copy of the condition could disagree with
+ * this one into a pill holding neither a button nor the chevron that stands in
+ * for it. The mechanism is untouched by the flag: a server-sent `thread.open`
+ * still returns a user to the parent in a deployment that hides the button.
  */
 export const useParentThreadId = (): string | undefined => {
+  const { config } = useConfig();
   const entry = useRecoilValue(parentThreadEntryState);
   const sessionId = useRecoilValue(sessionIdState);
   const currentThreadId = useRecoilValue(currentThreadIdState);
 
+  if (!config?.ui?.show_parent_thread_button) return undefined;
   if (!entry) return undefined;
   if (entry.forSessionId && entry.forSessionId === sessionId) {
     return entry.parentThreadId;

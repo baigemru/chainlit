@@ -10,6 +10,7 @@ from .orphans import ORPHAN_SCENARIOS, PARENT_SCENARIOS
 from .reload import RELOAD_SCENARIOS
 from .resume_delete import RESUME_DELETE_SCENARIOS
 from .resync import RESYNC_SCENARIOS
+from .sidebar import SIDEBAR_SCENARIOS
 from .transcript import TRANSCRIPT_SCENARIOS
 
 SCENARIOS: Tuple[Scenario, ...] = (
@@ -22,6 +23,7 @@ SCENARIOS: Tuple[Scenario, ...] = (
     + RELOAD_SCENARIOS
     + RESUME_DELETE_SCENARIOS
     + RESYNC_SCENARIOS
+    + SIDEBAR_SCENARIOS
 )
 
 __all__ = ["SCENARIOS"]

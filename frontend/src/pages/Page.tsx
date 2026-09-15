@@ -3,7 +3,7 @@ import { requiredEnvPresent } from '@/lib/userEnv';
 import { Navigate } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 
-import { sideViewState, useConfig } from '@chainlit/react-client';
+import { useConfig, useElementSidebar } from '@chainlit/react-client';
 
 import ChatProfileSwitchListener from '@/components/ChatProfileSwitchListener';
 import ElementSideView from '@/components/ElementSideView';
@@ -27,7 +27,7 @@ type Props = {
 const Page = ({ children }: Props) => {
   const { config } = useConfig();
   const userEnv = useRecoilValue(userEnvState);
-  const sideView = useRecoilValue(sideViewState);
+  const { state: elementSidebar } = useElementSidebar();
   const hasLeftSidebar = useHasLeftSidebar();
 
   if (!requiredEnvPresent(config?.userEnv, userEnv)) {
@@ -50,7 +50,14 @@ const Page = ({ children }: Props) => {
             {children}
           </div>
         </ResizablePanel>
-        {sideView ? <ElementSideView /> : <TaskList isMobile={false} />}
+        {/* The panel takes the slot only while it is on screen. Hidden
+            with its contents intact, it renders nothing and the task list
+            has the space back. */}
+        {elementSidebar.visible ? (
+          <ElementSideView />
+        ) : (
+          <TaskList isMobile={false} />
+        )}
       </ResizablePanelGroup>
     </div>
   );

@@ -11,22 +11,41 @@ pdf_path = os.path.join(current_directory, "dummy.pdf")
 
 @cl.on_chat_start
 async def start():
-    elements = [
-        cl.Image(path=cat_image_path, name="image1"),
-        cl.Pdf(path=pdf_path, name="pdf1"),
-        cl.Text(content="Here is a side text document", name="text1"),
-        cl.Text(content="Here is a page text document", name="text2"),
-    ]
-
-    await cl.ElementSidebar.set_elements(elements)
-    await cl.ElementSidebar.set_title("Test title")
+    # Two slots, so the tab strip and the switch between them are exercised.
+    # Stable ids on purpose: replacement is by element identity, and without
+    # them every refresh would be unmount-and-mount.
+    await cl.Sidebar.set_slot(
+        "media",
+        [
+            cl.Image(path=cat_image_path, name="image1", id="image1"),
+            cl.Pdf(path=pdf_path, name="pdf1", id="pdf1"),
+        ],
+        title="Test title",
+    )
+    await cl.Sidebar.set_slot(
+        "notes",
+        [
+            cl.Text(content="Here is a side text document", name="text1", id="text1"),
+            cl.Text(content="Here is a page text document", name="text2", id="text2"),
+        ],
+        title="Notes",
+        activate=False,
+    )
 
 
 @cl.on_message
 async def message(msg: cl.Message):
-    await cl.ElementSidebar.set_elements([cl.Text(content="Text changed!")])
-    await cl.ElementSidebar.set_title("Title changed!")
-
-    await cl.sleep(2)
-
-    await cl.ElementSidebar.set_elements([])
+    if msg.content == "replace":
+        await cl.Sidebar.set_slot(
+            "notes",
+            [cl.Text(content="Text changed!", name="text1", id="text1")],
+            title="Title changed!",
+        )
+        return
+    if msg.content == "close":
+        await cl.Sidebar.close_slot("notes")
+        return
+    if msg.content == "hide":
+        await cl.Sidebar.hide()
+        return
+    await cl.Sidebar.clear()

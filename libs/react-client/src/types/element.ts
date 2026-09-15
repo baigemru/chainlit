@@ -79,3 +79,38 @@ export type IDataframeElement = TMessageElement<'dataframe'>;
 export interface ICustomElement extends TMessageElement<'custom'> {
   props: Record<string, unknown>;
 }
+
+/**
+ * One tab of the element panel, with its contents resolved.
+ *
+ * The wire's `SidebarSlotRef` names elements by id; this is the same slot
+ * after the `sidebar.state` handler has looked those ids up in the element
+ * atom. Components render this and never the frame.
+ */
+export interface IElementSidebarSlot {
+  id: string;
+  title: string;
+  elements: IMessageElement[];
+  /** Whether the user may dismiss this tab. */
+  closable: boolean;
+  /** Drawn without a frame or a header. Was `title === 'canvas'`. */
+  canvas: boolean;
+}
+
+/**
+ * The whole element panel. Mirrors the server's `SidebarState`, and like it
+ * never has a "closed" value: an empty panel is empty slots, and `visible`
+ * says whether it is on screen — which is how putting it away stopped
+ * meaning throwing its contents out.
+ */
+export interface IElementSidebarState {
+  slots: IElementSidebarSlot[];
+  active: string | null;
+  visible: boolean;
+  /**
+   * The `rev` of the last `sidebar.state` this client was shown, quoted back
+   * in every `sidebar.user`. Not bumped by a local dispatch: what the server
+   * needs to know is which of *its* states the user was looking at.
+   */
+  rev: number;
+}

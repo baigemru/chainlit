@@ -2,7 +2,7 @@ import { MessageContext } from '@/contexts/MessageContext';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
+import { useRecoilValue } from 'recoil';
 import { toast } from 'sonner';
 
 import {
@@ -14,9 +14,9 @@ import {
   IThread,
   nestMessages,
   sessionIdState,
-  sideViewState,
   useApi,
-  useConfig
+  useConfig,
+  useElementSidebar
 } from '@chainlit/react-client';
 
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
@@ -48,7 +48,7 @@ const ReadOnlyThread = ({ id }: Props) => {
     }
   );
   const navigate = useNavigate();
-  const setSideView = useSetRecoilState(sideViewState);
+  const { dispatch } = useElementSidebar();
   const [steps, setSteps] = useState<IStep[]>([]);
   const apiClient = useContext(ChainlitContext);
   const { t } = useTranslation();
@@ -139,7 +139,12 @@ const ReadOnlyThread = ({ id }: Props) => {
   const onElementRefClick = useCallback(
     (element: IMessageElement) => {
       if (element.display === 'side') {
-        setSideView({ title: element.name, elements: [element] });
+        // Local, never sent. This transcript comes from the REST record of a
+        // thread the live session has never been in, so its element ids mean
+        // nothing to the server -- a `sidebar.user preview` would come back
+        // refused, and the refusal is a full state that would wipe the panel
+        // this click just filled.
+        dispatch({ op: 'preview', element }, { local: true });
         return;
       }
 
@@ -151,7 +156,7 @@ const ReadOnlyThread = ({ id }: Props) => {
 
       return navigate(element.display === 'page' ? path : '#');
     },
-    [setSideView, navigate]
+    [dispatch, navigate]
   );
 
   const onError = useCallback((error: string) => toast.error(error), [toast]);

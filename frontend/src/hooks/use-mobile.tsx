@@ -1,8 +1,10 @@
 import * as React from 'react';
 
-import type { ChatProfile, DeviceKey } from '@chainlit/react-client';
-
-const MOBILE_BREAKPOINT = 768;
+import {
+  type ChatProfile,
+  type DeviceKey,
+  MOBILE_BREAKPOINT
+} from '@chainlit/react-client';
 
 const DEVICE_OVERRIDE_KEY = 'chainlit_device_override';
 

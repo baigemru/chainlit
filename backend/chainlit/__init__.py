@@ -42,7 +42,7 @@ from chainlit.message import (
     Message,
 )
 from chainlit.mode import Mode, ModeOption
-from chainlit.sidebar import ElementSidebar
+from chainlit.sidebar import Sidebar
 from chainlit.step import Step, step
 from chainlit.types import (
     AskSlotBusyError,
@@ -95,7 +95,6 @@ __all__ = [
     "ChatProfile",
     "CustomElement",
     "Dataframe",
-    "ElementSidebar",
     "ErrorMessage",
     "File",
     "Image",
@@ -106,6 +105,7 @@ __all__ = [
     "PersistedUser",
     "Plotly",
     "Pyplot",
+    "Sidebar",
     "Starter",
     "StarterCategory",
     "Step",

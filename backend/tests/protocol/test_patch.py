@@ -1,7 +1,7 @@
 """Partial updates must be able to say "false" and "empty".
 
-``step.update`` and ``sidebar.set`` are merge messages: the receiver writes
-the fields the frame carries and leaves the rest of the object alone. Under
+``step.update`` is a merge message: the receiver writes the fields the frame
+carries and leaves the rest of the step alone. Under
 ``omit_defaults`` that only works if "not mentioned" and "mentioned as
 ``False`` / ``""`` / ``null``" produce different bytes — which a value
 default (``streaming: bool = False``) cannot do, because it is dropped from
@@ -167,41 +167,26 @@ def test_a_child_list_does_not_ride_along_on_a_patch() -> None:
 
 
 # --------------------------------------------------------------------------
-# sidebar.set
+# sidebar.state
 # --------------------------------------------------------------------------
 
 
-def test_the_sidebar_title_can_be_cleared_and_left_alone() -> None:
-    """``None`` used to be the default, so "clear the title" was unsendable."""
-    assert (
-        encode_server(s.SidebarSet(title=None)) == b'{"t":"sidebar.set","title":null}'
-    )
-    assert encode_server(s.SidebarSet()) == b'{"t":"sidebar.set"}'
+def test_the_panel_states_itself_whole_rather_than_patching() -> None:
+    """The one frame here that is deliberately *not* a merge message.
 
-    cleared = decode_server(b'{"t":"sidebar.set","title":null}')
-    untouched = decode_server(b'{"t":"sidebar.set"}')
-    assert isinstance(cleared, s.SidebarSet)
-    assert isinstance(untouched, s.SidebarSet)
-    assert cleared.title is None
-    assert untouched.title is UNSET
+    ``sidebar.set`` carried three ``UNSET`` fields because it was the last
+    thing anybody had said about the panel and had to leave the rest alone.
+    The panel is a model now, and the frame is its projection: an empty one
+    states an empty panel, which is exactly what has to reach a client that
+    reloaded in the middle of a preview.
+    """
+    assert encode_server(s.SidebarState()) == b'{"t":"sidebar.state"}'
 
-
-def test_the_sidebar_key_can_be_cleared_and_left_alone() -> None:
-    assert encode_server(s.SidebarSet(key=None)) == b'{"t":"sidebar.set","key":null}'
-    decoded = decode_server(b'{"t":"sidebar.set"}')
-    assert isinstance(decoded, s.SidebarSet)
-    assert decoded.key is UNSET
-
-
-def test_an_empty_element_list_closes_the_sidebar_and_absence_does_not() -> None:
-    closing = encode_server(s.SidebarSet(elements=[]))
-    silent = encode_server(s.SidebarSet(title="Sources"))
-    assert closing == b'{"t":"sidebar.set","elements":[]}'
-    assert b"elements" not in silent
-
-    decoded = decode_server(closing)
-    assert isinstance(decoded, s.SidebarSet)
-    assert decoded.elements == []
+    decoded = decode_server(b'{"t":"sidebar.state"}')
+    assert isinstance(decoded, s.SidebarState)
+    assert decoded.slots == []
+    assert decoded.active is None
+    assert decoded.visible is False
 
 
 # --------------------------------------------------------------------------

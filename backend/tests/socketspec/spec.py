@@ -61,6 +61,22 @@ class TranscriptStep:
 
 
 @dataclass(frozen=True)
+class SidebarSlotState:
+    """One tab the element panel is holding when the frames arrive.
+
+    ``elements`` are ids: the panel names its contents by reference on the
+    wire, and what a row cares about is which ids come back and in which
+    slot, never what is in them.
+    """
+
+    id: str
+    title: str = ""
+    elements: Tuple[str, ...] = ()
+    closable: bool = True
+    canvas: bool = False
+
+
+@dataclass(frozen=True)
 class Handover:
     """A message parked by the session that handed this one its thread.
 
@@ -148,6 +164,18 @@ class Given:
 
     transcript: Tuple[TranscriptStep, ...] = ()
     """The conversation the server already holds."""
+
+    sidebar: Tuple[SidebarSlotState, ...] = ()
+    """The element panel the server is holding, if it is holding one.
+
+    State of the conversation, like the transcript: it outlives the socket,
+    and what a reconnect owes the client is a projection of it. The old
+    panel had no such state at all -- it was whatever frame was last sent --
+    which is why no row could describe one.
+    """
+
+    sidebar_hidden: bool = False
+    """The user put the panel away. The slots above are still there."""
 
     hooks: Tuple[Literal["chat_start", "chat_resume", "thread_ready"], ...] = ()
     """Which callbacks the running application registered.
@@ -320,6 +348,7 @@ __all__ = [
     "Incoming",
     "Result",
     "Scenario",
+    "SidebarSlotState",
     "TranscriptStep",
     "assert_that",
 ]

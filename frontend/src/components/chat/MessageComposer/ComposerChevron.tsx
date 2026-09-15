@@ -5,52 +5,34 @@ import { ChevronRight } from 'lucide-react';
 // key it has not loaded yet, which would defeat the defaultValue below.
 import { useTranslation } from 'react-i18next';
 
-import { useSidebar } from '@/components/ui/sidebar';
+import { useElementSidebar } from '@chainlit/react-client';
 
-import { useHasLeftSidebar } from '@/hooks/useHasLeftSidebar';
-
-// The same 32px box in both forms: whether the glyph does anything must not
-// move the pill's geometry.
+// The same 32px box in both layouts: the pill's geometry must not move.
 const BOX =
   'flex h-8 w-8 flex-none items-center justify-center text-muted-foreground';
 
 /**
- * The pill's left slot when both of its buttons render null. With uploads off
- * and no parent thread a Telegram-shaped pill whose text starts flush at the
- * rounded edge reads as a defect; a mute ">" — the oldest prompt glyph there
- * is — holds the slot instead.
+ * The way back to the element panel, next to the thumb.
  *
- * Where a thread history exists the glyph is also the thumb's way into it. The
- * header keeps its own trigger, at the top of the screen; this is the same
- * action at the bottom, where the hand already is.
- *
- * Two components, because `useSidebar` throws outside a provider
- * (`ui/sidebar.tsx`) and the decorative form has to stay renderable wherever
- * the composer is — a bare composer in a test among them.
+ * It used to be a mute glyph standing in for an empty left slot, and it
+ * opened the *left* thread-history sidebar. Both are gone: the panel is
+ * session state now, so it can be hidden without being destroyed — and a
+ * hidden panel needs somewhere to be asked back from. That is here, on both
+ * layouts and always, because a control that appears only when there is
+ * something to show teaches nobody it exists. With nothing in the panel it
+ * opens an empty one, which is a legal state and a truthful answer.
  */
 export default function ComposerChevron() {
-  const hasLeftSidebar = useHasLeftSidebar();
-
-  if (hasLeftSidebar) return <SidebarChevron />;
-
-  return (
-    <span id="composer-chevron" aria-hidden="true" className={BOX}>
-      <ChevronRight className="!size-6" />
-    </span>
-  );
-}
-
-function SidebarChevron() {
-  const { toggleSidebar } = useSidebar();
+  const { dispatch } = useElementSidebar();
   const { t } = useTranslation();
 
   return (
     <button
       id="composer-chevron"
       type="button"
-      onClick={toggleSidebar}
-      aria-label={t('threadHistory.sidebar.actions.open', {
-        defaultValue: 'Open sidebar'
+      onClick={() => dispatch({ op: 'show' })}
+      aria-label={t('chat.input.actions.openSidePanel', {
+        defaultValue: 'Open the side panel'
       })}
       className={cn(BOX, 'rounded-full hover:text-foreground')}
     >

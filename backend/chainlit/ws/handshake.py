@@ -52,6 +52,7 @@ from chainlit.protocol.server import (
 )
 from chainlit.ws.registry import Claim, ClaimOutcome, SessionRegistry
 from chainlit.ws.session import Session, TranscriptEntry
+from chainlit.ws.sidebar import state_frame
 
 __all__ = [
     "Arrival",
@@ -211,8 +212,9 @@ async def restore(
        holds live and has also written down must not go twice;
     3. the buttons before the form -- a form that arrives first is a form
        with no buttons;
-    4. the form last, carrying what is *left* of its deadline, never a
-       fresh one.
+    4. the form, carrying what is *left* of its deadline, never a fresh one;
+    5. the element panel, whole, with the elements it names ahead of it --
+       nothing else in the replay mentions them.
 
     Nothing here deletes. The steps a resume takes away are hidden by
     ``controllers.project.hide_resume_deleted`` before the snapshot is
@@ -289,6 +291,26 @@ async def restore(
                 ),
             )
         )
+
+    # The element panel, after the form and before the spinner: it is the
+    # last piece of *screen*, and it is sent whatever it holds. An empty,
+    # hidden panel is still stated -- the frame is idempotent, and a client
+    # that reloaded in the middle of a preview needs to be told the panel is
+    # not there any more rather than left showing its own last guess.
+    #
+    # The elements go first, by id, because the frame names them and nothing
+    # else will: elements of the panel never enter the transcript (they are
+    # sent with an empty ``forId``), so the replay above has not mentioned
+    # them. Deduplicated across slots for the same reason the transcript's
+    # attachments are -- one element can be in two tabs.
+    sent_slot_elements: Set[str] = set()
+    for slot in session.sidebar.slots:
+        for element in slot.elements:
+            if element.id in sent_slot_elements:
+                continue
+            sent_slot_elements.add(element.id)
+            session.send(ElementUpsert(element=element))
+    session.send(state_frame(session.sidebar))
 
     # Level-triggered, and last: the client's spinner is a boolean, and the
     # only honest value for it is the one that is true once everything else

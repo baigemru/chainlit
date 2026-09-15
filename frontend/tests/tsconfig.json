@@ -1,7 +1,17 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "types": ["jest", "testing-library__jest-dom"]
+    "types": ["jest", "testing-library__jest-dom"],
+    // `paths` in a child replaces the parent's rather than adding to it, so
+    // the two inherited entries are restated. The third is for
+    // `elementSidebarFrame.spec.tsx`, which imports `libs/react-client/src`
+    // (see `vitest.config.ts` for why) and whose sources address each other
+    // as `src/...` through that package's own tsconfig.
+    "paths": {
+      "client-types/*": ["../../libs/react-client/dist"],
+      "@/*": ["../src/*"],
+      "src/*": ["../../libs/react-client/src/*"]
+    }
   },
   "include": ["**/*.spec.tsx"]
 }

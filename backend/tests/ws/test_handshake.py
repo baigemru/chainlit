@@ -17,7 +17,12 @@ from typing import Any, List, Optional, Sequence
 
 from chainlit.protocol.codec import encode_server
 from chainlit.protocol.payloads import AskActionSpec, Step as StepPayload, TextElement
-from chainlit.protocol.server import AskStart, StepUpsert
+from chainlit.protocol.server import (
+    AskStart,
+    ElementUpsert,
+    SidebarState,
+    StepUpsert,
+)
 from chainlit.ws.handshake import arrive, restore
 from chainlit.ws.registry import ClaimOutcome, SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
@@ -351,6 +356,75 @@ async def test_the_spinner_is_the_last_thing_said() -> None:
     await restore(session)
 
     assert tags(session)[-1] == "task.indicator"
+
+
+# ----------------------------------------------------------- the panel
+
+
+async def test_the_panel_is_replayed_with_its_elements_ahead_of_it() -> None:
+    """Nothing else in the replay mentions them.
+
+    Elements of the panel go out with an empty ``forId`` and never enter the
+    transcript, so the step replay above has said nothing about them -- and
+    the state frame names them by id only. If the upserts did not go first
+    the client would be handed a panel full of ids it has never seen.
+    """
+    session = make("s1")
+    session.sidebar.set_slot(
+        "cards", [TextElement(id="e1", name="a"), TextElement(id="e2", name="b")]
+    )
+    session.sidebar.set_slot("report", [TextElement(id="e3", name="c")])
+    session.sidebar.show()
+
+    await restore(session)
+
+    ordered = tags(session)
+    assert [f.element.id for f in queued(session, ElementUpsert)] == ["e1", "e2", "e3"]
+    assert ordered.index("element.upsert") < ordered.index("sidebar.state")
+
+    [frame] = queued(session, SidebarState)
+    assert {slot.id: list(slot.element_ids) for slot in frame.slots} == {
+        "cards": ["e1", "e2"],
+        "report": ["e3"],
+    }
+    assert frame.active == "report"
+    assert frame.visible is True
+
+
+async def test_an_element_in_two_slots_is_replayed_once() -> None:
+    session = make("s1")
+    shared = TextElement(id="e1", name="a")
+    session.sidebar.set_slot("left", [shared])
+    session.sidebar.set_slot("right", [shared])
+
+    await restore(session)
+
+    assert [f.element.id for f in queued(session, ElementUpsert)] == ["e1"]
+
+
+async def test_a_panel_the_user_put_away_comes_back_put_away() -> None:
+    """A reload is not a reason to reopen something they closed."""
+    session = make("s1")
+    session.sidebar.set_slot("cards", [TextElement(id="e1", name="a")])
+    session.sidebar.hide()
+
+    await restore(session)
+
+    [frame] = queued(session, SidebarState)
+    assert frame.visible is False
+    assert [slot.id for slot in frame.slots] == ["cards"]
+
+
+async def test_an_empty_panel_is_stated_anyway() -> None:
+    """The frame is idempotent, and a client that reloaded mid-preview is
+    otherwise left showing its own last guess."""
+    session = make("s1")
+
+    await restore(session)
+
+    [frame] = queued(session, SidebarState)
+    assert frame.slots == []
+    assert frame.visible is False
 
 
 # ------------------------------------------------------ the persisted half

@@ -1272,3 +1272,113 @@ async def test_live_new_chat_gives_the_conversation_up(
             assert ready["threadId"] == THREAD
             assert ready["sessionId"] != handle
             assert held(registry).id == ready["sessionId"]
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: the element panel across a reload
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_reload_gets_the_element_panel_back(ws_impl: str) -> None:
+    """F5 over a socket that really closed, with a panel open.
+
+    The case the model exists for. The panel used to be the last frame the
+    server had sent about it: nothing on the server to replay, nothing in
+    ``restore`` that sent it, and a reload came back to an empty side view
+    whatever had been in it. Here the browser's connection goes, the handler
+    unwinds for real, and the reload is handed the panel whole -- the
+    elements first, because they are named by id and nothing else in the
+    replay mentions them.
+
+    Then the user hides it and reloads again: hiding is not closing, and the
+    second reload has to come back with the contents still there and the
+    panel still put away.
+    """
+    handler, _middleware, registry = build()
+
+    async with live_server(Litestar([handler]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url) as first:
+            await open_live(first, pageLoad=True, threadId=THREAD)
+            session = await wait_for_session(registry)
+            _stage_open_panel(session)
+
+        await asyncio.sleep(0.2)
+        assert session.connected is False
+
+        async with connect(url) as second:
+            await second.send(hello(pageLoad=True, threadId=THREAD))
+            replay = await read_live(second, "task.indicator")
+
+            panel = [f for f in replay if f["t"] == "sidebar.state"]
+            assert len(panel) == 1, [f["t"] for f in replay]
+            [frame] = panel
+            assert {slot["id"]: slot["elementIds"] for slot in frame["slots"]} == {
+                "cards": ["e1"],
+                "report": ["e2"],
+            }
+            assert frame["visible"] is True
+            assert frame["active"] == "report"
+
+            # Ahead of the frame that names them, on the one FIFO queue.
+            upserts = [f for f in replay if f["t"] == "element.upsert"]
+            assert [f["element"]["id"] for f in upserts] == ["e1", "e2"]
+            assert replay.index(upserts[-1]) < replay.index(frame)
+
+            # A scalar the client has already applied, quoting the revision
+            # it was just shown: no answer at all.
+            await second.send(
+                json.dumps({"t": "sidebar.user", "op": "hide", "rev": frame["rev"]})
+            )
+            await second.send(json.dumps({"t": "no.such.tag"}))
+            answered = await read_live(second, "error")
+            assert "sidebar.state" not in [f["t"] for f in answered]
+
+            # And the same operation quoting a revision the panel has left
+            # behind is answered with the whole state, because nothing else
+            # would ever correct it.
+            await second.send(json.dumps({"t": "sidebar.user", "op": "show", "rev": 0}))
+            echoed = await read_live(second, "sidebar.state")
+            assert echoed[-1]["visible"] is True
+            await second.send(
+                json.dumps(
+                    {
+                        "t": "sidebar.user",
+                        "op": "hide",
+                        "rev": echoed[-1]["rev"],
+                    }
+                )
+            )
+            await second.send(json.dumps({"t": "no.such.tag"}))
+            assert "sidebar.state" not in [
+                f["t"] for f in await read_live(second, "error")
+            ]
+
+        await asyncio.sleep(0.2)
+        assert session.sidebar.visible is False
+
+        async with connect(url) as third:
+            await third.send(hello(pageLoad=True, threadId=THREAD))
+            replay = await read_live(third, "task.indicator")
+
+        [frame] = [f for f in replay if f["t"] == "sidebar.state"]
+        # Hidden, and still holding everything: the whole difference between
+        # this panel and the one that was destroyed by being closed.
+        assert frame.get("visible", False) is False
+        assert [slot["id"] for slot in frame["slots"]] == ["cards", "report"]
+
+
+def _stage_open_panel(session: Session) -> None:
+    """Two tabs in the panel, stated directly.
+
+    There is no application behind this handler -- ``build`` makes sessions
+    by hand -- so the model an ``await cl.Sidebar.set_slot(...)`` would have
+    left is written down instead. The elements are payloads either way:
+    what the panel holds is what the client was sent.
+    """
+    from chainlit.protocol.payloads import TextElement
+
+    session.sidebar.set_slot("cards", [TextElement(id="e1", name="shortlist")])
+    session.sidebar.set_slot("report", [TextElement(id="e2", name="report")])
+    session.sidebar.show()

@@ -286,22 +286,28 @@ export interface SessionReady {
   heartbeatIntervalMs?: number;
 }
 
-export interface SidebarSet {
-  t: 'sidebar.set';
-  title?: string | null;
-  elements?: (
-    | ImageElement
-    | TextElement
-    | PdfElement
-    | AudioElement
-    | VideoElement
-    | FileElement
-    | PlotlyElement
-    | DataframeElement
-    | CustomElement
-    | TasklistElement
-  )[];
-  key?: string | null;
+export interface SidebarSlotRef {
+  id: string;
+  title?: string;
+  elementIds?: string[];
+  closable?: boolean;
+  canvas?: boolean;
+}
+
+export interface SidebarState {
+  t: 'sidebar.state';
+  slots?: SidebarSlotRef[];
+  active?: string | null;
+  visible?: boolean;
+  rev?: number;
+}
+
+export interface SidebarUser {
+  t: 'sidebar.user';
+  op: 'activate' | 'close' | 'hide' | 'preview' | 'show';
+  slot?: string | null;
+  elementId?: string | null;
+  rev?: number;
 }
 
 export interface Step {
@@ -543,7 +549,7 @@ export type ServerMsg =
   | ThreadParent
   | ThreadOpen
   | SessionHandoff
-  | SidebarSet
+  | SidebarState
   | Toast;
 
 export type ServerMsgTag =
@@ -568,7 +574,7 @@ export type ServerMsgTag =
   | 'thread.parent'
   | 'thread.open'
   | 'session.handoff'
-  | 'sidebar.set'
+  | 'sidebar.state'
   | 'toast';
 
 /** Exhaustive handler table: omitting a message is a compile error. */
@@ -582,7 +588,8 @@ export type ClientMsg =
   | SessionClear
   | Stop
   | MessageSend
-  | AskReply;
+  | AskReply
+  | SidebarUser;
 
 export type ClientMsgTag =
   | 'hello'
@@ -590,7 +597,8 @@ export type ClientMsgTag =
   | 'session.clear'
   | 'stop'
   | 'message.send'
-  | 'ask.reply';
+  | 'ask.reply'
+  | 'sidebar.user';
 
 /** Exhaustive handler table: omitting a message is a compile error. */
 export type ClientMsgHandlers = {

@@ -11,12 +11,12 @@ from __future__ import annotations
 from typing import Any, Literal, Union, get_args
 
 import msgspec
-from msgspec import UNSET, UnsetType
 
 from chainlit.protocol.payloads import (
     Action,
     AskSpec,
     Element,
+    SidebarSlotRef,
     Step,
     StepPatch,
     Thread,
@@ -38,7 +38,7 @@ __all__ = [
     "ServerMsg",
     "SessionHandoff",
     "SessionReady",
-    "SidebarSet",
+    "SidebarState",
     "StepDelete",
     "StepStreamStart",
     "StepStreamToken",
@@ -265,24 +265,33 @@ class SessionHandoff(_Msg, tag="session.handoff"):
     has_transit_message: bool = False
 
 
-class SidebarSet(_Msg, tag="sidebar.set"):
-    """Title and contents of the element sidebar in one message.
+class SidebarState(_Msg, tag="sidebar.state"):
+    """The element panel, whole, as the session holds it.
 
-    Collapses ``set_sidebar_title`` and ``set_sidebar_elements``, which the
-    client had to reconcile into a single ``sideView`` atom — each event
-    reading the other's half out of the previous state.
+    Replaces ``sidebar.set``, which was not a state at all but the last
+    thing anybody said about the panel: one slot, no way to ask for it
+    back once the user closed it, and a ``key`` whose only power was to
+    forbid updates. The panel is now ``session.sidebar`` and this frame is
+    a projection of it, so it is idempotent, states every field, and is
+    safe to send again on a reconnect or after a refused operation.
 
-    An *absent* field means "leave it alone"; an explicit ``null`` on
-    ``title`` or ``key`` clears it. The two are different instructions and
-    a ``None`` default could not express the second: ``omit_defaults``
-    would drop it from the frame, so the client could never be told to
-    clear a title it is already showing. ``elements`` has no null form —
-    an empty list already closes the sidebar.
+    Full rather than partial for the reason ``thread.resume`` is: a client
+    that has just reconnected does not know what it missed, and "replace
+    everything" is the one reducer with no edge cases.
     """
 
-    title: Union[str, UnsetType, None] = UNSET
-    elements: Union[list[Element], UnsetType] = UNSET
-    key: Union[str, UnsetType, None] = UNSET
+    slots: list[SidebarSlotRef] = []
+    #: The tab on screen. ``None`` only while there are no slots.
+    active: str | None = None
+    #: ``False`` means the contents are still here and the panel is put
+    #: away -- the distinction the old wire could not draw, which is why
+    #: closing the panel used to destroy what was in it.
+    visible: bool = False
+    #: Which revision of the panel this is. The client quotes it back in
+    #: ``sidebar.user`` so the server can tell an operation made against
+    #: what is on screen from one made against a screen a frame already in
+    #: flight has replaced. Monotonic per session, never reset.
+    rev: int = 0
 
 
 # --------------------------------------------------------------------------
@@ -317,7 +326,7 @@ ServerMsg = Union[
     ThreadParent,
     ThreadOpen,
     SessionHandoff,
-    SidebarSet,
+    SidebarState,
     Toast,
 ]
 

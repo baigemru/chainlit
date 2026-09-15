@@ -76,7 +76,8 @@
         "send": "Send message",
         "stop": "Stop Task",
         "attachFiles": "Attach files",
-        "openParentThread": "Back to the original chat"
+        "openParentThread": "Back to the original chat",
+        "openSidePanel": "Open the side panel"
       }
     },
     "favorites": {

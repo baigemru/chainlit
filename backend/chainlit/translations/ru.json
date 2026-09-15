@@ -76,7 +76,8 @@
         "send": "Отправить сообщение",
         "stop": "Остановить задачу",
         "attachFiles": "Прикрепить файлы",
-        "openParentThread": "Вернуться в исходный чат"
+        "openParentThread": "Вернуться в исходный чат",
+        "openSidePanel": "Открыть боковую панель"
       }
     },
     "favorites": {

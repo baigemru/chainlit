@@ -57,6 +57,7 @@ from chainlit.protocol.payloads import (
     Step as StepPayload,
 )
 from chainlit.ws.outbound import Outbound
+from chainlit.ws.sidebar import SidebarState
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from chainlit.protocol.server import ServerMsg
@@ -253,6 +254,12 @@ class Session:
         self.thread_ready_task: Optional["asyncio.Task[Any]"] = None
 
         self.transcript: List[TranscriptEntry] = []
+
+        #: The element panel, next to the transcript because it is the same
+        #: kind of thing: state the client is a projection of, rebuilt on
+        #: every reconnect. It used to be the last frame anybody sent, which
+        #: is why closing the panel destroyed what was in it.
+        self.sidebar = SidebarState()
 
         self.files: Dict[str, Dict[str, Any]] = {}
         self.files_spec: Dict[str, Any] = {}

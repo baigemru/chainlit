@@ -14,6 +14,10 @@ import {
 const mockUseConfig = vi.fn();
 
 vi.mock('@chainlit/react-client', () => ({
+  // `hooks/use-mobile` reads the breakpoint from the package, so that the
+  // layout and the element panel's mobile rule cannot drift apart. A mock
+  // of the whole module has to carry it.
+  MOBILE_BREAKPOINT: 768,
   useChatSession: () => ({ chatProfile: undefined }),
   useConfig: () => mockUseConfig()
 }));

@@ -18,14 +18,17 @@ time a PDF was opened beside it.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import List, Optional, Sequence
 
 import msgspec
 
+# Aliased: ``set_slot(persist=...)`` is a public keyword and would shadow it.
+from chainlit import persist as persistence
 from chainlit.context import context
 from chainlit.element import ElementBased
 from chainlit.protocol.payloads import Element as ElementPayload
-from chainlit.ws.sidebar import PREVIEW_SLOT, SidebarState, orphaned
+from chainlit.ws.sidebar import PREVIEW_SLOT, SidebarState, release
 
 __all__ = ["Sidebar", "SidebarState"]
 
@@ -47,6 +50,7 @@ class Sidebar:
         activate: bool = True,
         closable: bool = True,
         canvas: bool = False,
+        persist: bool = True,
     ) -> None:
         """Put ``elements`` in the slot ``id``, creating it if it is new.
 
@@ -74,8 +78,26 @@ class Sidebar:
         click in the feed, and an application writing into it would erase
         what they were looking at -- and be erased by their next click.
 
+        ``persist`` decides whether the slot's contents are *rows*. They are
+        by default, written with ``forId NULL``, which is how the panel comes
+        back after the last tab on this conversation was closed a day ago --
+        restoring it is the engine's job, not a recipe the application keeps
+        and replays in ``on_chat_resume``. ``persist=False`` is for content
+        that is not worth a row: a loader, a progress card, anything the next
+        call replaces anyway.
+
+        A persisted element needs a **uuid** for an id, because ``elements.id``
+        is a ``uuid`` column, and it is refused here rather than in the writer
+        -- whatever the deployment, database or not. A rule that fires only
+        where somebody configured PostgreSQL is a rule nobody meets until
+        production. Stable ids are what replacement by identity needs, so mint
+        them with ``uuid5``::
+
+            uuid.uuid5(uuid.NAMESPACE_URL, f"cards:{thread_id}")
+
         Raises:
-            ValueError: ``id`` is the reserved preview address.
+            ValueError: ``id`` is the reserved preview address, or a persisted
+                element's id is not a uuid.
         """
         _refuse_preview(id)
         session = context.session
@@ -85,14 +107,23 @@ class Sidebar:
             await Sidebar.close_slot(id)
             return
 
+        if persist:
+            _refuse_unwritable(elements)
+
         # Sent first, and before the model is touched: ``send`` is what mints
         # the element's key and url, so ``to_dict()`` is only the truth
-        # afterwards. ``persist=False`` with an empty ``forId`` keeps them out
-        # of the transcript -- the panel is their home, and a step they were
-        # never attached to must not replay them.
+        # afterwards. An element that already hangs off a step keeps that
+        # step: putting a feed element in a tab must not detach its row from
+        # the message it came from. One that hangs off nothing is the panel's
+        # own, and ``None`` is the persisted spelling of "no step" -- ``forId``
+        # is a uuid column and ``""`` does not parse as one; ``""`` stays the
+        # throw-away spelling so a ``persist=False`` element is unchanged.
         await asyncio.gather(
             *(
-                element.send(for_id=element.for_id or "", persist=False)
+                element.send(
+                    for_id=element.for_id or (None if persist else ""),
+                    persist=persist,
+                )
                 for element in elements
             )
         )
@@ -112,7 +143,8 @@ class Sidebar:
             closable=closable,
             canvas=canvas,
         )
-        _release(dropped)
+        release(session, dropped)
+        persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
     @staticmethod
@@ -124,7 +156,8 @@ class Sidebar:
         """
         _refuse_preview(id)
         session = context.session
-        _release(session.sidebar.close_slot(id))
+        release(session, session.sidebar.close_slot(id))
+        persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
     @staticmethod
@@ -148,7 +181,9 @@ class Sidebar:
     @staticmethod
     async def clear() -> None:
         """Close every slot."""
-        _release(context.session.sidebar.clear())
+        session = context.session
+        release(session, session.sidebar.clear())
+        persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
     @staticmethod
@@ -166,15 +201,22 @@ def _refuse_preview(slot_id: str) -> None:
         )
 
 
-def _release(element_ids: Sequence[str]) -> None:
-    """Take the panel's own leavings off the client, and nothing else.
+def _refuse_unwritable(elements: Sequence[ElementBased]) -> None:
+    """Refuse a persisted element whose id no ``elements`` row could carry.
 
-    ``orphaned`` is the gate: an element still in another slot, or hanging
-    off a step in the transcript, belongs to something that is still showing
-    it. A ``preview`` slot holds an element of the *feed*, and removing that
-    because the tab went away would blank the attachment in the message it
-    came from.
+    At the call site, before a frame or a row goes anywhere. The writer would
+    otherwise take the id as far as ``to_uuid``, fail the batch, retry it op
+    by op and drop this one with a warning in a log nobody is reading -- and
+    only where a database is configured, so the application author would meet
+    it first in production.
     """
-    session = context.session
-    for element_id in orphaned(session, element_ids):
-        context.emitter.remove_element(element_id)
+    for element in elements:
+        try:
+            uuid.UUID(str(element.id))
+        except ValueError, AttributeError, TypeError:
+            raise ValueError(
+                f"{element.id!r} is not a uuid, and a slot's elements are "
+                f"rows: elements.id is a uuid column. Mint a stable one with "
+                f"uuid.uuid5(uuid.NAMESPACE_URL, ...), or pass persist=False "
+                f"for content that is not worth a row."
+            ) from None

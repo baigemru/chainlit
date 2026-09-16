@@ -14,8 +14,9 @@ the user's row id before it can attribute the thread, and says so.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Union
 
 import msgspec
 
@@ -30,6 +31,7 @@ from chainlit.persistence.writer import (
     SaveStep,
     SessionWriter,
 )
+from chainlit.ws.sidebar import SIDEBAR_META_KEY, sidebar_meta
 
 if TYPE_CHECKING:
     from chainlit.ws.session import Session
@@ -37,7 +39,9 @@ if TYPE_CHECKING:
 __all__ = [
     "delete_element",
     "delete_step",
+    "drop_elements",
     "open_thread",
+    "patch_sidebar",
     "save_element",
     "save_step",
     "writer_of",
@@ -47,7 +51,16 @@ __all__ = [
 # hand-off between two sessions and would resurrect on every resume; the
 # rest are mirrors of the session the accessor keeps for the app's
 # convenience, and the conversation log, which is the steps table's job.
-_VOLATILE_STATE = frozenset({"transit_message", "__chat_messages", "id", "user", "env"})
+#
+# ``__sidebar`` is here for the opposite reason: it is the thread's, not the
+# application's, and an app writing that key into ``user_session`` must not
+# be able to shadow the panel's own record. The other half of the rule is
+# the exclusion tuple in ``runner._resume``, which keeps the stored value
+# from coming back out into ``session.state`` -- two lists, and they have to
+# agree.
+_VOLATILE_STATE = frozenset(
+    {"transit_message", "__chat_messages", "id", "user", "env", SIDEBAR_META_KEY}
+)
 
 
 def writer_of(session: Optional["Session"] = None) -> Optional[SessionWriter]:
@@ -133,6 +146,56 @@ def delete_element(element_id: str, thread_id: Optional[str] = None) -> None:
         writer.submit(DeleteElement(element_id, thread_id))
 
 
+def drop_elements(session: "Session", element_ids: Sequence[str]) -> None:
+    """Delete the rows of elements nothing in the session is showing any more.
+
+    The panel's half of ``element.remove``: a card taken off the screen whose
+    row survives is a card the next cold resume puts back.
+
+    An id that is not a uuid is skipped rather than submitted. A slot filled
+    with ``persist=False`` accepts any id the application likes, no such
+    element ever reached the ``elements`` table, and a ``DeleteElement``
+    carrying one would fail ``to_uuid`` inside the transaction and take every
+    innocent write in the batch with it.
+    """
+    writer = writer_of(session)
+    if writer is None:
+        return
+    for element_id in element_ids:
+        try:
+            uuid.UUID(element_id)
+        except ValueError, AttributeError, TypeError:
+            continue
+        writer.submit(DeleteElement(element_id, session.thread_id))
+
+
+def patch_sidebar(session: "Session") -> None:
+    """Write down what the element panel is, as one metadata patch.
+
+    Submitted *after* the element rows and deletes of the same mutation, so
+    the queue orders them: a stored frame naming an element whose row is
+    still behind it would rebuild a panel with a hole in it for as long as
+    the writer takes to catch up.
+
+    Only structural moves reach here -- filling a slot, closing one, clearing
+    the panel, and the user closing a tab. ``hide``, ``show`` and ``activate``
+    do not: a click must not cost a database write, and a ``visible`` lost to
+    a crash costs the user one chevron.
+
+    The patch merges by key, so naming ``__sidebar`` alone is enough and the
+    rest of the thread's metadata is left where it is.
+    """
+    writer = writer_of(session)
+    if writer is None or not session.thread_id:
+        return
+    writer.submit(
+        PatchThread(
+            session.thread_id,
+            ThreadPatch(metadata={SIDEBAR_META_KEY: sidebar_meta(session.sidebar)}),
+        )
+    )
+
+
 async def open_thread(session: "Session", name: str, *, announce: bool = True) -> None:
     """The thread's first interaction: name the row, then release the writes.
 
@@ -189,6 +252,13 @@ def thread_state(session: "Session") -> dict[str, Any]:
     state["client_type"] = session.client_type
     state["device"] = session.device
     state["env"] = dict(session.user_env) if config.project.persist_user_env else {}
+    # After the filter rather than through it, so the panel's own record
+    # wins over an application key of the same name. Every existing
+    # ``PatchThread`` site carries it from here -- the ``open_thread``
+    # prelude, the disconnect, the release -- which is what makes the
+    # immediate patches of ``patch_sidebar`` insurance rather than the only
+    # record.
+    state[SIDEBAR_META_KEY] = sidebar_meta(session.sidebar)
     return _jsonable(state)
 
 

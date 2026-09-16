@@ -372,6 +372,56 @@ class Session:
         """Queue one frame for this session's client."""
         return self.outbound.send(msg)
 
+    # -------------------------------------------------------------- elements
+
+    def remember_element(self, payload: Element) -> None:
+        """Replace this session's copy of an element wherever it is held.
+
+        The one seam every write of an element goes through, and it exists
+        because there are two places holding one: the transcript entry it
+        hangs off, and any panel slot showing it. Both are replayed on a
+        reconnect, and until this they were only ever written once -- so a
+        custom element that saved new props (``PUT /project/element``, or a
+        second ``send``) got them into the database and nowhere else, and
+        the next reload replayed the props the user had already changed.
+
+        Deliberately not an attach: an element nothing holds is not added
+        to anything. Where a *new* element belongs is decided by ``forId``,
+        which is ``Emitter.send_element``'s business; it calls this after
+        attaching.
+        """
+        for entry in self.transcript:
+            entry.elements[:] = [
+                payload if element.id == payload.id else element
+                for element in entry.elements
+            ]
+        for slot in self.sidebar.slots:
+            slot.elements[:] = [
+                payload if element.id == payload.id else element
+                for element in slot.elements
+            ]
+
+    def holds_element(self, element_id: str) -> bool:
+        """Whether this conversation is showing the element with that id.
+
+        What the element route asks when the database has no row yet: a
+        panel element is queued through the writer and may not be filed for
+        a while, and a write refused in that window is a card that silently
+        stops saving. Holding it is the authority -- the session sent it,
+        and the caller has already been proven to own the session.
+        """
+        if not element_id:
+            return False
+        return any(
+            element.id == element_id
+            for entry in self.transcript
+            for element in entry.elements
+        ) or any(
+            element.id == element_id
+            for slot in self.sidebar.slots
+            for element in slot.elements
+        )
+
     # --------------------------------------------------------------- the app
 
     async def call_action(self, action: Mapping[str, Any]) -> Any:

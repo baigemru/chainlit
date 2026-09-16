@@ -299,9 +299,9 @@ async def restore(
     # not there any more rather than left showing its own last guess.
     #
     # The elements go first, by id, because the frame names them and nothing
-    # else will: elements of the panel never enter the transcript (they are
-    # sent with an empty ``forId``), so the replay above has not mentioned
-    # them. Deduplicated across slots for the same reason the transcript's
+    # else will: elements of the panel never enter the transcript (they hang
+    # off no step, so their ``forId`` is absent), so the replay above has not
+    # mentioned them. Deduplicated across slots for the same reason the transcript's
     # attachments are -- one element can be in two tabs.
     sent_slot_elements: Set[str] = set()
     for slot in session.sidebar.slots:

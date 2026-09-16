@@ -19,10 +19,11 @@ nothing here knows an application exists.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence
 
 import msgspec
 
+from chainlit.logger import logger
 from chainlit.protocol.payloads import Element, SidebarSlotRef
 from chainlit.protocol.server import (
     ElementRemove,
@@ -36,11 +37,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "PREVIEW_SLOT",
+    "SIDEBAR_META_KEY",
     "SidebarSlot",
     "SidebarState",
     "apply_user_op",
     "orphaned",
+    "release",
+    "sidebar_meta",
     "state_frame",
+    "state_from_meta",
 ]
 
 PREVIEW_SLOT = "preview"
@@ -49,6 +54,15 @@ PREVIEW_SLOT = "preview"
 One address, not one per element: a preview is "show me this, now", and a
 second click replaces the first rather than growing a row of tabs nobody
 asked for.
+"""
+
+SIDEBAR_META_KEY = "__sidebar"
+"""Where the thread row remembers its panel.
+
+Dunder-prefixed because it shares a dict with whatever the application put
+in ``user_session``, and because it must never come back out into one: it is
+filtered on the way out by ``persist._VOLATILE_STATE`` and on the way in by
+the exclusion tuple in ``runner._resume``.
 """
 
 
@@ -257,6 +271,87 @@ def state_frame(sidebar: SidebarState) -> SidebarStateFrame:
     )
 
 
+def sidebar_meta(sidebar: SidebarState) -> Dict[str, Any]:
+    """The panel as the thread row remembers it: the wire frame, less two things.
+
+    One shape in both directions -- ``state_from_meta`` reads this back with
+    ``msgspec.convert`` -- so there is no second schema to keep honest, and
+    element *ids* only, never props: the rows are the props, and a copy of
+    them here would be a second truth that goes stale on the first
+    ``updateElement``.
+
+    What is dropped is dropped because it belongs to a session, not to a
+    thread:
+
+    * ``rev`` counts one session's mutations and starts again at 0 in the
+      next one; stored, it would make the first click on a resumed panel
+      look stale to ``apply_user_op`` and be answered with a redraw;
+    * the ``preview`` slot holds whatever the user last clicked in the feed
+      -- an element of the transcript, which the resume replays anyway --
+      and reopening that tab a day later is not resuming a conversation.
+    """
+    frame = msgspec.to_builtins(state_frame(sidebar))
+    frame.pop("rev", None)
+    if "slots" in frame:
+        frame["slots"] = [
+            slot for slot in frame["slots"] if slot.get("id") != PREVIEW_SLOT
+        ]
+    return frame
+
+
+def state_from_meta(
+    meta: Optional[Mapping[str, Any]], elements: Sequence[Element]
+) -> SidebarState:
+    """The panel a cold resume rebuilds, out of what was written down.
+
+    Neither half is a panel on its own: the meta says which tabs there were
+    and what was in each, the rows carry the elements. So a slot keeps only
+    the ids it has a row for and an empty slot is dropped -- a tab whose
+    contents did not survive is a promise of content that is not coming --
+    and a row nothing names is *ignored* rather than shown, which is what
+    keeps a ``forId NULL`` row written before this feature out of a panel it
+    never belonged to.
+
+    ``rev`` starts at 0, like any other new session's: the client is told
+    the whole state in the replay before it may quote a revision back.
+
+    A record that does not parse is an empty panel and a warning, not an
+    error: it would have surfaced inside the handshake, and a thread that
+    cannot be resumed because of a hand-edited row is a worse outcome than a
+    thread that comes back without its tabs.
+    """
+    if not meta:
+        return SidebarState()
+    try:
+        frame = msgspec.convert(dict(meta), SidebarStateFrame)
+    except msgspec.ValidationError, TypeError, ValueError:
+        logger.warning("Ignoring an element-panel record that does not parse: %r", meta)
+        return SidebarState()
+    by_id = {element.id: element for element in elements}
+    slots: List[SidebarSlot] = []
+    for ref in frame.slots:
+        held = [
+            by_id[element_id] for element_id in ref.element_ids if element_id in by_id
+        ]
+        if not held:
+            continue
+        slots.append(
+            SidebarSlot(
+                id=ref.id,
+                title=ref.title,
+                elements=held,
+                closable=ref.closable,
+                canvas=ref.canvas,
+            )
+        )
+    state = SidebarState(slots=slots, active=frame.active, visible=frame.visible)
+    # The stored ``active`` may name a slot that did not come back -- the
+    # preview tab is never stored at all -- and a tab strip pointing at
+    # nothing renders nothing.
+    state._settle_active()
+    return state
+
+
 def apply_user_op(session: "Session", message: "SidebarUser") -> bool:
     """Apply one inbound panel operation, and say whether to answer with state.
 
@@ -298,8 +393,11 @@ def apply_user_op(session: "Session", message: "SidebarUser") -> bool:
         slot = sidebar.slot(message.slot or "")
         if slot is None or not slot.closable:
             return True
-        for element_id in orphaned(session, sidebar.close_slot(slot.id)):
-            session.send(ElementRemove(id=element_id))
+        release(session, sidebar.close_slot(slot.id))
+        # A tab the user closed is a tab that must not be back tomorrow, so
+        # this one move of theirs is written down -- after the deletes above,
+        # which is what the queue's order is for.
+        _persist().patch_sidebar(session)
         return True
 
     element = _find_element(session, message.element_id or "")
@@ -314,8 +412,9 @@ def apply_user_op(session: "Session", message: "SidebarUser") -> bool:
     # Through the same gate as ``close``: what a second preview displaces is
     # usually a feed element the panel was only borrowing, and taking that
     # off the client would blank the attachment in the message it hangs off.
-    for element_id in orphaned(session, replaced):
-        session.send(ElementRemove(id=element_id))
+    # No metadata patch follows: the preview slot is not part of what the
+    # thread remembers, so this move changes nothing that is written down.
+    release(session, replaced)
     sidebar.show()
     # Ahead of the state frame, which names the element by id only. The
     # server keeps no model of what the client is holding -- the click
@@ -323,6 +422,38 @@ def apply_user_op(session: "Session", message: "SidebarUser") -> bool:
     # frame and a dangling id is a hole in the panel.
     session.send(ElementUpsert(element=element))
     return True
+
+
+def release(session: "Session", element_ids: Sequence[str]) -> None:
+    """Let go of the panel's leavings -- off the client and out of the table.
+
+    Both halves or neither, and ``orphaned`` decides which ids get them. An
+    element taken off the screen whose row survives is a card that comes back
+    by itself on the next cold resume; a row deleted while a step still shows
+    the element is a blank attachment in the middle of the feed. So an id
+    still in another slot, or hanging off a step in the transcript, is left
+    entirely alone -- what goes is only what the panel minted and nothing is
+    showing any more.
+    """
+    gone = orphaned(session, element_ids)
+    for element_id in gone:
+        session.send(ElementRemove(id=element_id))
+    _persist().drop_elements(session, gone)
+
+
+def _persist() -> Any:
+    """``chainlit.persist``, fetched at the call rather than at import.
+
+    Imported late on purpose: ``chainlit.persist`` reaches for
+    ``chainlit.context``, and this package is the half that must be able to
+    hold a conversation with no application in it at all -- a module-level
+    import here would pull the application's context variable into every
+    ``import chainlit.ws.session``. The session is passed explicitly for the
+    same reason: nothing here reads the current context.
+    """
+    from chainlit import persist
+
+    return persist
 
 
 def orphaned(session: "Session", element_ids: Sequence[str]) -> List[str]:
@@ -349,8 +480,9 @@ def _find_element(session: "Session", element_id: str) -> Optional[Element]:
     ``ApplicationRunner._resume`` fills ``session.transcript`` from the
     stored thread before the screen is rebuilt, so a stored element hanging
     off a stored message is here like any other. Then the panel's own
-    elements, which never enter the transcript (they go out with an empty
-    ``forId``). Nothing else is consulted: an id that is in neither is an id
+    elements, which never enter the transcript: they hang off no step, and
+    go out -- and are written -- with no ``forId`` at all. Nothing else is
+    consulted: an id that is in neither is an id
     this conversation never showed, and answering it would let a browser ask
     the database questions through the panel.
     """

@@ -111,3 +111,80 @@ class TestHoldsElement:
         session.transcript.append(entry("s1", element("")))
 
         assert not session.holds_element("")
+
+
+class TestFindElement:
+    def test_the_transcript_is_asked_first(self, session) -> None:
+        session.transcript.append(entry("s1", element("e1", props={"where": "feed"})))
+        session.sidebar.slots.append(
+            SidebarSlot(id="cards", elements=[element("e1", props={"where": "tab"})])
+        )
+
+        assert session.find_element("e1").props == {"where": "feed"}
+
+    def test_every_id_shown_is_held(self, session) -> None:
+        session.transcript.append(entry("s1", element("e1")))
+        session.sidebar.slots.append(SidebarSlot(id="cards", elements=[element("e2")]))
+
+        assert session.held_element_ids() == {"e1", "e2"}
+
+
+class TestElementWritten:
+    def test_a_feed_element_has_a_row(self, session) -> None:
+        session.transcript.append(entry("s1", element("e1")))
+        assert session.element_written("e1")
+
+    def test_a_persisted_slots_element_has_a_row(self, session) -> None:
+        session.sidebar.slots.append(SidebarSlot(id="cards", elements=[element("e1")]))
+        assert session.element_written("e1")
+
+    def test_a_throwaway_slots_element_has_none(self, session) -> None:
+        """The route must not write one for it: the row would bring a loader
+        back on a cold resume the slot itself never survives."""
+        session.sidebar.slots.append(
+            SidebarSlot(id="loader", elements=[element("e1")], persisted=False)
+        )
+        assert session.holds_element("e1")
+        assert not session.element_written("e1")
+
+
+class TestForgetElement:
+    def test_it_drops_the_copy_hanging_off_a_step(self, session) -> None:
+        session.transcript.append(entry("s1", element("e1"), element("e2")))
+
+        session.forget_element("e1")
+
+        assert [e.id for e in session.transcript[0].elements] == ["e2"]
+
+    def test_it_drops_the_copy_a_slot_is_showing_and_says_so(self, session) -> None:
+        """The panel half: the tab loses the card, the frame goes out, and
+        the record is written down -- a reload and a cold resume must agree
+        about a card the user deleted."""
+        session.sidebar.slots.append(
+            SidebarSlot(id="cards", elements=[element("e1"), element("e2")])
+        )
+        before = session.sidebar.rev
+        start = len(session.outbound.pending_frames)
+
+        session.forget_element("e1")
+
+        assert [e.id for e in session.sidebar.slots[0].elements] == ["e2"]
+        assert session.sidebar.rev > before
+        assert [type(f).__name__ for f in session.outbound.pending_frames[start:]] == [
+            "SidebarState"
+        ]
+
+    def test_a_tab_left_empty_closes(self, session) -> None:
+        session.sidebar.slots.append(SidebarSlot(id="cards", elements=[element("e1")]))
+        session.sidebar.active = "cards"
+        session.sidebar.visible = True
+
+        session.forget_element("e1")
+
+        assert session.sidebar.slots == []
+        assert session.sidebar.visible is False
+
+    def test_an_element_nobody_holds_moves_nothing(self, session) -> None:
+        start = len(session.outbound.pending_frames)
+        session.forget_element("ghost")
+        assert list(session.outbound.pending_frames[start:]) == []

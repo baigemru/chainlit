@@ -350,29 +350,19 @@ class ApplicationRunner:
         all_rows = list(detail.elements)
         detail.elements = [row for row in detail.elements if row.for_id is not None]
 
-        metadata = dict(detail.metadata or {})
-        # Read here and taken out of the thread before the hooks see it: the
-        # record is the panel's, not the application's, and the dict
-        # ``on_chat_resume`` receives is the same one the snapshot is built
-        # from. ``session.state`` filters it again below, for the same reason.
-        stored_panel = metadata.pop(SIDEBAR_META_KEY, None)
-        if detail.metadata:
-            detail.metadata = {
-                k: v for k, v in detail.metadata.items() if k != SIDEBAR_META_KEY
-            }
+        # The engine's half of the metadata is read here and goes no further:
+        # the dict ``on_chat_resume`` receives is the same one the snapshot is
+        # built from, and neither is the place for the panel's record.
+        engine_metadata, metadata = persist.split_engine_metadata(detail.metadata)
+        detail.metadata = metadata
         session.state.update(
             # ``device`` joins the excluded mirrors for the same reason: it
             # describes the connection reading the thread, not the thread. A
             # chat begun on a phone must not label a desktop resume "mobile".
-            # ``__sidebar`` is not a mirror at all -- it is the panel's own
-            # record, read below and never the application's to see. The
-            # other half of that rule is ``persist._VOLATILE_STATE``, which
-            # keeps it from being written *from* here; two lists, and they
-            # have to agree.
             {
                 k: v
                 for k, v in metadata.items()
-                if k not in ("env", "client_type", "device", SIDEBAR_META_KEY)
+                if k not in ("env", "client_type", "device")
             }
         )
         if profile := metadata.get("chat_profile"):
@@ -384,7 +374,7 @@ class ApplicationRunner:
         # rebuilding it from rows would undo whatever the application has
         # done to it since.
         session.sidebar = state_from_meta(
-            stored_panel,
+            engine_metadata.get(SIDEBAR_META_KEY),
             [
                 msgspec.convert(_present(msgspec.to_builtins(row)), Element)
                 for row in all_rows

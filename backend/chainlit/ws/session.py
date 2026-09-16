@@ -45,6 +45,7 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
+    Set,
     Tuple,
     runtime_checkable,
 )
@@ -401,6 +402,37 @@ class Session:
                 for element in slot.elements
             ]
 
+    def find_element(self, element_id: str) -> Optional[Element]:
+        """The element with that id, wherever this conversation is showing it.
+
+        The one walk over the two places an element can be held, and the
+        transcript comes first because it is also the answer for a resumed
+        thread: ``ApplicationRunner._resume`` fills it from the stored
+        thread before the screen is rebuilt, so a stored element hanging off
+        a stored message is here like any other. Then the panel's own
+        elements, which never enter the transcript. Nothing else is
+        consulted: an id in neither is an id this conversation never showed,
+        and answering it would let a browser ask the database questions
+        through the session.
+        """
+        if not element_id:
+            return None
+        for entry in self.transcript:
+            for element in entry.elements:
+                if element.id == element_id:
+                    return element
+        for slot in self.sidebar.slots:
+            for element in slot.elements:
+                if element.id == element_id:
+                    return element
+        return None
+
+    def held_element_ids(self) -> Set[str]:
+        """Every element id this conversation is showing, feed and panel."""
+        return {
+            element.id for entry in self.transcript for element in entry.elements
+        } | {element.id for slot in self.sidebar.slots for element in slot.elements}
+
     def holds_element(self, element_id: str) -> bool:
         """Whether this conversation is showing the element with that id.
 
@@ -410,17 +442,41 @@ class Session:
         stops saving. Holding it is the authority -- the session sent it,
         and the caller has already been proven to own the session.
         """
-        if not element_id:
-            return False
-        return any(
+        return self.find_element(element_id) is not None
+
+    def element_written(self, element_id: str) -> bool:
+        """Whether the element this conversation holds has a row to write back to.
+
+        A feed element always does; a panel element only if its slot is
+        ``persisted``. The element route asks before it writes: a throw-away
+        loader that saved its props would otherwise gain a row, and the row
+        would bring it back on a cold resume the slot itself never survives.
+        """
+        if any(
             element.id == element_id
             for entry in self.transcript
             for element in entry.elements
-        ) or any(
-            element.id == element_id
+        ):
+            return True
+        return any(
+            slot.persisted and element.id == element_id
             for slot in self.sidebar.slots
             for element in slot.elements
         )
+
+    def forget_element(self, element_id: str) -> None:
+        """The element's row is gone; drop every copy of it, and say so.
+
+        The transcript half here, the panel half in ``ws.sidebar``, which
+        also writes the panel's new shape down -- the row was deleted from
+        the browser, and a reload must not put the card back that a cold
+        resume would not.
+        """
+        from chainlit.ws.sidebar import forget_element
+
+        for entry in self.transcript:
+            entry.elements[:] = [e for e in entry.elements if e.id != element_id]
+        forget_element(self, element_id)
 
     # --------------------------------------------------------------- the app
 

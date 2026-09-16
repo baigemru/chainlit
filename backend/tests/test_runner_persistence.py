@@ -34,6 +34,7 @@ from chainlit.persistence.models import SCHEMA_NAME
 from chainlit.persistence.records import ThreadDetail
 from chainlit.plugin import ChainlitPlugin
 from chainlit.security import ChainlitAuth, chainlit_auth
+from chainlit.ws.sidebar import row_id
 from tests.persistence.conftest import (  # noqa: F401 - fixture re-export
     TABLE_NAMES,
     database_url,
@@ -1124,7 +1125,7 @@ def test_a_fresh_session_is_not_told_its_own_thread_is_missing(
 # ------------------------------------------------ 9. the panel across a resume
 
 
-CARDS_SLOT_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "chainlit.test/cards"))
+CARDS_SLOT_ID = "cards-composer"  # the application's name; the engine mints the row id
 LOADER_SLOT_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "chainlit.test/loader"))
 
 
@@ -1191,13 +1192,14 @@ def test_a_cold_resume_rebuilds_the_panel_from_the_rows_it_wrote(
         # The row: no step, so no ``forId`` -- that is what the resume
         # recognises a panel element by.
         [row] = detail.elements
-        assert row.id == CARDS_SLOT_ID
+        cards_row_id = row_id(thread_id, CARDS_SLOT_ID)
+        assert row.id == cards_row_id
         assert row.for_id is None
         assert row.props == {"n": 1}
         # And the thread remembers the tab, by id only.
         stored = (detail.metadata or {})["__sidebar"]
         assert [slot["id"] for slot in stored["slots"]] == ["cards"]
-        assert stored["slots"][0]["elementIds"] == [CARDS_SLOT_ID]
+        assert stored["slots"][0]["elementIds"] == [cards_row_id]
         assert "rev" not in stored
 
         with client.websocket_connect("/ws") as ws:
@@ -1212,10 +1214,10 @@ def test_a_cold_resume_rebuilds_the_panel_from_the_rows_it_wrote(
     assert order.index("sidebar.state") < order.index("task.indicator")
 
     upserted = [f["element"]["id"] for f in replay if f["t"] == "element.upsert"]
-    assert upserted == [CARDS_SLOT_ID]
+    assert upserted == [cards_row_id]
     [state] = [f for f in replay if f["t"] == "sidebar.state"]
     assert [slot["id"] for slot in state["slots"]] == ["cards"]
-    assert state["slots"][0]["elementIds"] == [CARDS_SLOT_ID]
+    assert state["slots"][0]["elementIds"] == [cards_row_id]
     assert state["slots"][0]["title"] == "Shortlist"
     assert state["visible"] is True
 

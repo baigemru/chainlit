@@ -35,7 +35,7 @@ called as `cl.*` by an application author. Everything else is internal.
 | `controllers/sessions.py`                                                                         | `LiveSession` / `SessionRegistry` protocols the routes are allowed to see.                                                                                                   | internal               |
 | `controllers/caller.py`                                                                           | `caller`, `caller_identifier`, `assert_session_owner` — reading the scope safely.                                                                                            | internal               |
 | `persistence/`                                                                                    | `records` → `models` → `statements` → `repositories`/`services` → `config` → `writer`.                                                                                       | internal               |
-| `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`.                                                                              | internal               |
+| `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`; the panel's `drop_elements`, `patch_sidebar`; `split_engine_metadata`.       | internal               |
 | `security.py`                                                                                     | `ChainlitAuth(JWTCookieAuth)`, `Identity`, `identity_from_token`, `chainlit_auth()`.                                                                                         | internal               |
 | `oauth_providers.py`                                                                              | The configured OAuth providers and their token exchanges.                                                                                                                    | internal               |
 | `transit_store.py`                                                                                | `TransitStore` — the TTL'd one-shot profile-switch handover on a `litestar.stores` store.                                                                                    | internal               |
@@ -353,20 +353,35 @@ is written from whatever record the upload returns, and a failed upload writes n
 `transit_message` are excluded) and it always carries the panel under `__sidebar`.
 
 **The element panel's writes.** A slot's elements are ordinary element rows with `forId NULL`
-(`persist.save_element`, same FIFO as steps); `persist=False` is the way to fill a slot with
-something not worth a row, and it is the only mode that accepts a non-uuid id — `elements.id` is
-a `uuid` column, so `set_slot` refuses one at the call site, database configured or not. Every
-id a slot lets go — displaced, closed, cleared, or closed by the user — passes
-`ws/sidebar.orphaned` (an element another slot or a step still shows is left alone) and then
-gets **both** `element.remove` on the wire and `DeleteElement` to the writer, via
-`ws/sidebar.release`; `persist.drop_elements` skips ids that are not uuids, because no such row
-exists and `to_uuid` would fail the whole batch. Every **structural** change also submits an
-immediate `PatchThread(metadata={"__sidebar": …})` _after_ those rows and deletes, so the queue
-orders them. Scalar moves (`hide`/`show`/`activate`, and the `sidebar.user` ops that mirror
-them) write nothing: a click must not cost a database write, and a `visible` lost to a crash
-costs one chevron. The key is kept out of the application's reach by two lists that have to
-agree — `persist._VOLATILE_STATE` on the way out and `runner._resume`'s exclusion tuple on the
-way in.
+(`persist.save_element`, same FIFO as steps). The row id is the engine's, not the application's:
+`elements.id` is the table's only key, so `set_slot` mints it from the thread and the id the
+application chose (`ws/sidebar.row_id`) — stable across calls, so a refresh updates in place, and
+a different row in every conversation, so a name like `"cards"` is not one row every user
+overwrites. `persist=False` fills a slot with something not worth a row; the slot remembers that
+(`SidebarSlot.persisted`), and that flag — never the id's spelling — is what decides whether
+the record names the slot, whether a delete is issued for what leaves it, and whether
+`PUT /project/element` writes a row for an element in it. A persisted element may not carry an
+`object_key` of its own: deleting a panel row discards the blob its key names, and that would be
+the application's file — a file the application owns goes in by `url=`. Every id a slot lets go
+— displaced, closed, cleared, or closed by the user — passes `ws/sidebar.orphaned` (an element
+another slot or a step still shows is left alone) and then gets **both** `element.remove` on
+the wire and `DeleteElement` to the writer, via `ws/sidebar.release`. Every **structural**
+change also submits an immediate `PatchThread(metadata={"__sidebar": …})` after those deletes.
+The rows are not strictly ordered against it: an element with a blob — and a custom element's
+props are one — is written only once its upload finishes, so the record can name a row that lands
+a moment later, which `state_from_meta` tolerates by dropping an id with no row. What the writer
+does guard is the other order: a `DeleteElement` issued while that upload is in flight dooms it
+(`_Uploading`), so no row lands after the delete meant to undo it and the blob it uploaded is
+discarded. Scalar moves (`hide`/`show`/`activate`, and the `sidebar.user` ops that mirror them)
+write nothing: a click must not cost a database write, and a `visible` lost to a crash costs one
+chevron. The key stays out of the application's reach through one set,
+`persist.ENGINE_METADATA_KEYS`: `thread_state` writes those keys from the engine's own state and
+never from `session.state`, `split_engine_metadata` takes them out of a stored thread before
+`_resume` hands the rest to `session.state`, the hooks and the snapshot, and the share route
+keeps them off a public thread. A delete from the browser (`DELETE /project/element`) goes the
+other way through `Session.forget_element`: the row is gone, so the transcript and the panel
+let go of their copies and the panel's new shape is written down — a reload and a cold resume
+must not disagree about a card the user deleted.
 
 **Schema and migrations.** Schema `chainlit`, mapped to the deployed layout: lowercase tables,
 quoted camelCase columns, native `uuid` keys, timestamps as ISO **text** with a trailing `Z`.

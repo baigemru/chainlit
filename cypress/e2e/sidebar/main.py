@@ -1,5 +1,4 @@
 import os
-import uuid
 
 import chainlit as cl
 
@@ -10,39 +9,25 @@ cat_image_path = os.path.join(current_directory, "cat.jpeg")
 pdf_path = os.path.join(current_directory, "dummy.pdf")
 
 
-# Stable *and* uuids: a slot's elements are rows, ``elements.id`` is a uuid
-# column, and ``set_slot`` refuses anything else. ``uuid5`` is how an
-# application mints an id that is the same on every call, which is what
-# replacement by identity needs -- without it every refresh would be
-# unmount-and-mount.
-def element_id(name: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"chainlit/cypress/sidebar/{name}"))
-
-
+# Stable ids, so a refresh of a slot updates an element in place instead of
+# unmounting and mounting it. They are the application's names: the engine
+# mints the row id from the thread, the slot and the name.
 @cl.on_chat_start
 async def start():
     # Two slots, so the tab strip and the switch between them are exercised.
     await cl.Sidebar.set_slot(
         "media",
         [
-            cl.Image(path=cat_image_path, name="image1", id=element_id("image1")),
-            cl.Pdf(path=pdf_path, name="pdf1", id=element_id("pdf1")),
+            cl.Image(path=cat_image_path, name="image1", id="image1"),
+            cl.Pdf(path=pdf_path, name="pdf1", id="pdf1"),
         ],
         title="Test title",
     )
     await cl.Sidebar.set_slot(
         "notes",
         [
-            cl.Text(
-                content="Here is a side text document",
-                name="text1",
-                id=element_id("text1"),
-            ),
-            cl.Text(
-                content="Here is a page text document",
-                name="text2",
-                id=element_id("text2"),
-            ),
+            cl.Text(content="Here is a side text document", name="text1", id="text1"),
+            cl.Text(content="Here is a page text document", name="text2", id="text2"),
         ],
         title="Notes",
         activate=False,
@@ -54,7 +39,7 @@ async def message(msg: cl.Message):
     if msg.content == "replace":
         await cl.Sidebar.set_slot(
             "notes",
-            [cl.Text(content="Text changed!", name="text1", id=element_id("text1"))],
+            [cl.Text(content="Text changed!", name="text1", id="text1")],
             title="Title changed!",
         )
         return

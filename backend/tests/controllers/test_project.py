@@ -88,7 +88,11 @@ class StubSession:
         self.thread_id = thread_id
         self.writer = writer
         self.held: Set[str] = held or set()
+        #: What has a row to write back to; the panel's throw-away slots
+        #: hold elements that do not. Defaults to everything held.
+        self.written: Optional[Set[str]] = None
         self.remembered: List[Any] = []
+        self.forgotten: List[str] = []
 
     async def call_action(self, action: Any) -> Any:
         name = action.get("name")
@@ -105,6 +109,14 @@ class StubSession:
 
     def holds_element(self, element_id: str) -> bool:
         return element_id in self.held
+
+    def element_written(self, element_id: str) -> bool:
+        written = self.held if self.written is None else self.written
+        return element_id in written
+
+    def forget_element(self, element_id: str) -> None:
+        self.held.discard(element_id)
+        self.forgotten.append(element_id)
 
 
 class StubRegistry:
@@ -1604,3 +1616,58 @@ async def test_the_settings_describe_the_running_app(client, auth) -> None:
 
 async def test_the_settings_need_a_login(client) -> None:
     assert (await client.get("/project/settings")).status_code == 401
+
+
+async def test_a_throwaway_slots_element_gets_no_row(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """``persist=False`` has to hold on this route too.
+
+    The session's copy is refreshed -- that is what the reload replays --
+    but a row written here would be the one thing bringing a throw-away
+    loader back on a cold resume.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = str(uuid.uuid4())
+    writer = writer_for(thread_id, hold=True)
+    session = registry.sessions["alice-session"]
+    session.held = {element_id}
+    session.written = set()
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload(element_id, thread_id)
+    )
+
+    assert response.status_code == 200
+    assert [e.id for e in session.remembered] == [element_id]
+    assert writer.held == ()
+
+
+async def test_a_delete_lets_the_session_go_of_its_copy(
+    client, auth, persistence: Persistence, registry: StubRegistry
+) -> None:
+    """Deleting the row and leaving the session holding the element was a
+    reload that showed the card and a cold resume that did not."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    session = registry.sessions["alice-session"]
+    session.held = {element_id}
+
+    login(client, auth, ALICE)
+    response = await client.request(
+        "DELETE",
+        "/project/element",
+        json={
+            "sessionId": "alice-session",
+            "element": {
+                "id": element_id,
+                "name": "chart",
+                "type": "custom",
+                "threadId": thread_id,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert session.forgotten == [element_id]

@@ -942,3 +942,62 @@ async def test_a_writer_with_no_storage_deletes_the_row_and_says_nothing(
 
     assert await uow.elements.fetch(thread_id, element_id) is None
     assert [r for r in caplog.records if "alice/report.xlsx" in r.getMessage()] == []
+
+
+async def test_a_delete_issued_during_an_upload_dooms_its_row(
+    storing_writer: Recorder, thread_id: str, uow: UnitOfWork, bucket: Bucket
+):
+    """A delete must not be overtaken by the save it was meant to undo.
+
+    The row of an element with a blob is queued only when the upload ends,
+    while a delete is queued at once -- so the delete used to run first and
+    the row landed after it, a zombie pointing at a blob no delete would ever
+    return. The panel made this reachable from a click: fill a slot, close
+    the tab before the bucket answered.
+    """
+    parent = step(thread_id, name="carrier")
+    storing_writer.submit(SaveStep(parent))
+    record = element(thread_id, for_id=parent.id)
+    release = asyncio.Event()
+
+    async def slow_upload() -> ElementRecord:
+        await release.wait()
+        return msgspec.structs.replace(
+            record, object_key="alice/blob.png", url="memory://alice/blob.png"
+        )
+
+    storing_writer.submit_element(record, slow_upload)
+    await asyncio.sleep(0.02)
+    storing_writer.submit(DeleteElement(record.id, thread_id))
+    release.set()
+
+    async def blob_discarded() -> None:
+        while "alice/blob.png" not in bucket.asked:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(blob_discarded(), timeout=5.0)
+    await storing_writer.drain(timeout=5.0)
+
+    assert await uow.elements.fetch(thread_id, record.id) is None
+    assert [op for op in storing_writer.applied if isinstance(op, SaveElement)] == []
+
+
+async def test_a_delete_forgets_an_upload_still_waiting_for_the_gate(
+    persistence: Persistence, registry: WriterRegistry, thread_id: str, bucket: Bucket
+):
+    """Nothing was uploaded for it, so there is nothing to discard either."""
+    writer = SessionWriter(
+        replace(persistence, storage=bucket),
+        thread_id,
+        registry=registry,
+        hold_until_interaction=True,
+    )
+    record = element(thread_id, for_id=new_id())
+
+    async def never() -> None:
+        raise AssertionError("an upload the delete forgot was started")
+
+    writer.submit_element(record, never)
+    writer.submit(DeleteElement(record.id, thread_id))
+
+    assert [type(entry).__name__ for entry in writer.held] == ["DeleteElement"]

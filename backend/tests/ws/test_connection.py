@@ -44,6 +44,7 @@ from chainlit.security import ChainlitAuth
 from chainlit.ws.connection import Connection, make_websocket_handler
 from chainlit.ws.registry import SessionEntry, SessionRegistry
 from chainlit.ws.session import Session
+from chainlit.ws.sidebar import row_id
 from tests.persistence.conftest import database_url  # noqa: F401 - fixture re-export
 from tests.test_runner import frontend_dir  # noqa: F401 - fixture re-export
 from tests.test_runner_persistence import (  # noqa: F401 - fixture re-export
@@ -1389,8 +1390,9 @@ def _stage_open_panel(session: Session) -> None:
 # --------------------------------------------------------------------------
 
 
-PANEL_CARD_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "chainlit.live/cards"))
-PANEL_LATER_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "chainlit.live/later"))
+# The application's names; the engine mints the row ids from them and the thread.
+PANEL_CARD_ID = "cards"
+PANEL_LATER_ID = "later"
 
 
 async def _reaped(
@@ -1486,9 +1488,12 @@ async def test_live_a_cold_resume_gets_the_panel_back(
             lambda d: any(row.for_id is None for row in d.elements),
         )
         [row] = [r for r in detail.elements if r.for_id is None]
-        assert row.id == PANEL_CARD_ID
+        card_row_id = row_id(thread_id, PANEL_CARD_ID)
+        assert row.id == card_row_id
+        # The rows are the props: nothing else remembers them.
+        assert row.props == {"n": 1}
         assert (detail.metadata or {})["__sidebar"]["slots"][0]["elementIds"] == [
-            PANEL_CARD_ID
+            card_row_id
         ]
 
         async with connect(url, additional_headers=cookie) as second:
@@ -1501,17 +1506,19 @@ async def test_live_a_cold_resume_gets_the_panel_back(
     assert order.index("element.upsert") < order.index("sidebar.state")
     assert order.index("sidebar.state") < order.index("task.indicator")
 
-    assert [f["element"]["id"] for f in replay if f["t"] == "element.upsert"] == [
-        PANEL_CARD_ID
-    ]
+    [upserted] = [f["element"] for f in replay if f["t"] == "element.upsert"]
+    assert upserted["id"] == card_row_id
+    assert upserted["props"] == {"n": 1}
     [restored] = [f for f in replay if f["t"] == "sidebar.state"]
     assert [slot["id"] for slot in restored["slots"]] == ["cards"]
-    assert restored["slots"][0]["elementIds"] == [PANEL_CARD_ID]
+    assert restored["slots"][0]["elementIds"] == [card_row_id]
     assert restored["slots"][0]["title"] == "Shortlist"
     # The rows went out once. Inside ``thread.resume`` as well would be a
     # fifty-card panel sent twice on every resume.
     [snapshot] = [f for f in replay if f["t"] == "thread.resume"]
     assert snapshot["thread"].get("elements", []) == []
+    # And the record itself is the thread's, not the client's to see.
+    assert "__sidebar" not in snapshot["thread"].get("metadata", {})
 
     # And the hook's own slot lands after the restore and wins.
     [later] = [f for f in after if f["t"] == "sidebar.state"]

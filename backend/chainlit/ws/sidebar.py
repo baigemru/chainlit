@@ -13,12 +13,15 @@ Deliberately transport-side, for the same reason ``ws/session.py`` is. The
 ``cl.Sidebar`` API in ``chainlit/sidebar.py`` reaches for ``chainlit.context``
 and through it for the session -- so the model cannot live there without
 ``ws/session.py`` importing its own importer. What lives here is the model,
-its invariants, and what one inbound ``sidebar.user`` frame does to it;
-nothing here knows an application exists.
+its invariants, what one inbound ``sidebar.user`` frame does to it, and what
+the panel writes down when it moves; nothing here reads the current context,
+and the one reach upward into ``chainlit.persist`` is late-bound for that
+reason (see ``_persist``).
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence
 
 import msgspec
@@ -41,8 +44,10 @@ __all__ = [
     "SidebarSlot",
     "SidebarState",
     "apply_user_op",
+    "forget_element",
     "orphaned",
     "release",
+    "row_id",
     "sidebar_meta",
     "state_frame",
     "state_from_meta",
@@ -80,6 +85,31 @@ class SidebarSlot(msgspec.Struct):
     elements: List[Element] = []
     closable: bool = True
     canvas: bool = False
+    #: Whether this slot's elements are rows. Model-only, never on the wire:
+    #: the client does not care, but everything that writes or deletes a row
+    #: asks, and asking the model is the one answer that cannot drift -- a
+    #: guess from an id's spelling, or a route that writes whatever it is
+    #: handed, would bring a throw-away loader back a day later.
+    persisted: bool = True
+
+
+SLOT_NAMESPACE = uuid.UUID("5b0f6d1e-3c1a-4c7e-9d2b-7f1e2a9c4b60")
+"""The namespace a slot element's row id is minted in.
+
+``elements.id`` is a uuid column and the *sole* primary key of the table,
+so the id an application chooses -- ``"cards"``, stable on purpose so a
+refresh updates in place -- cannot be the row's id: it is neither a uuid nor
+unique across threads, and a stable id shared by every user of a deployment
+is one row that each of them overwrites in turn. So the engine mints the
+row id from the thread and the application's id, and the application never
+learns there was a rule. Not from the slot as well: one element may be shown
+in two tabs, and that is one row, not two.
+"""
+
+
+def row_id(thread_id: str, app_id: str) -> str:
+    """The row id of a panel element, the same on every call for the same two."""
+    return str(uuid.uuid5(SLOT_NAMESPACE, f"{thread_id}:{app_id}"))
 
 
 class SidebarState(msgspec.Struct):
@@ -143,12 +173,16 @@ class SidebarState(msgspec.Struct):
         activate: bool = True,
         closable: bool = True,
         canvas: bool = False,
+        persisted: bool = True,
     ) -> List[str]:
         """Put ``elements`` in the slot, and name the ones that leave it.
 
         The returned ids are the caller's cue to send ``element.remove``:
         the model drops them here, and only the caller can put a frame on
         the wire. An empty ``elements`` closes the slot outright.
+
+        ``persisted`` is recorded on the slot and nowhere else; see
+        ``SidebarSlot.persisted``.
 
         ``activate`` selects the slot **and** puts the panel on screen, on a
         slot being created and on one being refreshed alike. The application
@@ -177,6 +211,7 @@ class SidebarState(msgspec.Struct):
                     elements=list(elements),
                     closable=closable,
                     canvas=canvas,
+                    persisted=persisted,
                 )
             )
         else:
@@ -189,6 +224,7 @@ class SidebarState(msgspec.Struct):
                 existing.title = title
             existing.closable = closable
             existing.canvas = canvas
+            existing.persisted = persisted
 
         if activate:
             self.active = slot_id
@@ -226,6 +262,29 @@ class SidebarState(msgspec.Struct):
         self.visible = False
         self.rev += 1
         return removed
+
+    def forget(self, element_id: str) -> bool:
+        """Take one element out of every tab it is in; say whether anything moved.
+
+        A tab left empty closes, like any other empty tab. This is what a
+        delete from the browser does to the panel: the row is gone, and a
+        slot still naming it would put a card back on the next reload that
+        a cold resume could not.
+        """
+        touched = False
+        for slot in list(self.slots):
+            kept = [element for element in slot.elements if element.id != element_id]
+            if len(kept) == len(slot.elements):
+                continue
+            touched = True
+            if kept:
+                slot.elements = kept
+            else:
+                self.close_slot(slot.id)
+        if touched:
+            self._settle_active()
+            self.rev += 1
+        return touched
 
     def activate(self, slot_id: str) -> bool:
         if self.slot(slot_id) is None:
@@ -286,16 +345,17 @@ def sidebar_meta(sidebar: SidebarState) -> Dict[str, Any]:
     * ``rev`` counts one session's mutations and starts again at 0 in the
       next one; stored, it would make the first click on a resumed panel
       look stale to ``apply_user_op`` and be answered with a redraw;
-    * the ``preview`` slot holds whatever the user last clicked in the feed
-      -- an element of the transcript, which the resume replays anyway --
-      and reopening that tab a day later is not resuming a conversation.
+    * a slot that is not ``persisted`` has no rows, so a record naming it
+      would name a tab with nothing behind it. The ``preview`` slot is one
+      such: it holds whatever the user last clicked in the feed -- an
+      element of the transcript, which the resume replays anyway -- and
+      reopening that tab a day later is not resuming a conversation.
     """
     frame = msgspec.to_builtins(state_frame(sidebar))
     frame.pop("rev", None)
+    written = {slot.id for slot in sidebar.slots if slot.persisted}
     if "slots" in frame:
-        frame["slots"] = [
-            slot for slot in frame["slots"] if slot.get("id") != PREVIEW_SLOT
-        ]
+        frame["slots"] = [slot for slot in frame["slots"] if slot.get("id") in written]
     return frame
 
 
@@ -393,28 +453,31 @@ def apply_user_op(session: "Session", message: "SidebarUser") -> bool:
         slot = sidebar.slot(message.slot or "")
         if slot is None or not slot.closable:
             return True
-        release(session, sidebar.close_slot(slot.id))
+        release(session, sidebar.close_slot(slot.id), rows=slot.persisted)
         # A tab the user closed is a tab that must not be back tomorrow, so
         # this one move of theirs is written down -- after the deletes above,
         # which is what the queue's order is for.
         _persist().patch_sidebar(session)
         return True
 
-    element = _find_element(session, message.element_id or "")
+    element = session.find_element(message.element_id or "")
     if element is None:
         return True
+    # Never rows: the preview holds an element that is somebody else's --
+    # the feed's, or another tab's -- and the thread does not remember it.
     replaced = sidebar.set_slot(
         PREVIEW_SLOT,
         [element],
         title=element.name,
         closable=True,
+        persisted=False,
     )
     # Through the same gate as ``close``: what a second preview displaces is
     # usually a feed element the panel was only borrowing, and taking that
     # off the client would blank the attachment in the message it hangs off.
     # No metadata patch follows: the preview slot is not part of what the
     # thread remembers, so this move changes nothing that is written down.
-    release(session, replaced)
+    release(session, replaced, rows=False)
     sidebar.show()
     # Ahead of the state frame, which names the element by id only. The
     # server keeps no model of what the client is holding -- the click
@@ -424,7 +487,7 @@ def apply_user_op(session: "Session", message: "SidebarUser") -> bool:
     return True
 
 
-def release(session: "Session", element_ids: Sequence[str]) -> None:
+def release(session: "Session", element_ids: Sequence[str], *, rows: bool) -> None:
     """Let go of the panel's leavings -- off the client and out of the table.
 
     Both halves or neither, and ``orphaned`` decides which ids get them. An
@@ -434,11 +497,31 @@ def release(session: "Session", element_ids: Sequence[str]) -> None:
     still in another slot, or hanging off a step in the transcript, is left
     entirely alone -- what goes is only what the panel minted and nothing is
     showing any more.
+
+    ``rows`` is the slot's own ``persisted`` flag, handed in by the caller
+    because the slot is gone by the time this runs: the ids of a throw-away
+    slot have no rows to delete, and a ``DeleteElement`` for a row that
+    never was is a write the database has to refuse.
     """
     gone = orphaned(session, element_ids)
     for element_id in gone:
         session.send(ElementRemove(id=element_id))
-    _persist().drop_elements(session, gone)
+    if rows:
+        _persist().drop_elements(session, gone)
+
+
+def forget_element(session: "Session", element_id: str) -> None:
+    """The browser deleted an element's row; the panel lets go of it too.
+
+    The other direction of ``release``: there the panel drops the row, here
+    the row is already gone and the panel is told. Whatever moved is written
+    down and shown, so a reload and a cold resume agree on the screen --
+    without this the reload put the deleted card back and the resume did not.
+    """
+    if not session.sidebar.forget(element_id):
+        return
+    _persist().patch_sidebar(session)
+    session.send(state_frame(session.sidebar))
 
 
 def _persist() -> Any:
@@ -467,33 +550,5 @@ def orphaned(session: "Session", element_ids: Sequence[str]) -> List[str]:
     left alone -- what is removed is only what the panel minted and nothing
     is showing any more.
     """
-    held = {
-        element.id for slot in session.sidebar.slots for element in slot.elements
-    } | {element.id for entry in session.transcript for element in entry.elements}
+    held = session.held_element_ids()
     return [element_id for element_id in element_ids if element_id not in held]
-
-
-def _find_element(session: "Session", element_id: str) -> Optional[Element]:
-    """The element a ``preview`` names, wherever the session has it.
-
-    The transcript first, which is also the answer for a resumed thread:
-    ``ApplicationRunner._resume`` fills ``session.transcript`` from the
-    stored thread before the screen is rebuilt, so a stored element hanging
-    off a stored message is here like any other. Then the panel's own
-    elements, which never enter the transcript: they hang off no step, and
-    go out -- and are written -- with no ``forId`` at all. Nothing else is
-    consulted: an id that is in neither is an id
-    this conversation never showed, and answering it would let a browser ask
-    the database questions through the panel.
-    """
-    if not element_id:
-        return None
-    for entry in session.transcript:
-        for element in entry.elements:
-            if element.id == element_id:
-                return element
-    for slot in session.sidebar.slots:
-        for element in slot.elements:
-            if element.id == element_id:
-                return element
-    return None

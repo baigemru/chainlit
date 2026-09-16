@@ -18,8 +18,7 @@ time a PDF was opened beside it.
 from __future__ import annotations
 
 import asyncio
-import uuid
-from typing import List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 import msgspec
 
@@ -28,7 +27,10 @@ from chainlit import persist as persistence
 from chainlit.context import context
 from chainlit.element import ElementBased
 from chainlit.protocol.payloads import Element as ElementPayload
-from chainlit.ws.sidebar import PREVIEW_SLOT, SidebarState, release
+from chainlit.ws.sidebar import PREVIEW_SLOT, SidebarState, release, row_id
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from chainlit.ws.session import Session
 
 __all__ = ["Sidebar", "SidebarState"]
 
@@ -86,18 +88,23 @@ class Sidebar:
         that is not worth a row: a loader, a progress card, anything the next
         call replaces anyway.
 
-        A persisted element needs a **uuid** for an id, because ``elements.id``
-        is a ``uuid`` column, and it is refused here rather than in the writer
-        -- whatever the deployment, database or not. A rule that fires only
-        where somebody configured PostgreSQL is a rule nobody meets until
-        production. Stable ids are what replacement by identity needs, so mint
-        them with ``uuid5``::
+        The id the application gives a persisted element is *its* name for
+        it, not the row's: the row id is minted from the thread and that
+        name, the same on every call (``ws.sidebar.row_id``), and the element
+        is sent under it. So ``id="cards"`` is stable, updates in
+        place, and is a different row in every conversation -- ``elements.id``
+        is the table's only key, and a name shared by every user of a
+        deployment would otherwise be one row they all overwrite. An element
+        that already hangs off a step keeps the id it has.
 
-            uuid.uuid5(uuid.NAMESPACE_URL, f"cards:{thread_id}")
+        A persisted element may not arrive carrying an ``object_key`` of its
+        own: the panel deletes its rows when a tab closes, and deleting a row
+        discards the blob its key names. A file the application owns goes in
+        by ``url=``, which the row keeps and the delete leaves alone.
 
         Raises:
             ValueError: ``id`` is the reserved preview address, or a persisted
-                element's id is not a uuid.
+                element names a blob the panel would delete.
         """
         _refuse_preview(id)
         session = context.session
@@ -108,7 +115,7 @@ class Sidebar:
             return
 
         if persist:
-            _refuse_unwritable(elements)
+            _mint_row_ids(session, elements)
 
         # Sent first, and before the model is touched: ``send`` is what mints
         # the element's key and url, so ``to_dict()`` is only the truth
@@ -134,7 +141,11 @@ class Sidebar:
         # Decided inside the model, where "is this slot new?" is asked at the
         # moment of the mutation. Asked out here it was read before the
         # ``await`` above and acted on after it -- a ``sidebar.user close``
-        # arriving in that window answered the question for us.
+        # arriving in that window answered the question for us. What the
+        # displaced elements *were* -- rows or not -- is the slot's answer as
+        # it stood before the mutation, and it is read in the same breath.
+        existing = sidebar.slot(id)
+        had_rows = existing.persisted if existing is not None else persist
         dropped = sidebar.set_slot(
             id,
             payloads,
@@ -142,8 +153,9 @@ class Sidebar:
             activate=activate,
             closable=closable,
             canvas=canvas,
+            persisted=persist,
         )
-        release(session, dropped)
+        release(session, dropped, rows=had_rows)
         persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
@@ -156,7 +168,7 @@ class Sidebar:
         """
         _refuse_preview(id)
         session = context.session
-        release(session, session.sidebar.close_slot(id))
+        _close(session, id)
         persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
@@ -180,9 +192,16 @@ class Sidebar:
 
     @staticmethod
     async def clear() -> None:
-        """Close every slot."""
+        """Close every slot, and put the panel away with them."""
         session = context.session
-        release(session, session.sidebar.clear())
+        # One tab at a time, so each slot's leavings are let go with that
+        # slot's own answer to "were these rows"; the model's ``clear`` would
+        # hand back one list with the answer already lost. It is still called,
+        # for the panel itself: an empty panel the chevron opened is on screen
+        # with no tab to close, and ``clear`` means "away" even then.
+        for slot in list(session.sidebar.slots):
+            _close(session, slot.id)
+        session.sidebar.clear()
         persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
@@ -201,22 +220,37 @@ def _refuse_preview(slot_id: str) -> None:
         )
 
 
-def _refuse_unwritable(elements: Sequence[ElementBased]) -> None:
-    """Refuse a persisted element whose id no ``elements`` row could carry.
+def _close(session: Session, slot_id: str) -> None:
+    """Drop one slot and let its elements go, rows and all if it had rows."""
+    slot = session.sidebar.slot(slot_id)
+    if slot is None:
+        return
+    release(session, session.sidebar.close_slot(slot_id), rows=slot.persisted)
 
-    At the call site, before a frame or a row goes anywhere. The writer would
-    otherwise take the id as far as ``to_uuid``, fail the batch, retry it op
-    by op and drop this one with a warning in a log nobody is reading -- and
-    only where a database is configured, so the application author would meet
-    it first in production.
+
+def _mint_row_ids(session: Session, elements: Sequence[ElementBased]) -> None:
+    """Give each new element of a persisted slot the id its row will have.
+
+    Minted once: an element the panel is already showing is under its row id
+    and is left alone (minting again would mint a *different* id from the
+    minted one, and every refresh would be unmount-and-mount). An element
+    hanging off a step is the feed's and keeps the id its row already has.
+
+    The ``object_key`` refusal lives here because it is the same question --
+    "what will this row be" -- asked before anything is sent. The engine's
+    own uploads set the key on the *record*, inside the writer, never on the
+    element, so this cannot fire on a blob the panel minted itself.
     """
+    thread_id = session.thread_id or ""
+    already = set(session.sidebar.element_ids())
     for element in elements:
-        try:
-            uuid.UUID(str(element.id))
-        except ValueError, AttributeError, TypeError:
+        if element.for_id:
+            continue
+        if getattr(element, "object_key", None):
             raise ValueError(
-                f"{element.id!r} is not a uuid, and a slot's elements are "
-                f"rows: elements.id is a uuid column. Mint a stable one with "
-                f"uuid.uuid5(uuid.NAMESPACE_URL, ...), or pass persist=False "
-                f"for content that is not worth a row."
-            ) from None
+                f"element {element.id!r} names a blob ({element.object_key!r}) "
+                f"the panel would discard when its tab closes; pass url= for "
+                f"a file the application owns, or persist=False"
+            )
+        if element.id not in already:
+            element.id = row_id(thread_id, element.id)

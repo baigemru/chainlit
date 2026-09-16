@@ -88,6 +88,19 @@ class LiveSession(Protocol):
         """Whether the session is showing that element right now."""
         ...
 
+    def element_written(self, element_id: str) -> bool:
+        """Whether the element the session shows has a row to write back to.
+
+        A panel slot filled with ``persist=False`` has none, and a route
+        that wrote one anyway would resurrect a throw-away card on a cold
+        resume.
+        """
+        ...
+
+    def forget_element(self, element_id: str) -> None:
+        """Drop every copy of an element whose row the caller just deleted."""
+        ...
+
     async def release(self) -> None:
         """Give the conversation up: out of the registry, then torn down.
 

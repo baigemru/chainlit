@@ -101,6 +101,7 @@ from chainlit.persistence.storage.disposition import content_disposition, elemen
 from chainlit.persistence.writer import SessionWriter
 from chainlit.protocol.payloads import Element
 from chainlit.security import AuthedRequest
+from chainlit.ws.sidebar import SIDEBAR_META_KEY
 
 __all__ = (
     "RESUME_POLICY_DELETE",
@@ -141,10 +142,11 @@ Language = Annotated[
 
 # Metadata keys that belong to the running session and must never travel out
 # on a shared thread: they carry the app's own configuration and the user's
-# environment. ``__sidebar`` is the element panel's own record (see
-# ``chainlit.ws.sidebar``): ids only, but it describes a screen the reader
-# of a shared thread is not shown.
-PRIVATE_METADATA_KEYS = ("chat_profile", "chat_settings", "env", "__sidebar")
+# environment -- and the engine's own records (the element panel's, today),
+# which describe a screen the reader of a shared thread is not shown.
+PRIVATE_METADATA_KEYS = frozenset({"chat_profile", "chat_settings", "env"}) | frozenset(
+    {SIDEBAR_META_KEY}
+)
 
 # The only element type a client is allowed to write. Everything else is
 # written by the app itself, over the socket.
@@ -921,11 +923,19 @@ class ProjectController(Controller):
         if not authorized_by_session(session, data.element):
             await authorize_element(elements, threads, data.element, request)
 
-        record = custom_element_record(data.element)
-        session.remember_element(as_element(data.element))
+        element = as_element(data.element)
+        session.remember_element(element)
+        # The session copy always; the row only where there is one to write
+        # back to. A throw-away slot (``persist=False``) has no rows, and a
+        # row written for it here would be the one thing that brought its
+        # card back on a cold resume.
+        if session.holds_element(element.id) and not session.element_written(
+            element.id
+        ):
+            return Ok()
         writer = session.writer
         if isinstance(writer, SessionWriter):
-            writer.submit_element(record)
+            writer.submit_element(custom_element_record(data.element))
         return Ok()
 
     @delete("/project/element", status_code=200)
@@ -949,8 +959,12 @@ class ProjectController(Controller):
         gone -- which the file route already answers with a 404, and which is
         the direction to fail in: the other one keeps a user's file in the
         bucket with nothing left in the database that knows it is there.
+
+        The session lets go of its copy too, and the panel writes its new
+        shape down: a reload replays the session, a cold resume reads the
+        rows, and the two must not disagree about a card the user deleted.
         """
-        self._session_of(sessions, data.session_id, request)
+        session = self._session_of(sessions, data.session_id, request)
         if data.element.get("type") != WRITABLE_ELEMENT_TYPE:
             return Ok(success=False)
 
@@ -958,6 +972,7 @@ class ProjectController(Controller):
             elements, threads, data.element, request
         )
         await discard_blobs(storage, await elements.remove(str(element_id), thread_id))
+        session.forget_element(str(element_id))
         return Ok()
 
     @put("/project/thread")

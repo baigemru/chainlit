@@ -26,6 +26,7 @@ from chainlit.sidebar import Sidebar
 from chainlit.ws.sidebar import (
     SIDEBAR_META_KEY,
     apply_user_op,
+    row_id,
     sidebar_meta,
     state_from_meta,
 )
@@ -39,13 +40,13 @@ async def ctx(session):
 
 
 def eid(label: str) -> str:
-    """A readable label as the uuid a persisted slot element must carry.
+    """The application's own name for a slot element -- any string will do."""
+    return f"app-{label}"
 
-    ``elements.id`` is a ``uuid`` column, so ``set_slot`` refuses anything
-    else -- and ``uuid5`` is what the docstring tells applications to use for
-    the stable ids replacement-by-identity needs.
-    """
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"chainlit.test.sidebar/{label}"))
+
+def rid(label: str) -> str:
+    """The row id the engine mints for ``eid(label)`` in the test session's thread."""
+    return row_id("test_thread_id", eid(label))
 
 
 def text(name: str, id: str) -> Text:
@@ -142,6 +143,17 @@ class TestInvariants:
         assert session.sidebar.visible is False
         assert session.sidebar.active is None
 
+    async def test_clear_puts_an_empty_panel_away_too(self, ctx, session):
+        """An empty panel on screen is legal only where the user asked for it
+        (the chevron); ``clear`` means "away", tabs or no tabs."""
+        await Sidebar.show()
+        assert session.sidebar.visible is True
+
+        await Sidebar.clear()
+
+        assert session.sidebar.visible is False
+        assert last_state(session).visible is False
+
     async def test_show_on_an_empty_panel_is_legal(self, ctx, session):
         """The composer's chevron opens the panel whatever is in it.
 
@@ -159,7 +171,7 @@ class TestInvariants:
         await Sidebar.set_slot("cards", [text("a", eid("e1"))])
         await Sidebar.hide()
         assert session.sidebar.visible is False
-        assert ids_of(last_state(session)) == {"cards": [eid("e1")]}
+        assert ids_of(last_state(session)) == {"cards": [rid("e1")]}
 
     async def test_refreshing_a_slot_brings_the_panel_back(self, ctx, session):
         """ "Bring this to the front" is also "put it where it can be seen".
@@ -243,10 +255,10 @@ class TestReplaceByIdentity:
         # lands first is not a promise the wire makes.
         upserted = sorted(f.element.id for f in sent if isinstance(f, ElementUpsert))
         removed = [f.id for f in sent if isinstance(f, ElementRemove)]
-        assert upserted == sorted([eid("e1"), eid("e3")])
+        assert upserted == sorted([rid("e1"), rid("e3")])
         # e2 left the slot; e1 stayed and is updated in place.
-        assert removed == [eid("e2")]
-        assert ids_of(last_state(session)) == {"cards": [eid("e1"), eid("e3")]}
+        assert removed == [rid("e2")]
+        assert ids_of(last_state(session)) == {"cards": [rid("e1"), rid("e3")]}
 
     async def test_the_elements_are_on_the_wire_before_the_frame_names_them(
         self, ctx, session
@@ -383,7 +395,7 @@ class TestUserOps:
         removed = [
             f.id for f in since(session, furnished) if isinstance(f, ElementRemove)
         ]
-        assert removed == [eid("e1")]
+        assert removed == [rid("e1")]
 
     async def test_close_on_a_slot_that_refuses_is_rejected_with_state(self, session):
         assert apply_user_op(session, op(session, op="close", slot="pinned")) is True
@@ -427,10 +439,10 @@ class TestUserOps:
 
     async def test_preview_resolves_against_the_panels_own_elements(self, session):
         assert (
-            apply_user_op(session, op(session, op="preview", element_id=eid("e2")))
+            apply_user_op(session, op(session, op="preview", element_id=rid("e2")))
             is True
         )
-        assert [e.id for e in session.sidebar.slot("preview").elements] == [eid("e2")]
+        assert [e.id for e in session.sidebar.slot("preview").elements] == [rid("e2")]
 
     async def test_a_second_preview_releases_what_it_displaced(self, session):
         """But only when nothing else is still showing it.
@@ -439,15 +451,15 @@ class TestUserOps:
         was the last slot holding it; a feed element would not, which is the
         case below.
         """
-        apply_user_op(session, op(session, op="preview", element_id=eid("e1")))
+        apply_user_op(session, op(session, op="preview", element_id=rid("e1")))
         # "cards" is closable, so e1 is now shown nowhere but the preview.
         apply_user_op(session, op(session, op="close", slot="cards"))
         start = mark(session)
 
-        apply_user_op(session, op(session, op="preview", element_id=eid("e2")))
+        apply_user_op(session, op(session, op="preview", element_id=rid("e2")))
 
         removed = [f.id for f in since(session, start) if isinstance(f, ElementRemove)]
-        assert removed == [eid("e1")]
+        assert removed == [rid("e1")]
 
     async def test_a_second_preview_leaves_a_feeds_element_alone(self, session):
         from chainlit.protocol.payloads import Step, TextElement
@@ -514,7 +526,7 @@ class TestRows:
         await Sidebar.set_slot("cards", [text("a", eid("e1")), text("b", eid("e2"))])
 
         written = rows(writer)
-        assert sorted(op.record.id for op in written) == sorted([eid("e1"), eid("e2")])
+        assert sorted(op.record.id for op in written) == sorted([rid("e1"), rid("e2")])
         # NULL, not "": ``forId`` is a uuid column, and NULL is what the cold
         # resume recognises a panel row by.
         assert {op.record.for_id for op in written} == {None}
@@ -560,29 +572,78 @@ class TestRows:
             "DeleteElement",
             "PatchThread",
         ]
-        assert deletions(writer) == [eid("e1")]
-        assert patches(writer)[-1]["slots"][0]["elementIds"] == [eid("e3")]
+        assert deletions(writer) == [rid("e1")]
+        assert patches(writer)[-1]["slots"][0]["elementIds"] == [rid("e3")]
 
-    async def test_a_non_uuid_id_is_refused_before_anything_moves(self, ctx, session):
-        """At the call site, and whether or not a database is configured.
-
-        A rule that only fires where somebody set up PostgreSQL is a rule an
-        application author meets for the first time in production.
-        """
+    async def test_the_engine_mints_the_row_id_from_the_thread_and_the_name(
+        self, ctx, session
+    ):
+        """``elements.id`` is the table's only key: an application's stable
+        name -- ``"cards"`` -- must not be one row for every user of the
+        deployment. The application never learns there was a rule."""
         writer = writer_for(session)
+        card = text("a", "cards")
+
+        await Sidebar.set_slot("cards", [card])
+
+        assert card.id == row_id("test_thread_id", "cards")
+        uuid.UUID(card.id)
+        assert [op.record.id for op in rows(writer)] == [card.id]
+        assert card.id != row_id("another-thread", "cards")
+
+    async def test_a_minted_id_is_stable_and_never_minted_twice(self, ctx, session):
+        """The same name on the next call is the same row, so the refresh
+        updates in place; and the object already sent is left under its row
+        id rather than minted from it into a fresh one."""
+        first = text("a", "cards")
+        await Sidebar.set_slot("cards", [first])
         start = mark(session)
 
-        with pytest.raises(ValueError, match="uuid"):
-            await Sidebar.set_slot("cards", [text("a", "cards-1")])
+        again = text("b", "cards")
+        await Sidebar.set_slot("cards", [again])
+        await Sidebar.set_slot("cards", [again])
+
+        assert again.id == first.id
+        assert not [f for f in since(session, start) if isinstance(f, ElementRemove)]
+
+    async def test_a_feed_element_keeps_its_own_id(self, ctx, session):
+        attached = text("a", eid("e1"))
+        await attached.send(for_id="m1")
+
+        await Sidebar.set_slot("cards", [attached])
+
+        assert attached.id == eid("e1")
+
+    async def test_a_throwaway_element_keeps_its_own_id(self, ctx, session):
+        loader = text("a", "loader")
+        await Sidebar.set_slot("files", [loader], persist=False)
+        assert loader.id == "loader"
+
+    async def test_an_element_naming_a_blob_of_its_own_is_refused(self, ctx, session):
+        """The panel deletes its rows when a tab closes, and a deleted row
+        discards the blob its key names -- which would be the application's
+        file. ``url=`` is how a file the application owns goes in."""
+        writer = writer_for(session)
+        pointer = File(name="report.pdf", url="/files/report.pdf")
+        pointer.object_key = "reports/thread/report.pdf"
+        start = mark(session)
+
+        with pytest.raises(ValueError, match="blob"):
+            await Sidebar.set_slot("report", [pointer])
 
         assert since(session, start) == []
         assert writer.held == ()
         assert session.sidebar.slots == []
 
-    async def test_the_id_rule_holds_without_a_database(self, ctx, session):
-        assert session.writer is None
-        with pytest.raises(ValueError, match="uuid"):
-            await Sidebar.set_slot("cards", [text("a", "cards-1")])
+    async def test_a_throwaway_slot_is_not_in_the_record(self, ctx, session):
+        """It has no rows, so a record naming it would name a tab with
+        nothing behind it -- and a cold resume would look for one."""
+        writer = writer_for(session)
+        await Sidebar.set_slot("cards", [text("a", eid("e1"))])
+        await Sidebar.set_slot("loader", [text("b", "spinner")], persist=False)
+
+        assert [s["id"] for s in patches(writer)[-1]["slots"]] == ["cards"]
+        assert [slot.persisted for slot in session.sidebar.slots] == [True, False]
 
     async def test_closing_a_slot_deletes_the_rows_it_drops(self, ctx, session):
         writer = writer_for(session)
@@ -590,7 +651,7 @@ class TestRows:
 
         await Sidebar.close_slot("cards")
 
-        assert deletions(writer) == [eid("e1")]
+        assert deletions(writer) == [rid("e1")]
         assert patches(writer)[-1].get("slots", []) == []
 
     async def test_clear_deletes_every_row(self, ctx, session):
@@ -600,7 +661,7 @@ class TestRows:
 
         await Sidebar.clear()
 
-        assert sorted(deletions(writer)) == sorted([eid("e1"), eid("e2")])
+        assert sorted(deletions(writer)) == sorted([rid("e1"), rid("e2")])
 
     async def test_an_element_another_slot_still_holds_keeps_its_row(
         self, ctx, session
@@ -659,7 +720,7 @@ class TestRows:
 
         issued = list(writer.held)[before:]
         assert [type(op).__name__ for op in issued] == ["DeleteElement", "PatchThread"]
-        assert issued[0].element_id == eid("e1")
+        assert issued[0].element_id == rid("e1")
         assert [
             s["id"] for s in issued[1].patch.metadata[SIDEBAR_META_KEY]["slots"]
         ] == ["notes"]
@@ -727,7 +788,7 @@ class TestMeta:
         meta = sidebar_meta(session.sidebar)
 
         assert [slot["id"] for slot in meta["slots"]] == ["cards"]
-        assert meta["slots"][0]["elementIds"] == [eid("e1")]
+        assert meta["slots"][0]["elementIds"] == [rid("e1")]
         # ``rev`` counts a session's mutations and restarts at 0 in the next
         # one; stored, it would make the first click on a resumed panel look
         # stale and be answered with a redraw.
@@ -754,7 +815,7 @@ class TestMeta:
         rebuilt = state_from_meta(meta, elements)
 
         assert [slot.id for slot in rebuilt.slots] == ["cards", "notes"]
-        assert [e.id for e in rebuilt.slots[0].elements] == [eid("e1"), eid("e2")]
+        assert [e.id for e in rebuilt.slots[0].elements] == [rid("e1"), rid("e2")]
         assert rebuilt.slots[0].title == "Cards"
         assert rebuilt.active == session.sidebar.active
         assert rebuilt.visible is False
@@ -838,4 +899,4 @@ class TestMeta:
 
         stored = persist.thread_state(session)
 
-        assert stored[SIDEBAR_META_KEY]["slots"][0]["elementIds"] == [eid("e1")]
+        assert stored[SIDEBAR_META_KEY]["slots"][0]["elementIds"] == [rid("e1")]

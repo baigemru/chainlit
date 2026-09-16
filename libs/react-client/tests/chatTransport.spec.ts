@@ -206,6 +206,27 @@ describe('ChatTransport', () => {
     });
   });
 
+  it('lets a detach cancel a retry that has not fired yet', () => {
+    // The blip the transport was about to heal by itself, interrupted by the
+    // user navigating away. A pending retry that survives the detach opens a
+    // connection for a conversation nobody is in any more -- and with the
+    // generation fence swallowing its status, it opens invisibly.
+    transport.attach({ threadId: 'one' });
+    latest().open();
+    latest().deliver(ready());
+    latest().drop();
+    expect(transport.getSnapshot().phase).toBe('reconnecting');
+
+    transport.detach();
+    vi.advanceTimersByTime(BACKOFF_CEILING * 10);
+
+    expect(sockets()).toHaveLength(1);
+    expect(transport.getSnapshot()).toMatchObject({
+      phase: 'idle',
+      connected: false
+    });
+  });
+
   it('keeps queued work across a rebuild and flushes it on session.ready', () => {
     transport.attach({ threadId: 'one' });
     latest().open();

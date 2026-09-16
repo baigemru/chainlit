@@ -18,25 +18,49 @@ The chunking scheme existed for one provider's oversized tokens, and that
 provider is not configured anywhere this fork runs; every cookie minted by
 the old stack lacks ``sub`` and is refused, which costs each browser exactly
 one login at cutover.
+
+One thing *is* overridden, and it is about the websocket. Middleware runs
+before the handler's ``accept()``, and a refusal before an accept is not a
+close code: per the ASGI spec uvicorn turns a pre-accept ``websocket.close``
+into an HTTP 403 rejection, and the browser's WebSocket API never exposes an
+HTTP status. The tab sees a bare 1006 with ``opened=false`` -- the same
+thing an unreachable server looks like -- so it backs off and reconnects,
+forever. A night of that is thousands of ``"WebSocket /ws" 403`` pairs from
+tabs whose cookie expired while the page stayed open. So
+:class:`WebSocketAwareJWTCookieMiddleware` accepts the upgrade first and
+*then* closes it with 4401, which the client already treats as terminal:
+one handshake bought, a retry loop ended, and the user sent to the login
+page instead of a spinner. HTTP is untouched -- there a 401 is already
+something the caller can read.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Callable, Dict, Literal, Optional, cast
 
-from litestar import Request
+from litestar import Request, WebSocket
 from litestar.connection import ASGIConnection
 from litestar.datastructures import State
+from litestar.enums import ScopeType
+from litestar.exceptions import NotAuthorizedException
+from litestar.middleware._utils import should_bypass_middleware
 from litestar.security.jwt import JWTCookieAuth, Token
+from litestar.security.jwt.middleware import JWTCookieAuthenticationMiddleware
+from litestar.types import Receive, Scope, Send
+
+from chainlit.protocol.codec import CloseCode, ErrorCode
+from chainlit.ws.outbound import FORCE_CLOSE_GRACE
 
 __all__ = (
     "AUTH_SECRET_ENV",
     "AuthedRequest",
     "ChainlitAuth",
     "Identity",
+    "WebSocketAwareJWTCookieMiddleware",
     "chainlit_auth",
     "get_auth_secret",
     "identity_from_token",
@@ -100,24 +124,95 @@ async def identity_from_token(
     )
 
 
+class WebSocketAwareJWTCookieMiddleware(JWTCookieAuthenticationMiddleware):
+    """Refuse a websocket with a close code rather than an HTTP status.
+
+    The HTTP path is the base class, untouched: a 401 is an answer the
+    caller can read, and ``useApi`` already logs the user out on one.
+
+    On an upgrade there is no such answer. Litestar's exception middleware
+    answers a ``NotAuthorizedException`` with ``websocket.close``, and
+    because the handler has not accepted yet, uvicorn is obliged to turn
+    that into an HTTP 403 rejection — which the browser's WebSocket API
+    does not surface. So this accepts the upgrade itself and closes it
+    with 4401, the code the client's ``TERMINAL_CLOSE_CODES`` already
+    names. ``accept()`` on a socket in the ``init`` state consumes the
+    ``websocket.connect`` event; nothing else on the scope is touched, and
+    ``self.app`` is never called, so the route handler does not run and
+    never sees a connection that was refused.
+
+    Only ``NotAuthorizedException``. A misconfigured secret, a
+    ``retrieve_user_handler`` that raises, anything else — all still
+    propagate to the exception middleware and close 4500, because a
+    server that is broken must not tell a client its credentials are bad:
+    the client's answer to that is to log the user out.
+    """
+
+    __slots__ = ()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != ScopeType.WEBSOCKET or should_bypass_middleware(
+            exclude_http_methods=self.exclude_http_methods,
+            exclude_opt_key=self.exclude_opt_key,
+            exclude_path_pattern=self.exclude,
+            scope=scope,
+            scopes=self.scopes,
+        ):
+            await super().__call__(scope, receive, send)
+            return
+
+        try:
+            result = await self.authenticate_request(ASGIConnection(scope))
+        except NotAuthorizedException:
+            socket: WebSocket[Any, Any, Any] = WebSocket(scope, receive, send)
+            await socket.accept()
+            # The enum name, not the JWT library's message: a browser caps
+            # ``reason`` at 123 bytes, and what went wrong with the token is
+            # the server's business either way. Bounded like every other
+            # goodbye in this fork: on the ``websockets`` implementation
+            # ``close`` awaits the closing handshake, up to ten seconds
+            # against a peer that has stopped answering.
+            try:
+                await asyncio.wait_for(
+                    socket.close(
+                        code=CloseCode.UNAUTHENTICATED,
+                        reason=ErrorCode.UNAUTHENTICATED,
+                    ),
+                    FORCE_CLOSE_GRACE,
+                )
+            except TimeoutError:
+                pass
+            return
+
+        scope["user"] = result.user
+        scope["auth"] = result.auth
+        await self.app(scope, receive, send)
+
+
 @dataclass
 class ChainlitAuth(JWTCookieAuth[Identity, Token]):
     """``JWTCookieAuth`` with Chainlit's ``connection.user`` type pinned.
 
-    Nothing is overridden; two defaults are filled in. ``retrieve_user_handler``
-    defaults to :func:`identity_from_token` so ``connection.user`` has the
-    shape the rest of the package reads (``identifier``, ``display_name``,
-    ``metadata``), and ``key`` defaults to the cookie name Chainlit has
-    always used. Build it with :func:`chainlit_auth` to read the
-    deployment's settings, or construct it directly with whatever
-    ``key``/``path``/``samesite`` the host wants — every cookie the auth
-    routes write is derived from this instance, so the two cannot disagree.
+    Two defaults are filled in and one class is swapped.
+    ``retrieve_user_handler`` defaults to :func:`identity_from_token` so
+    ``connection.user`` has the shape the rest of the package reads
+    (``identifier``, ``display_name``, ``metadata``), and ``key`` defaults
+    to the cookie name Chainlit has always used. The middleware is
+    :class:`WebSocketAwareJWTCookieMiddleware`, which answers a refused
+    upgrade with close 4401 instead of an HTTP 403 no browser can read.
+    Build it with :func:`chainlit_auth` to read the deployment's settings,
+    or construct it directly with whatever ``key``/``path``/``samesite``
+    the host wants — every cookie the auth routes write is derived from
+    this instance, so the two cannot disagree.
     """
 
     retrieve_user_handler: Callable[
         [Token, ASGIConnection[Any, Any, Any, Any]], Any
     ] = identity_from_token
     key: str = "access_token"
+    authentication_middleware_class: type[JWTCookieAuthenticationMiddleware] = field(
+        default=WebSocketAwareJWTCookieMiddleware
+    )
 
 
 def chainlit_auth(

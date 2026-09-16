@@ -117,9 +117,13 @@ Two objects, in two files, with a clear split of duties.
 websocket.
 
 - `websocketUrl(httpEndpoint)` derives `ws(s)://host/<root>/ws`; `WEBSOCKET_PATH` is
-  `/ws`. Auth is cookie-only — nothing in the URL or the handshake frame — so a
-  refused upgrade arrives as an HTTP 403 and the browser reports a plain 1006 with
-  `opened: false`.
+  `/ws`. Auth is cookie-only — nothing in the URL or the handshake frame — and a
+  refusal of those cookies arrives as close **4401 on an accepted socket**: the auth
+  middleware accepts the upgrade itself before it closes, because a refusal sent
+  before the accept reaches the browser as an HTTP 403 whose status the WebSocket API
+  never exposes. `opened: false` therefore means one thing now — nothing completed the
+  upgrade (an unreachable server, or a proxy refusing it) — and that is exactly the
+  case the backoff is right for.
 - On `onopen` it arms the watchdog and writes `hello()` immediately, bypassing the
   buffer. The buffer is _not_ drained until `session.ready` (socket.io drained first
   and announced later, which is how buffered events used to reach a half-initialised
@@ -292,10 +296,19 @@ never the way out of itself); the "×" that closes a slot is a sibling of its
 `TabsTrigger`, never a child, and a single slot carries its own beside the title —
 distinct from the back arrow and the sheet's close, which hide.
 
-`sink.onClose` does nothing. It used to reset the session id once on a terminal 4403
-`SESSION_FORBIDDEN`, because a persisted id could name a session belonging to a user
-who had since been replaced in this tab. Neither half survives: the client names no
-session, so there is nothing to refuse, and 4403 is not a close code any more.
+`sink.onClose` has one branch: **close 4401 clears `userState`**, which is the answer
+`useApi` already gives an HTTP 401 (`api.ts:63-67`). The socket learns the same thing
+over its own wire, and `useAuth`'s `isAuthenticated: !!user` turns it into the
+redirect — `AppWrapper` sends the tab to `/login`, and `App.tsx`'s attach effect, gated
+on the same flag, stops re-attaching. Without it a cookie that expired under an open
+page left the tab on "reconnecting" forever: 4401 is terminal, so the socket stopped,
+but nothing told the app, and the next run of the attach effect would have re-attached
+the closed transport and earned another 4401. The setter comes from
+`useSetRecoilState(userState)` rather than `useAuthState()` — the same write, without
+subscribing all ten callers of the hook to `userState` and `authState`. A 1006 leaves
+the user alone: that is a blip the transport heals. (The branch that used to live here
+reset the session id on a terminal 4403; neither half survives — the client names no
+session, so there is nothing to refuse, and 4403 is not a close code any more.)
 
 The session id reaches the element handlers through a **ref written inside the
 `session.ready` handler**, not through the render-captured value. `element.upsert`
@@ -484,7 +497,9 @@ each: one socket per thread however often attached; opening without any HTTP cal
 first; a handshake naming the thread and nothing else; exactly one rebuild for a new
 thread, old one closed; a second connection for a second `clear()` with no thread on
 either side (`detach` forgets the descriptor); a `detach` cancelling a connection that
-has not opened yet; queued work surviving a rebuild and flushing on `session.ready`;
+has not opened yet; a `detach` cancelling a _retry_ that has not fired yet (no socket
+opens for a conversation nobody is in, and the generation fence would have hidden it);
+queued work surviving a rebuild and flushing on `session.ready`;
 `superseded` staying sticky through a re-attach; a 4403 being retried, not treated as
 terminal; a `closed` transport reopening on a fresh attach; a blip healing without a new
 attach; a new `chatProfile` reaching the next handshake without a reconnect; the device
@@ -499,7 +514,11 @@ path and guards hello-before-anything, buffer ordering, a reply kept across a
 reconnect, a send from a `session.ready` listener staying behind the buffered ones,
 the never-buffered `hb.ack`, backoff stopping on a terminal code, a refused upgrade
 reported as never-opened, no reconnect after a deliberate close, both watchdog cases,
-fan-out order, and `websocketUrl`. Other specs cover message-tree merging, ask-action
+fan-out order, and `websocketUrl`. `unauthenticatedClose.spec.tsx` runs the whole chain
+— a real `ChatTransport` over a stubbed `WebSocket`, driving the real `useChatSession`
+in a `RecoilRoot` — and pins the link the fix is: a close 4401 leaves `userState` null,
+while a 1006 leaves the signed-in user exactly where it was. Other specs cover
+message-tree merging, ask-action
 pruning, transcript freezing, wait messages, compact steps, icons, content rendering,
 `NewChat`, `openThread` and `threadAddressSync` (both directions of the
 address↔session loop). `displayModePrecedence.spec.ts`, whose three failures were the

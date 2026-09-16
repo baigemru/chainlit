@@ -303,9 +303,16 @@ Invariants:
   `bad_message`, `unknown_tag`, `ask_slot_busy`, …). A failure that must also
   close sends a `CloseCode` too: 4400 bad handshake, 4401 unauthenticated, 4408 heartbeat
   timeout, 4409 superseded, 4413 frame too large, 4429 backlog exceeded, 4500 internal. 4429
-  must be retried by the client; 4409 is terminal and must **not** be. 4403 and 4404 are
-  retired — a refusal about a thread was an answer about a row that exists, and the server now
-  answers with a thread of the caller's own instead.
+  must be retried by the client; 4409 and 4401 are terminal and must **not** be. 4403 and 4404
+  are retired — a refusal about a thread was an answer about a row that exists, and the server
+  now answers with a thread of the caller's own instead.
+- **4401 is sent by the auth middleware, not the handler.** `WebSocketAwareJWTCookieMiddleware`
+  (`security.py`) accepts the upgrade itself and then closes it, because a refusal before an
+  accept is an HTTP 403 by the ASGI spec and the browser's WebSocket API never exposes a status:
+  the tab would see a bare 1006 with `opened: false`, the same thing an unreachable server looks
+  like, and reconnect forever. The route handler never runs for a refused credential, so nothing
+  in `ws/` has to answer for one. Only `NotAuthorizedException` is answered this way; any other
+  failure still propagates and closes 4500.
 - **`hb` / `hb.ack` are per connection**, never per session: the ack is recorded on
   `Connection.last_ack` and never reaches `_dispatch`.
 - Unknown _fields_ are ignored (forward compatibility); an unknown _tag_, a wrong type or a
@@ -397,6 +404,10 @@ because `ChainlitPlugin` registers `Persistence.plugin()`.
 `retrieve_user_handler = identity_from_token` and `key = "access_token"`. `identity_from_token`
 trusts the signed token and does no database lookup — `sub` is the identifier,
 `display_name`/`metadata` ride in `extras`. `Identity` is what `connection.user` holds.
+`authentication_middleware_class` is `WebSocketAwareJWTCookieMiddleware`: on HTTP it is the
+stock `JWTCookieAuthenticationMiddleware`, and on a websocket it accepts the upgrade and then
+closes it with 4401 rather than letting the exception middleware refuse it pre-accept, which
+uvicorn is obliged to turn into an HTTP 403 the browser cannot read (see §4).
 
 `chainlit_auth()` reads the deployment settings at call time: `CHAINLIT_AUTH_SECRET`,
 `CHAINLIT_AUTH_COOKIE_NAME`, `CHAINLIT_AUTH_COOKIE_PATH`, `CHAINLIT_COOKIE_SAMESITE`

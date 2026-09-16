@@ -94,9 +94,12 @@ def build(
 ) -> Any:
     """The route and its registry, plus whatever middleware the case needs.
 
-    Authentication is not exercised here on purpose: it runs before
-    ``accept()``, so a refusal from it is a failed upgrade rather than a
-    close code, and none of the cases below is about that.
+    ``user`` stands in for what the real auth middleware leaves on the
+    scope, because none of the cases here is about the credential itself:
+    a refused one never reaches this handler at all -- the middleware
+    accepts the upgrade and closes it 4401 without calling the app, which
+    ``test_live_a_refused_credential_is_a_close_code_not_an_http_status``
+    covers against a real server.
     """
     registry = registry if registry is not None else SessionRegistry()
     handler = make_websocket_handler(
@@ -1524,3 +1527,93 @@ async def test_live_a_cold_resume_gets_the_panel_back(
     [later] = [f for f in after if f["t"] == "sidebar.state"]
     assert [slot["id"] for slot in later["slots"]] == ["cards", "later"]
     assert later["rev"] > restored.get("rev", 0)
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: a credential the middleware refuses
+# --------------------------------------------------------------------------
+
+AUTH_SECRET = "live-test-secret-not-a-real-one-but-long-enough-for-hs256"
+"""Only ever signs the tokens below; the fork's secret comes from the host."""
+
+
+def _expired_cookie(key: str) -> Dict[str, str]:
+    """A cookie exactly as a tab left open overnight still sends it.
+
+    Minted with pyjwt rather than ``Token``: ``Token.__post_init__`` refuses
+    an ``exp`` in the past, which is the right rule for a mint and makes the
+    production case unreachable from the stock API.
+    """
+    import jwt as pyjwt
+
+    token = pyjwt.encode(
+        {"sub": "ada", "exp": 1000000000}, AUTH_SECRET, algorithm="HS256"
+    )
+    return {"Cookie": f"{key}={token}"}
+
+
+@asynccontextmanager
+async def upgraded(url: str, **kwargs: Any) -> AsyncIterator[ClientConnection]:
+    """``connect``, with the HTTP rejection spelled out as the failure it is.
+
+    A pre-accept refusal never reaches ``recv``: ``connect`` raises, there is
+    no websocket, and a test that only asserted on a close code would report
+    "the connection never closed". This says the thing that went wrong --
+    the server answered with a status no browser can read.
+    """
+    from websockets.exceptions import InvalidStatus
+
+    try:
+        sock = await connect(url, **kwargs)
+    except InvalidStatus as rejected:
+        raise AssertionError(
+            f"the upgrade was refused with HTTP {rejected.response.status_code}; "
+            "the browser sees 1006 and retries forever"
+        ) from None
+    try:
+        yield sock
+    finally:
+        await sock.close()
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_refused_credential_is_a_close_code_not_an_http_status(
+    ws_impl: str,
+) -> None:
+    """The upgrade succeeds and the refusal arrives as 4401.
+
+    Live because this is the one thing the in-process client cannot show:
+    there, ``websocket.close`` before an accept is a queue write like any
+    other and the harness reports it as a close either way. Against a real
+    uvicorn a pre-accept close is an HTTP 403 rejection -- ``connect``
+    raises ``InvalidStatus`` and no websocket exists -- and a browser in
+    that position is told nothing it can read: 1006, ``opened=false``,
+    indistinguishable from a server that is down, so the tab reconnects
+    forever. Thousands of those pairs in one night's log are why the
+    middleware accepts first.
+    """
+    config = ChainlitAuth(token_secret=AUTH_SECRET)
+    handler, _middleware, _registry = build()
+    app = Litestar(route_handlers=[handler], middleware=[config.middleware])
+
+    async with live_server(app, ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+
+        # No cookie at all: the handshake still completes.
+        async with upgraded(url) as anonymous:
+            assert await live_close_code(anonymous) == CloseCode.UNAUTHENTICATED
+
+        # And the production case, which is not "no cookie" but "no longer
+        # decodes": the browser sends one, and it expired hours ago.
+        async with upgraded(
+            url, additional_headers=_expired_cookie(config.key)
+        ) as stale:
+            assert await live_close_code(stale) == CloseCode.UNAUTHENTICATED
+
+        # The control: nothing above was bought by breaking the credential
+        # that works. Same middleware, a token it accepts, a whole handshake.
+        credential = {"Cookie": f"{config.key}={config.create_token('ada')}"}
+        async with upgraded(url, additional_headers=credential) as member:
+            ready = (await open_live(member, pageLoad=True))[0]
+            assert ready["t"] == "session.ready"
+            assert ready["threadId"] == THREAD

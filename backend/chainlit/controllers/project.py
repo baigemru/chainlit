@@ -916,23 +916,24 @@ class ProjectController(Controller):
         if data.element.get("type") != WRITABLE_ELEMENT_TYPE:
             return Ok(success=False)
 
-        # Before anything else: ``elements.id`` is a native uuid column, and
-        # a non-uuid id handed to the writer fails a whole batch of somebody
-        # else's rows rather than this one request.
-        element_uuid(data.element.get("id"), "id")
-        if not authorized_by_session(session, data.element):
+        element = as_element(data.element)
+        vouched = authorized_by_session(session, data.element)
+        if not vouched:
             await authorize_element(elements, threads, data.element, request)
 
-        element = as_element(data.element)
         session.remember_element(element)
         # The session copy always; the row only where there is one to write
         # back to. A throw-away slot (``persist=False``) has no rows, and a
         # row written for it here would be the one thing that brought its
-        # card back on a cold resume.
-        if session.holds_element(element.id) and not session.element_written(
-            element.id
-        ):
+        # card back on a cold resume. Decided before the uuid gate below: a
+        # throw-away element may carry any id, and the gate exists only to
+        # protect the writer's batch.
+        if vouched and not session.element_written(element.id):
             return Ok()
+        # ``elements.id`` is a native uuid column, and a non-uuid id handed to
+        # the writer fails a whole batch of somebody else's rows rather than
+        # this one request.
+        element_uuid(data.element.get("id"), "id")
         writer = session.writer
         if isinstance(writer, SessionWriter):
             writer.submit_element(custom_element_record(data.element))

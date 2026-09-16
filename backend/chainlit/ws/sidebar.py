@@ -66,8 +66,9 @@ SIDEBAR_META_KEY = "__sidebar"
 
 Dunder-prefixed because it shares a dict with whatever the application put
 in ``user_session``, and because it must never come back out into one: it is
-filtered on the way out by ``persist._VOLATILE_STATE`` and on the way in by
-the exclusion tuple in ``runner._resume``.
+one of ``persist.ENGINE_METADATA_KEYS``, which ``thread_state`` writes from
+the engine's own state and ``split_engine_metadata`` takes back out before a
+resume hands the rest to the application.
 """
 
 

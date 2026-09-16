@@ -1671,3 +1671,25 @@ async def test_a_delete_lets_the_session_go_of_its_copy(
 
     assert response.status_code == 200
     assert session.forgotten == [element_id]
+
+
+async def test_a_throwaway_element_may_carry_any_id(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """The uuid gate protects the writer's batch and nothing else, so it
+    must not stand between a ``persist=False`` element and its session copy:
+    refused here, a loader that saved its props came back stale on F5."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    writer = writer_for(thread_id, hold=True)
+    session = registry.sessions["alice-session"]
+    session.held = {"loader"}
+    session.written = set()
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload("loader", thread_id)
+    )
+
+    assert response.status_code == 200
+    assert [e.id for e in session.remembered] == ["loader"]
+    assert writer.held == ()

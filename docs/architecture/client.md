@@ -78,6 +78,9 @@ The consequences for an element's author, benefits and costs together:
   the session copy existed a change written with `updateElement` came back stale
   anyway. The row is for **display**: an application that owns the fact the element
   is showing keeps it somewhere of its own, not in the element it drew it with.
+- The `id` a panel element sees on the client is the **row id the engine minted**
+  from the thread and the name passed to `set_slot`, not that name itself. An element
+  that needs its name at runtime gets it through `props` (the consumer's `panelId`).
 - `useState(props.foo)` is the standard React trap and now bites for real: an
   initialiser runs once, and since the element no longer remounts on every update
   the state will never catch up with the prop. Derive from `props` during render,

@@ -311,9 +311,10 @@ export class ChatTransport {
     } else if (info.terminal) {
       this.publish({ phase: 'closed', connected: false, error: true });
     } else if (!info.opened) {
-      // An upgrade refused before the server accepted it (no close frame to
-      // read) or an unreachable server. The retry that follows will report
-      // itself, but the user is owed an answer now.
+      // Nothing completed the upgrade: an unreachable server, or a proxy that
+      // refused it. Not a refusal of the credentials — that one accepts and
+      // closes 4401, and took the terminal branch above. The retry that
+      // follows will report itself, but the user is owed an answer now.
       this.publish({ phase: 'reconnecting', connected: false, error: true });
     } else {
       // A drop the transport is about to heal. Not the UI's business, and

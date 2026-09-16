@@ -72,10 +72,15 @@ export interface CloseInfo {
   code: number;
   reason: string;
   /**
-   * False when `onopen` never fired. A guard denial happens before the
-   * server accepts the upgrade, so the browser sees an HTTP 403 on the
-   * handshake and reports a plain abnormal closure — indistinguishable from
-   * an unreachable server. There is no close code to read in that case.
+   * False when `onopen` never fired, which now means one thing: nothing on
+   * the other end completed the upgrade — an unreachable server, or a proxy
+   * that refused it. There is no close code to read, and that is exactly the
+   * case worth retrying, so the backoff is the right answer to it.
+   *
+   * A refusal of the *credentials* is no longer in this bucket: the auth
+   * middleware accepts the upgrade and then closes 4401, because a refusal
+   * sent before the accept reaches the browser as an HTTP status its
+   * WebSocket API never exposes.
    */
   opened: boolean;
   /** True when the transport has stopped retrying by itself. */
@@ -119,8 +124,10 @@ export const websocketUrl = (httpEndpoint: string): string => {
  *
  * Authentication is by cookie only: the browser sends the session cookies
  * with the upgrade request, and nothing is put in the URL or the handshake
- * frame. That is why a refusal arrives as an HTTP 403 on the upgrade rather
- * than as a close frame — see {@link CloseInfo.opened}.
+ * frame. A refusal of those cookies arrives as close 4401 on an accepted
+ * socket, not as a failed upgrade — the server accepts first precisely so
+ * there is a code to read here, since the browser's WebSocket API hides the
+ * HTTP status of a rejected handshake. See {@link CloseInfo.opened}.
  */
 export class ChainlitSocket {
   /**

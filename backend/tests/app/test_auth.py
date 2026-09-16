@@ -16,6 +16,7 @@ from litestar.security.jwt import Token
 from litestar.testing import create_test_client
 
 from chainlit.plugin import ChainlitPlugin
+from chainlit.protocol.codec import CloseCode
 from chainlit.security import ChainlitAuth, Identity, chainlit_auth
 
 SECRET = "test-secret-not-a-real-one-but-long-enough-for-hs256"
@@ -261,16 +262,68 @@ def test_the_cookie_authenticates_the_websocket():
             assert socket.receive_json() == {"identifier": "ada"}
 
 
-def test_an_unauthenticated_websocket_is_refused():
+def test_an_unauthenticated_websocket_is_accepted_and_then_closed_4401():
+    """The upgrade *succeeds*, and the refusal arrives as a close code.
+
+    A refusal before ``accept`` is an HTTP 403 by the ASGI spec, and the
+    browser's WebSocket API never surfaces an HTTP status: the tab sees a
+    bare 1006 and cannot tell a dead credential from a dead server, so it
+    reconnects forever. Accepting first costs one handshake and buys the
+    one thing the client can act on -- 4401, which it already treats as
+    terminal.
+    """
     from litestar.exceptions import WebSocketDisconnect
 
-    def connect(client) -> None:
+    with _client() as client:
         with client.websocket_connect("/probe-ws") as socket:
-            socket.send_text("ping")
-            socket.receive_json()
+            with pytest.raises(WebSocketDisconnect) as refusal:
+                socket.receive_json()
 
-    with _client() as client, pytest.raises(WebSocketDisconnect, match="No JWT token"):
-        connect(client)
+    assert refusal.value.code == CloseCode.UNAUTHENTICATED
+
+
+def test_a_websocket_whose_cookie_expired_is_closed_4401():
+    """The production case: a tab left open past its token's expiry.
+
+    Not "no cookie" -- the browser still sends one, it just no longer
+    decodes, and thousands of those were the log line that started this.
+    """
+    from litestar.exceptions import WebSocketDisconnect
+
+    expired = pyjwt.encode(
+        {"sub": "ada", "identifier": "ada", "exp": 1000000000},
+        SECRET,
+        algorithm="HS256",
+    )
+    with _client() as client:
+        client.cookies.set(COOKIE, expired)
+        with client.websocket_connect("/probe-ws") as socket:
+            with pytest.raises(WebSocketDisconnect) as refusal:
+                socket.receive_json()
+
+    assert refusal.value.code == CloseCode.UNAUTHENTICATED
+
+
+def test_a_misconfigured_middleware_is_not_dressed_up_as_a_refusal():
+    """Only ``NotAuthorizedException`` is answered with 4401.
+
+    Anything else still propagates, which the exception middleware turns
+    into a 4500 close: a server that is broken must not tell a client its
+    credentials are bad, because the client's answer to that is to log the
+    user out.
+    """
+    from litestar.exceptions import WebSocketDisconnect
+
+    async def explode(token, connection):
+        raise RuntimeError("the retrieve_user_handler is wired wrong")
+
+    with _client(auth=_auth(retrieve_user_handler=explode)) as client:
+        client.cookies.set(COOKIE, _token())
+        with pytest.raises(WebSocketDisconnect) as failure:
+            with client.websocket_connect("/probe-ws") as socket:
+                socket.receive_json()
+
+    assert failure.value.code != CloseCode.UNAUTHENTICATED
 
 
 # --- no auth at all ----------------------------------------------------------

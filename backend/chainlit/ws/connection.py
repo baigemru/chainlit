@@ -247,9 +247,13 @@ def make_websocket_handler(
     async def chainlit_websocket(socket: WebSocket[Any, Any, Any]) -> None:
         # Guards and the authentication middleware have already run: their
         # scopes include the websocket one, and a refusal from either
-        # happens *before* accept, which the browser sees as a failed
-        # upgrade -- an HTTP status, not a close code. Nothing here can
-        # turn that into a close frame, and the client knows it.
+        # happens *before* this handler exists. Nothing here ever sees a
+        # connection whose credentials were refused -- the auth middleware
+        # accepts that upgrade and closes it 4401 itself, precisely because
+        # refusing before an accept is an HTTP status the browser cannot
+        # read (``chainlit/security.py``). So a user on this scope is a
+        # user the middleware vouched for, and ``None`` means there is no
+        # authentication configured at all.
         user = socket.scope.get("user")
 
         await socket.accept()

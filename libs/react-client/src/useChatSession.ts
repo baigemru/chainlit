@@ -14,7 +14,8 @@ import {
   protocolErrorState,
   sessionDescriptorState,
   sessionIdState,
-  tasklistState
+  tasklistState,
+  userState
 } from 'src/state';
 import {
   IAction,
@@ -44,6 +45,7 @@ import {
 
 import { isMobileViewport } from './breakpoint';
 import { ChainlitContext, useChatTransport } from './context';
+import { CloseCode } from './protocol';
 import type {
   AskReplyValue,
   ProtocolAskSpec,
@@ -90,6 +92,10 @@ const useChatSession = () => {
   const setTasklists = useSetRecoilState(tasklistState);
   const setActions = useSetRecoilState(actionState);
   const setProtocolError = useSetRecoilState(protocolErrorState);
+  // The setter alone, not `useAuthState()`: ten components call this hook, and
+  // that hook subscribes its caller to `userState` and `authState` for a value
+  // nothing here reads. Same setter, no re-render.
+  const setUser = useSetRecoilState(userState);
 
   // The thread the session is actually in, as opposed to the one it was
   // opened to resume. It changes without the connection being rebuilt, so it
@@ -488,14 +494,20 @@ const useChatSession = () => {
         // at runtime.
         (handlers[message.t] as (m: typeof message) => void)(message);
       },
-      // Nothing to do. There used to be a branch here resetting the session
-      // id on a terminal 4403: a persisted id could name a session belonging
-      // to a user who had since been replaced in this tab. Neither half of
-      // that exists any more -- the client never names a session, so the
-      // server has nothing to refuse, and 4403 is not a close code.
-      onClose: () => undefined
+      onClose: (info) => {
+        // Close 4401 is the socket learning what an HTTP 401 teaches, and it
+        // gets the same answer `useApi` gives that status: forget the user.
+        // Without this the tab sat on "reconnecting" forever -- the cookie
+        // expired under an open page, the transport stopped (4401 is
+        // terminal), and nothing told the app, so `isAuthenticated` stayed
+        // true and the next run of the attach effect would re-attach the
+        // closed transport and earn another 4401. Clearing the user flips
+        // that gate shut and sends the page to /login, which is the only
+        // thing that can actually fix it.
+        if (info.code === CloseCode.UNAUTHENTICATED) setUser(null);
+      }
     }),
-    [handlers]
+    [handlers, setUser]
   );
 
   /**

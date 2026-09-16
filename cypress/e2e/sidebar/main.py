@@ -9,11 +9,12 @@ cat_image_path = os.path.join(current_directory, "cat.jpeg")
 pdf_path = os.path.join(current_directory, "dummy.pdf")
 
 
+# Stable ids, so a refresh of a slot updates an element in place instead of
+# unmounting and mounting it. They are the application's names: the engine
+# mints the row id from the thread, the slot and the name.
 @cl.on_chat_start
 async def start():
     # Two slots, so the tab strip and the switch between them are exercised.
-    # Stable ids on purpose: replacement is by element identity, and without
-    # them every refresh would be unmount-and-mount.
     await cl.Sidebar.set_slot(
         "media",
         [

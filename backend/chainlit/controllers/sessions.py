@@ -12,6 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import AbstractSet, Any, Mapping, Optional, Protocol, runtime_checkable
 
+from chainlit.protocol.payloads import Element
+
 __all__ = ["LiveSession", "SessionRegistry"]
 
 
@@ -28,6 +30,22 @@ class LiveSession(Protocol):
         """The user the socket belongs to; ``None`` without authentication.
 
         Only ``.identifier`` is read.
+        """
+        ...
+
+    @property
+    def thread_id(self) -> Optional[str]:
+        """The conversation this session is having, if it has one yet."""
+        ...
+
+    @property
+    def writer(self) -> Optional[Any]:
+        """The ordered writer for this session's rows, or ``None``.
+
+        Typed loosely on purpose: the routes only submit through it, and
+        naming ``SessionWriter`` here would make this declaration depend on
+        the persistence package it is deliberately independent of. The one
+        route that writes an element checks the concrete type itself.
         """
         ...
 
@@ -55,6 +73,32 @@ class LiveSession(Protocol):
 
     async def call_action(self, action: Mapping[str, Any]) -> Any:
         """Run the app's callback for this action; ``LookupError`` if none."""
+        ...
+
+    def remember_element(self, payload: Element) -> None:
+        """Replace the session's copy of an element it is already holding.
+
+        A route that writes an element row writes the screen too: the copy
+        the reconnect replay reads is the session's, and a row alone comes
+        back as the props the element had before the change.
+        """
+        ...
+
+    def holds_element(self, element_id: str) -> bool:
+        """Whether the session is showing that element right now."""
+        ...
+
+    def element_written(self, element_id: str) -> bool:
+        """Whether the element the session shows has a row to write back to.
+
+        A panel slot filled with ``persist=False`` has none, and a route
+        that wrote one anyway would resurrect a throw-away card on a cold
+        resume.
+        """
+        ...
+
+    def forget_element(self, element_id: str) -> None:
+        """Drop every copy of an element whose row the caller just deleted."""
         ...
 
     async def release(self) -> None:

@@ -44,6 +44,7 @@ from chainlit.security import ChainlitAuth
 from chainlit.ws.connection import Connection, make_websocket_handler
 from chainlit.ws.registry import SessionEntry, SessionRegistry
 from chainlit.ws.session import Session
+from chainlit.ws.sidebar import row_id
 from tests.persistence.conftest import database_url  # noqa: F401 - fixture re-export
 from tests.test_runner import frontend_dir  # noqa: F401 - fixture re-export
 from tests.test_runner_persistence import (  # noqa: F401 - fixture re-export
@@ -1382,3 +1383,144 @@ def _stage_open_panel(session: Session) -> None:
     session.sidebar.set_slot("cards", [TextElement(id="e1", name="shortlist")])
     session.sidebar.set_slot("report", [TextElement(id="e2", name="report")])
     session.sidebar.show()
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: the element panel across a cold resume
+# --------------------------------------------------------------------------
+
+
+# The application's names; the engine mints the row ids from them and the thread.
+PANEL_CARD_ID = "cards"
+PANEL_LATER_ID = "later"
+
+
+async def _reaped(
+    plugin: ChainlitPlugin, thread_id: str, *, timeout: float = 10.0
+) -> None:
+    """Wait for the session in this thread to be given up.
+
+    Polled on this loop, not with ``time.sleep``: the server under test is
+    running here, and sleeping the thread would stop the very reaper being
+    waited for.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if plugin.runner.registry.entry_of_thread(thread_id) is None:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"the session in thread {thread_id} was never reaped")
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_cold_resume_gets_the_panel_back(
+    ws_impl: str,
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The conversation is reopened a day later and the panel is still there.
+
+    Not a reload: the session is *gone* -- the socket closed, the reaper came
+    and went, and what is left is rows. So the panel is rebuilt from the
+    ``forId NULL`` elements and the ``__sidebar`` record the thread carries,
+    by the engine, with an application that does nothing about it in
+    ``on_chat_resume``. That recipe-in-``user_session`` is what this release
+    deletes from the consumer.
+
+    Live rather than in-process for the reason every case down here is: the
+    in-process client never closes a socket, so a session that has really
+    been let go is only reachable against a real server.
+
+    And the ordering is the assertion that matters: the elements before the
+    frame that names them by id, the whole panel after ``thread.resume`` and
+    before the spinner, and a ``set_slot`` made inside ``on_chat_resume``
+    landing after all of it and winning.
+    """
+    plugin = make_plugin()
+
+    async def on_chat_start() -> None:
+        await cl.Sidebar.set_slot(
+            "cards",
+            [cl.CustomElement(name="Cards", props={"n": 1}, id=PANEL_CARD_ID)],
+            title="Shortlist",
+        )
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        # Deliberately not a restore: the panel is already back by now. This
+        # is an application adding a tab of its own on top of it.
+        await cl.Sidebar.set_slot(
+            "later",
+            [cl.CustomElement(name="Cards", props={"n": 2}, id=PANEL_LATER_ID)],
+            title="Since you were away",
+        )
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+    await asyncio.to_thread(seed_user, db_url, ALICE)
+    cookie = {"Cookie": f"{auth.key}={auth.create_token(ALICE)}"}
+
+    async with live_server(Litestar(plugins=[plugin]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url, additional_headers=cookie) as first:
+            opening = await open_live(first, pageLoad=True, threadId=None)
+            thread_id = opening[0]["threadId"]
+            await read_live(first, "sidebar.state")
+            # Spoken in, or the writer's gate never opens and the panel is
+            # held rather than written -- which is correct, and useless here.
+            await first.send(user_message("hello"))
+            await read_live(first, "thread.first_interaction")
+            # Shortened while the socket is still open: the reaper reads the
+            # timeout when it is created, which is when the socket goes.
+            plugin.runner.session_timeout = 0.05
+
+        await _reaped(plugin, thread_id)
+        detail = await asyncio.to_thread(
+            wait_for_thread,
+            db_url,
+            thread_id,
+            lambda d: any(row.for_id is None for row in d.elements),
+        )
+        [row] = [r for r in detail.elements if r.for_id is None]
+        card_row_id = row_id(thread_id, PANEL_CARD_ID)
+        assert row.id == card_row_id
+        # The rows are the props: nothing else remembers them.
+        assert row.props == {"n": 1}
+        assert (detail.metadata or {})["__sidebar"]["slots"][0]["elementIds"] == [
+            card_row_id
+        ]
+
+        async with connect(url, additional_headers=cookie) as second:
+            replay = await open_live(second, pageLoad=True, threadId=thread_id)
+            after = await read_live(second, "sidebar.state")
+
+    assert [f for f in replay if f["t"] == "error"] == [], [f["t"] for f in replay]
+    order = [f["t"] for f in replay]
+    assert order.index("thread.resume") < order.index("element.upsert")
+    assert order.index("element.upsert") < order.index("sidebar.state")
+    assert order.index("sidebar.state") < order.index("task.indicator")
+
+    [upserted] = [f["element"] for f in replay if f["t"] == "element.upsert"]
+    assert upserted["id"] == card_row_id
+    assert upserted["props"] == {"n": 1}
+    [restored] = [f for f in replay if f["t"] == "sidebar.state"]
+    assert [slot["id"] for slot in restored["slots"]] == ["cards"]
+    assert restored["slots"][0]["elementIds"] == [card_row_id]
+    assert restored["slots"][0]["title"] == "Shortlist"
+    # The rows went out once. Inside ``thread.resume`` as well would be a
+    # fifty-card panel sent twice on every resume.
+    [snapshot] = [f for f in replay if f["t"] == "thread.resume"]
+    assert snapshot["thread"].get("elements", []) == []
+    # And the record itself is the thread's, not the client's to see.
+    assert "__sidebar" not in snapshot["thread"].get("metadata", {})
+
+    # And the hook's own slot lands after the restore and wins.
+    [later] = [f for f in after if f["t"] == "sidebar.state"]
+    assert [slot["id"] for slot in later["slots"]] == ["cards", "later"]
+    assert later["rev"] > restored.get("rev", 0)

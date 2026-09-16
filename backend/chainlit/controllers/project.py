@@ -98,7 +98,10 @@ from chainlit.persistence.storage.base import BaseStorageClient, discard_blobs
 # Re-exported: the upload path settles the same header at upload time, so the
 # rule lives where neither side of it has to import the other.
 from chainlit.persistence.storage.disposition import content_disposition, element_mime
+from chainlit.persistence.writer import SessionWriter
+from chainlit.protocol.payloads import Element
 from chainlit.security import AuthedRequest
+from chainlit.ws.sidebar import SIDEBAR_META_KEY
 
 __all__ = (
     "RESUME_POLICY_DELETE",
@@ -139,8 +142,11 @@ Language = Annotated[
 
 # Metadata keys that belong to the running session and must never travel out
 # on a shared thread: they carry the app's own configuration and the user's
-# environment.
-PRIVATE_METADATA_KEYS = ("chat_profile", "chat_settings", "env")
+# environment -- and the engine's own records (the element panel's, today),
+# which describe a screen the reader of a shared thread is not shown.
+PRIVATE_METADATA_KEYS = frozenset({"chat_profile", "chat_settings", "env"}) | frozenset(
+    {SIDEBAR_META_KEY}
+)
 
 # The only element type a client is allowed to write. Everything else is
 # written by the app itself, over the socket.
@@ -501,6 +507,40 @@ async def authorize_element(
     return element_id, None if thread_id is None else str(thread_id)
 
 
+def authorized_by_session(session: LiveSession, payload: Mapping[str, Any]) -> bool:
+    """Whether the session the caller owns is itself the authority here.
+
+    :func:`authorize_element` decides from the stored row, and for a panel
+    element there may not be one yet: it is queued through the session's
+    writer, which holds everything until the thread's first interaction. A
+    card that saved its props in that window was answered with a 404.
+
+    So a session showing the element right now vouches for it -- the caller
+    has already been proven to own the session, and the session is what put
+    the element on screen. The claimed thread still has to be the session's
+    own, or this would be the hole :func:`authorize_element` closes, reopened
+    from the other side: Alice's session holding an id, the payload naming
+    Bob's thread, and the row written into it.
+    """
+    claimed = payload.get("threadId")
+    if claimed and str(claimed) != (session.thread_id or ""):
+        return False
+    return session.holds_element(str(payload.get("id") or ""))
+
+
+def as_element(payload: Mapping[str, Any]) -> Element:
+    """The client's element in the shape a session holds one, or a 400.
+
+    The conversion is the check: what the transcript and the panel replay
+    are ``Element`` payloads, and a dict that is not one is the caller's
+    mistake rather than a shape smuggled into the reconnect replay.
+    """
+    try:
+        return msgspec.convert(payload, Element)
+    except msgspec.ValidationError as error:
+        raise ClientException(f"The element is malformed: {error}") from error
+
+
 def custom_element_record(payload: Mapping[str, Any]) -> ElementRecord:
     """The subset of a client-supplied element that may be written.
 
@@ -859,15 +899,44 @@ class ProjectController(Controller):
 
         Two checks, because there are two resources: the session the write
         claims to come from, and the element it claims to be about.
+
+        The write lands in two places, and the second one is the point. The
+        row is what a *cold* resume reads; the session's own copy is what a
+        reload replays, and it used to be left holding whatever the element
+        was first sent with -- so a card that saved its props came back
+        showing the old ones until the thread was resumed from scratch.
+
+        The row goes through the session's writer rather than straight to
+        the service: a slot's element is queued there too, and a direct save
+        can overtake it and then be overwritten by it -- fresh props, then
+        stale. Without a writer there is no database to be ahead of, and the
+        session copy is the whole of the write.
         """
-        # The session is checked for authorization only; the element itself
-        # is written to the database, not into the session.
-        self._session_of(sessions, data.session_id, request)
+        session = self._session_of(sessions, data.session_id, request)
         if data.element.get("type") != WRITABLE_ELEMENT_TYPE:
             return Ok(success=False)
 
-        await authorize_element(elements, threads, data.element, request)
-        await elements.save(custom_element_record(data.element))
+        element = as_element(data.element)
+        vouched = authorized_by_session(session, data.element)
+        if not vouched:
+            await authorize_element(elements, threads, data.element, request)
+
+        session.remember_element(element)
+        # The session copy always; the row only where there is one to write
+        # back to. A throw-away slot (``persist=False``) has no rows, and a
+        # row written for it here would be the one thing that brought its
+        # card back on a cold resume. Decided before the uuid gate below: a
+        # throw-away element may carry any id, and the gate exists only to
+        # protect the writer's batch.
+        if vouched and not session.element_written(element.id):
+            return Ok()
+        # ``elements.id`` is a native uuid column, and a non-uuid id handed to
+        # the writer fails a whole batch of somebody else's rows rather than
+        # this one request.
+        element_uuid(data.element.get("id"), "id")
+        writer = session.writer
+        if isinstance(writer, SessionWriter):
+            writer.submit_element(custom_element_record(data.element))
         return Ok()
 
     @delete("/project/element", status_code=200)
@@ -891,8 +960,12 @@ class ProjectController(Controller):
         gone -- which the file route already answers with a 404, and which is
         the direction to fail in: the other one keeps a user's file in the
         bucket with nothing left in the database that knows it is there.
+
+        The session lets go of its copy too, and the panel writes its new
+        shape down: a reload replays the session, a cold resume reads the
+        rows, and the two must not disagree about a card the user deleted.
         """
-        self._session_of(sessions, data.session_id, request)
+        session = self._session_of(sessions, data.session_id, request)
         if data.element.get("type") != WRITABLE_ELEMENT_TYPE:
             return Ok(success=False)
 
@@ -900,6 +973,7 @@ class ProjectController(Controller):
             elements, threads, data.element, request
         )
         await discard_blobs(storage, await elements.remove(str(element_id), thread_id))
+        session.forget_element(str(element_id))
         return Ok()
 
     @put("/project/thread")

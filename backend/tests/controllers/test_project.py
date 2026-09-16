@@ -43,6 +43,7 @@ from chainlit.persistence.records import (
     ThreadPatch,
 )
 from chainlit.persistence.storage.base import BaseStorageClient
+from chainlit.persistence.writer import SaveElement, SessionWriter, WriterRegistry
 from chainlit.security import chainlit_auth
 from tests.persistence.conftest import database_url, engine
 
@@ -63,15 +64,35 @@ class Identity:
 
 
 class StubSession:
-    """A ``LiveSession``: a user, an action dispatcher, and an ending."""
+    """A ``LiveSession``: a user, an action dispatcher, and an ending.
+
+    Plus the two element members the write-back route reads. ``held`` is what
+    the real session's transcript and panel are, flattened to the one question
+    the route asks -- and ``remembered`` is what it is here to prove, because
+    the copy the reconnect replays is the half a row cannot stand in for.
+    """
 
     def __init__(
-        self, user: Optional[Identity], actions: Optional[Dict[str, Any]] = None
+        self,
+        user: Optional[Identity],
+        actions: Optional[Dict[str, Any]] = None,
+        *,
+        thread_id: Optional[str] = None,
+        writer: Optional[Any] = None,
+        held: Optional[Set[str]] = None,
     ) -> None:
         self.user = user
         self.actions = actions or {}
         self.called: List[Dict[str, Any]] = []
         self.releases = 0
+        self.thread_id = thread_id
+        self.writer = writer
+        self.held: Set[str] = held or set()
+        #: What has a row to write back to; the panel's throw-away slots
+        #: hold elements that do not. Defaults to everything held.
+        self.written: Optional[Set[str]] = None
+        self.remembered: List[Any] = []
+        self.forgotten: List[str] = []
 
     async def call_action(self, action: Any) -> Any:
         name = action.get("name")
@@ -82,6 +103,20 @@ class StubSession:
 
     async def release(self) -> None:
         self.releases += 1
+
+    def remember_element(self, payload: Any) -> None:
+        self.remembered.append(payload)
+
+    def holds_element(self, element_id: str) -> bool:
+        return element_id in self.held
+
+    def element_written(self, element_id: str) -> bool:
+        written = self.held if self.written is None else self.written
+        return element_id in written
+
+    def forget_element(self, element_id: str) -> None:
+        self.held.discard(element_id)
+        self.forgotten.append(element_id)
 
 
 class StubRegistry:
@@ -163,6 +198,36 @@ class RecordingStorage(BaseStorageClient):
 @pytest.fixture
 def storage() -> RecordingStorage:
     return RecordingStorage()
+
+
+@pytest_asyncio.fixture
+async def writer_for(persistence: Persistence, registry: StubRegistry) -> Any:
+    """Give a stub session a real writer, and close it when the test ends.
+
+    A real one rather than a recorder: the route's whole point is that its
+    row goes into the same queue a slot's element goes into, and a double
+    would order that queue by agreeing with itself.
+    """
+    created: List[SessionWriter] = []
+
+    def attach(
+        thread_id: str, *, hold: bool = False, session: str = "alice-session"
+    ) -> SessionWriter:
+        writer = SessionWriter(
+            persistence,
+            thread_id,
+            registry=WriterRegistry(),
+            hold_until_interaction=hold,
+        ).start()
+        stub = registry.sessions[session]
+        stub.thread_id = thread_id
+        stub.writer = writer
+        created.append(writer)
+        return writer
+
+    yield attach
+    for writer in created:
+        await writer.aclose(timeout=5.0)
 
 
 @pytest.fixture
@@ -698,34 +763,208 @@ async def test_an_element_of_another_users_thread_is_refused(
     assert b"chart" not in response.content
 
 
+def element_payload(element_id: str, thread_id: Optional[str], **fields: Any) -> Any:
+    element: Dict[str, Any] = {
+        "id": element_id,
+        "name": "chart",
+        "type": "custom",
+        "display": "inline",
+        "props": {"a": 2},
+        **fields,
+    }
+    if thread_id is not None:
+        element["threadId"] = thread_id
+    return {"sessionId": "alice-session", "element": element}
+
+
+async def props_of(persistence: Persistence, thread_id: str, element_id: str) -> Any:
+    async with persistence.uow() as uow:
+        element = await uow.elements.fetch(thread_id, element_id)
+    return None if element is None else element.props
+
+
 async def test_a_custom_element_is_written_back_through_its_session(
-    client, auth, persistence: Persistence
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
 ) -> None:
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    writer = writer_for(thread_id)
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload(element_id, thread_id)
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+    await writer.drain(timeout=5.0)
+    assert await props_of(persistence, thread_id, element_id) == {"a": 2}
+
+
+async def test_a_custom_element_write_back_refreshes_the_session_copy(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """The row is half the write; the screen is the other half.
+
+    Only the row was ever written, so a reload replayed the transcript and
+    the panel the session was still holding -- the props the element had
+    before the user changed them.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    writer_for(thread_id)
+
+    login(client, auth, ALICE)
+    await client.put("/project/element", json=element_payload(element_id, thread_id))
+
+    remembered = registry.sessions["alice-session"].remembered
+    assert [(e.id, e.props) for e in remembered] == [(element_id, {"a": 2})]
+
+
+async def test_a_write_back_waits_behind_what_the_session_already_queued(
+    client, auth, persistence: Persistence, writer_for
+) -> None:
+    """The row goes into the session's queue, not around it.
+
+    A slot's element is queued through the writer and may not be filed for a
+    while. A write-back that went straight to the service landed *before* it
+    and was then overwritten by it: the user saw fresh props, and the next
+    resume showed the stale ones.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    writer = writer_for(thread_id, hold=True)
+    writer.submit_element(
+        ElementRecord(
+            id=element_id,
+            name="chart",
+            type="custom",
+            thread_id=thread_id,
+            props={"stale": True},
+        )
+    )
+
+    login(client, auth, ALICE)
+    assert (
+        await client.put(
+            "/project/element", json=element_payload(element_id, thread_id)
+        )
+    ).status_code == 200
+
+    writer.open_gate()
+    await writer.drain(timeout=5.0)
+    assert await props_of(persistence, thread_id, element_id) == {"a": 2}
+
+
+async def test_a_write_back_is_held_until_the_threads_first_interaction(
+    client, auth, persistence: Persistence, writer_for
+) -> None:
+    """Held, not lost: the gate is the writer's, and this row obeys it."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    writer = writer_for(thread_id, hold=True)
+
+    login(client, auth, ALICE)
+    await client.put("/project/element", json=element_payload(element_id, thread_id))
+
+    assert [type(op) for op in writer.held] == [SaveElement]
+    assert await props_of(persistence, thread_id, element_id) == {"a": 1}
+
+    writer.open_gate()
+    await writer.drain(timeout=5.0)
+    assert await props_of(persistence, thread_id, element_id) == {"a": 2}
+
+
+async def test_an_element_the_session_holds_is_writable_before_it_has_a_row(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """A panel element saves its props before the thread row exists.
+
+    Nothing is in the database yet -- not the element, not the thread: the
+    writer holds every row until the conversation's first interaction. The
+    session showing the element is what authorises the write, and without
+    that fallback a card in a fresh session was answered with a 404 for as
+    long as the gate stayed shut.
+    """
+    thread_id = str(uuid.uuid4())
+    element_id = str(uuid.uuid4())
+    writer_for(thread_id, hold=True)
+    registry.sessions["alice-session"].held = {element_id}
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload(element_id, thread_id)
+    )
+
+    assert response.status_code == 200
+    assert [e.id for e in registry.sessions["alice-session"].remembered] == [element_id]
+
+
+async def test_a_held_element_claiming_another_thread_is_still_refused(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """Holding an id is not a licence over the thread the payload names.
+
+    The same hole ``authorize_element`` closes, approached from the other
+    side: Alice's session holds an id, the payload claims Bob's thread, and
+    the row would be written into it.
+    """
+    bob_thread = await make_thread(persistence, owner=BOB)
+    element_id = await make_element(persistence, bob_thread)
+    writer_for(str(uuid.uuid4()))
+    registry.sessions["alice-session"].held = {element_id}
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload(element_id, bob_thread)
+    )
+
+    assert response.status_code == 404
+    assert await props_of(persistence, bob_thread, element_id) == {"a": 1}
+
+
+async def test_a_session_with_no_writer_still_refreshes_its_copy(
+    client, auth, persistence: Persistence, registry: StubRegistry
+) -> None:
+    """No writer is no database: the screen is the whole of the write.
+
+    Deliberate, and the reason the route no longer writes through the
+    element service: a row filed outside the session's queue is a row that
+    can be overtaken by it.
+    """
     thread_id = await make_thread(persistence, owner=ALICE)
     element_id = await make_element(persistence, thread_id)
 
     login(client, auth, ALICE)
     response = await client.put(
-        "/project/element",
-        json={
-            "sessionId": "alice-session",
-            "element": {
-                "id": element_id,
-                "name": "chart",
-                "type": "custom",
-                "threadId": thread_id,
-                "display": "inline",
-                "props": {"a": 2},
-            },
-        },
+        "/project/element", json=element_payload(element_id, thread_id)
     )
 
     assert response.status_code == 200
-    assert response.json() == {"success": True}
-    async with persistence.uow() as uow:
-        element = await uow.elements.fetch(thread_id, element_id)
-    assert element is not None
-    assert element.props == {"a": 2}
+    assert [e.id for e in registry.sessions["alice-session"].remembered] == [element_id]
+    assert await props_of(persistence, thread_id, element_id) == {"a": 1}
+
+
+async def test_an_element_with_a_non_uuid_id_is_refused_before_the_writer(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """``elements.id`` is a uuid column, and the writer batches.
+
+    A non-uuid id reaching the queue fails the whole batch it lands in --
+    somebody else's rows with it -- so it is refused here, even for an
+    element the session is holding.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    writer = writer_for(thread_id, hold=True)
+    registry.sessions["alice-session"].held = {"chart1"}
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload("chart1", thread_id)
+    )
+
+    assert response.status_code == 400
+    assert writer.held == ()
 
 
 async def test_a_non_custom_element_is_not_written(
@@ -1377,3 +1616,80 @@ async def test_the_settings_describe_the_running_app(client, auth) -> None:
 
 async def test_the_settings_need_a_login(client) -> None:
     assert (await client.get("/project/settings")).status_code == 401
+
+
+async def test_a_throwaway_slots_element_gets_no_row(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """``persist=False`` has to hold on this route too.
+
+    The session's copy is refreshed -- that is what the reload replays --
+    but a row written here would be the one thing bringing a throw-away
+    loader back on a cold resume.
+    """
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = str(uuid.uuid4())
+    writer = writer_for(thread_id, hold=True)
+    session = registry.sessions["alice-session"]
+    session.held = {element_id}
+    session.written = set()
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload(element_id, thread_id)
+    )
+
+    assert response.status_code == 200
+    assert [e.id for e in session.remembered] == [element_id]
+    assert writer.held == ()
+
+
+async def test_a_delete_lets_the_session_go_of_its_copy(
+    client, auth, persistence: Persistence, registry: StubRegistry
+) -> None:
+    """Deleting the row and leaving the session holding the element was a
+    reload that showed the card and a cold resume that did not."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    element_id = await make_element(persistence, thread_id)
+    session = registry.sessions["alice-session"]
+    session.held = {element_id}
+
+    login(client, auth, ALICE)
+    response = await client.request(
+        "DELETE",
+        "/project/element",
+        json={
+            "sessionId": "alice-session",
+            "element": {
+                "id": element_id,
+                "name": "chart",
+                "type": "custom",
+                "threadId": thread_id,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert session.forgotten == [element_id]
+
+
+async def test_a_throwaway_element_may_carry_any_id(
+    client, auth, persistence: Persistence, registry: StubRegistry, writer_for
+) -> None:
+    """The uuid gate protects the writer's batch and nothing else, so it
+    must not stand between a ``persist=False`` element and its session copy:
+    refused here, a loader that saved its props came back stale on F5."""
+    thread_id = await make_thread(persistence, owner=ALICE)
+    writer = writer_for(thread_id, hold=True)
+    session = registry.sessions["alice-session"]
+    session.held = {"loader"}
+    session.written = set()
+
+    login(client, auth, ALICE)
+    response = await client.put(
+        "/project/element", json=element_payload("loader", thread_id)
+    )
+
+    assert response.status_code == 200
+    assert [e.id for e in session.remembered] == ["loader"]
+    assert writer.held == ()

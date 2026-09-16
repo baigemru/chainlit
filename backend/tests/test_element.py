@@ -4,6 +4,7 @@ import json
 import uuid
 from unittest.mock import Mock
 
+import msgspec
 import pytest
 import pytest_asyncio
 
@@ -28,7 +29,10 @@ from chainlit.persistence.writer import (
     WriterRegistry,
     _HeldUpload,
 )
+from chainlit.protocol.payloads import Element as ElementPayload, Step
 from chainlit.protocol.server import ElementRemove, ElementUpsert
+from chainlit.ws.session import TranscriptEntry
+from chainlit.ws.sidebar import SidebarSlot
 from tests.conftest import bind_context
 
 
@@ -277,6 +281,47 @@ class TestCustomElement:
         shown = frames(session, ElementUpsert)
         assert [e.element.props["key"] for e in shown] == ["value", "changed"]
         assert shown[1].element.for_id == "message_123"
+
+    async def test_an_update_refreshes_the_copy_a_slot_is_showing(
+        self, ctx, session
+    ) -> None:
+        """The panel holds the element under no step at all.
+
+        Attaching by ``forId`` was the whole of what a send wrote into the
+        session, so a slot went on holding the props of the first send --
+        and a reload replayed them over what the user had changed.
+        """
+        custom = CustomElement(name="test_custom", props={"key": "value"})
+        await custom.send(for_id="", persist=False)
+        session.sidebar.slots.append(
+            SidebarSlot(
+                id="cards",
+                elements=[msgspec.convert(custom.to_dict(), ElementPayload)],
+            )
+        )
+
+        custom.props["key"] = "changed"
+        await custom.update()
+
+        assert [e.props["key"] for e in session.sidebar.slots[0].elements] == [
+            "changed"
+        ]
+
+    async def test_an_update_refreshes_the_copy_hanging_off_a_step(
+        self, ctx, session
+    ) -> None:
+        """And the transcript's, which is what a reconnect replays first."""
+        custom = CustomElement(name="test_custom", props={"key": "value"})
+        session.transcript.append(
+            TranscriptEntry(
+                step=msgspec.convert({"id": "m1", "type": "assistant_message"}, Step)
+            )
+        )
+        await custom.send(for_id="m1")
+        custom.props["key"] = "changed"
+        await custom.update()
+
+        assert [e.props["key"] for e in session.transcript[0].elements] == ["changed"]
 
 
 class TestElementEdgeCases:

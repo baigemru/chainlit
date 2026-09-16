@@ -70,6 +70,17 @@ The consequences for an element's author, benefits and costs together:
 - `props` is **one object for the element's lifetime**, never replaced. Reading
   `props.foo` during render always sees the current value, and
   `updateElement(Object.assign(props, { … }))` still works.
+- `updateElement` is what makes a change **survive**. It writes the element in
+  two places at once (`PUT /project/element` → `controllers/project.update_element`):
+  the row, which a cold resume reads, and the session's own copy of the element —
+  the transcript entry it hangs off and any panel slot showing it — which is what a
+  reload replays. A change kept only in `props` is gone on the next F5, and until
+  the session copy existed a change written with `updateElement` came back stale
+  anyway. The row is for **display**: an application that owns the fact the element
+  is showing keeps it somewhere of its own, not in the element it drew it with.
+- The `id` a panel element sees on the client is the **row id the engine minted**
+  from the thread and the name passed to `set_slot`, not that name itself. An element
+  that needs its name at runtime gets it through `props` (the consumer's `panelId`).
 - `useState(props.foo)` is the standard React trap and now bites for real: an
   initialiser runs once, and since the element no longer remounts on every update
   the state will never catch up with the prop. Derive from `props` during render,

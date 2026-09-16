@@ -28,7 +28,8 @@ interface TElement<T> {
   id: string;
   type: T;
   threadId?: string;
-  forId: string;
+  // Absent for an element of the panel: it hangs off no step.
+  forId?: string;
   mime?: string;
   url?: string;
   chainlitKey?: string;

@@ -34,6 +34,7 @@ from chainlit.persistence.models import SCHEMA_NAME
 from chainlit.persistence.records import ThreadDetail
 from chainlit.plugin import ChainlitPlugin
 from chainlit.security import ChainlitAuth, chainlit_auth
+from chainlit.ws.sidebar import row_id
 from tests.persistence.conftest import (  # noqa: F401 - fixture re-export
     TABLE_NAMES,
     database_url,
@@ -1119,3 +1120,159 @@ def test_a_fresh_session_is_not_told_its_own_thread_is_missing(
 
     assert frames[0]["t"] == "session.ready"
     assert [f for f in frames if f["t"] == "error"] == []
+
+
+# ------------------------------------------------ 9. the panel across a resume
+
+
+CARDS_SLOT_ID = "cards-composer"  # the application's name; the engine mints the row id
+LOADER_SLOT_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "chainlit.test/loader"))
+
+
+def _panel_app(test_config: Any, resumed: List[Dict[str, Any]]) -> None:
+    """An application that fills the panel and never restores it itself.
+
+    The point of the release: the recipe the consumer kept in
+    ``user_session`` and replayed in ``on_chat_resume`` is gone, and the
+    panel still comes back.
+    """
+
+    async def on_chat_start() -> None:
+        await cl.Sidebar.set_slot(
+            "cards",
+            [cl.CustomElement(name="Cards", props={"n": 1}, id=CARDS_SLOT_ID)],
+            title="Shortlist",
+        )
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo: {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        resumed.append(
+            {
+                "elements": list(thread.get("elements", [])),
+                "metadata": dict(thread.get("metadata", {})),
+                "sidebar_in_session": cl.user_session.get("__sidebar"),
+                "slots": [slot.id for slot in cl.Sidebar.state().slots],
+            }
+        )
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+
+def test_a_cold_resume_rebuilds_the_panel_from_the_rows_it_wrote(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """The panel survives the last tab closing, with no help from the app.
+
+    Four things at once, and each of them was a bug on the way here: the
+    slot's element is a row with no step; the thread remembers which tab it
+    was in; the resume hands it back through the same replay a reload uses;
+    and the rows do *not* also arrive inside ``thread.resume``, which is
+    what would send a fifty-card panel down the wire twice.
+    """
+    seed_user(db_url, ALICE)
+    resumed: List[Dict[str, Any]] = []
+    _panel_app(test_config, resumed)
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            send_and_read_reply(ws, "first words")
+            reap_soon(plugin)
+        thread_id = handshake[0]["threadId"]
+        detail = wait_for_thread(
+            db_url, thread_id, lambda d: len(d.elements) == 1 and len(d.steps) == 2
+        )
+        reaped(plugin, thread_id)
+
+        # The row: no step, so no ``forId`` -- that is what the resume
+        # recognises a panel element by.
+        [row] = detail.elements
+        cards_row_id = row_id(thread_id, CARDS_SLOT_ID)
+        assert row.id == cards_row_id
+        assert row.for_id is None
+        assert row.props == {"n": 1}
+        # And the thread remembers the tab, by id only.
+        stored = (detail.metadata or {})["__sidebar"]
+        assert [slot["id"] for slot in stored["slots"]] == ["cards"]
+        assert stored["slots"][0]["elementIds"] == [cards_row_id]
+        assert "rev" not in stored
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, threadId=thread_id)
+            wait_until(lambda: len(resumed) == 1)
+
+    order = [f["t"] for f in replay]
+    # The panel is the last piece of screen, after the conversation and
+    # before the spinner.
+    assert order.index("thread.resume") < order.index("element.upsert")
+    assert order.index("element.upsert") < order.index("sidebar.state")
+    assert order.index("sidebar.state") < order.index("task.indicator")
+
+    upserted = [f["element"]["id"] for f in replay if f["t"] == "element.upsert"]
+    assert upserted == [cards_row_id]
+    [state] = [f for f in replay if f["t"] == "sidebar.state"]
+    assert [slot["id"] for slot in state["slots"]] == ["cards"]
+    assert state["slots"][0]["elementIds"] == [cards_row_id]
+    assert state["slots"][0]["title"] == "Shortlist"
+    assert state["visible"] is True
+
+    # Once, not twice: the panel's rows are taken out of the snapshot before
+    # it is built, or a fifty-card composer goes down the wire again inside
+    # ``thread.resume`` and then again as the upserts above.
+    [snapshot] = [f for f in replay if f["t"] == "thread.resume"]
+    assert snapshot["thread"].get("elements", []) == []
+
+    # And the same for what the hook is handed -- plus the key itself, which
+    # is the thread's and never the application's: not in ``user_session``,
+    # not in the hook's dict, not in the snapshot.
+    assert resumed[0]["elements"] == []
+    assert resumed[0]["sidebar_in_session"] is None
+    assert "__sidebar" not in resumed[0]["metadata"]
+    assert "__sidebar" not in snapshot["thread"].get("metadata", {})
+    assert resumed[0]["slots"] == ["cards"]
+
+
+def test_a_slot_the_user_closed_does_not_come_back(
+    plugin: ChainlitPlugin, test_config: Any, auth: ChainlitAuth, db_url: str
+) -> None:
+    """Their move is written down, and the row goes with the tab.
+
+    The other half of "the panel survives": a panel that survived a close
+    would be a panel the user cannot get rid of.
+    """
+    seed_user(db_url, ALICE)
+    resumed: List[Dict[str, Any]] = []
+    _panel_app(test_config, resumed)
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            handshake = open_session(ws)
+            send_and_read_reply(ws, "first words")
+            thread_id = handshake[0]["threadId"]
+            wait_for_thread(db_url, thread_id, lambda d: len(d.elements) == 1)
+            ws.send_text(
+                json.dumps(
+                    {"t": "sidebar.user", "op": "close", "slot": "cards", "rev": 1}
+                )
+            )
+            read_until(ws, "sidebar.state")
+            reap_soon(plugin)
+        detail = wait_for_thread(db_url, thread_id, lambda d: not d.elements)
+        reaped(plugin, thread_id)
+
+        assert (detail.metadata or {})["__sidebar"].get("slots", []) == []
+
+        with client.websocket_connect("/ws") as ws:
+            replay = open_session(ws, threadId=thread_id)
+            wait_until(lambda: len(resumed) == 1)
+
+    assert [f for f in replay if f["t"] == "element.upsert"] == []
+    [state] = [f for f in replay if f["t"] == "sidebar.state"]
+    assert state.get("slots", []) == []
+    assert resumed[0]["slots"] == []

@@ -154,6 +154,25 @@ class _HeldUpload:
     upload: Upload
 
 
+@dataclass(slots=True)
+class _Uploading:
+    """An upload in flight, and whether its row is still wanted.
+
+    A ``DeleteElement`` for an element whose upload has not finished would
+    otherwise be applied *before* the ``SaveElement`` the upload ends in --
+    the delete goes into the queue now, the save when the bucket answers --
+    and the row it was meant to undo lands afterwards, a zombie pointing at
+    a blob nothing will ever delete. So a delete dooms the upload instead:
+    it still runs to completion (cancelling a PUT half-way leaves the bucket
+    in an unknown state), but writes no row, and discards what it uploaded
+    unless a newer upload of the same element -- same object key -- is
+    already in flight and about to overwrite it.
+    """
+
+    record: ElementRecord
+    doomed: bool = False
+
+
 class _Fence:
     """A marker that resolves once everything queued before it has run."""
 
@@ -195,6 +214,8 @@ class SessionWriter:
         self._gate_open = not hold_until_interaction
         self._batch_limit = batch_limit
         self._uploads: Set["asyncio.Task[None]"] = set()
+        #: By element id, the uploads in flight -- what a delete has to doom.
+        self._uploading: Dict[str, List[_Uploading]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._task: Optional["asyncio.Task[None]"] = None
         self._closing = False
@@ -283,10 +304,27 @@ class SessionWriter:
                 self.thread_id,
             )
             return
+        if isinstance(op, DeleteElement):
+            self._doom_uploads_of(op.element_id)
         if self._gate_open:
             self._queue.put_nowait(op)
         else:
             self._held.append(op)
+
+    def _doom_uploads_of(self, element_id: str) -> None:
+        """A delete has been issued: no upload of that element may end in a row.
+
+        One still waiting for the gate is simply forgotten -- nothing has
+        been uploaded for it. One in flight is left to finish and told not
+        to write; see ``_Uploading``.
+        """
+        self._held = [
+            entry
+            for entry in self._held
+            if not (isinstance(entry, _HeldUpload) and entry.record.id == element_id)
+        ]
+        for entry in self._uploading.get(element_id, ()):
+            entry.doomed = True
 
     def submit_threadsafe(self, op: Op) -> None:
         """Queue one write from a thread that is not running the event loop.
@@ -333,26 +371,44 @@ class SessionWriter:
             self._held.append(_HeldUpload(record, upload))
 
     def _start_upload(self, record: ElementRecord, upload: Upload) -> None:
-        task = asyncio.ensure_future(self._upload_then_write(record, upload))
+        entry = _Uploading(record)
+        self._uploading.setdefault(record.id, []).append(entry)
+        task = asyncio.ensure_future(self._upload_then_write(entry, upload))
         self._uploads.add(task)
         task.add_done_callback(self._uploads.discard)
 
-    async def _upload_then_write(self, record: ElementRecord, upload: Upload) -> None:
+    async def _upload_then_write(self, entry: _Uploading, upload: Upload) -> None:
+        record = entry.record
         try:
-            written = await upload()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # No row: an element whose blob is not in the bucket points at
-            # nothing. This is the invariant the legacy create_element got
-            # from doing the upload and the insert in one coroutine.
-            logger.warning(
-                "Upload for element %s failed; the element row is not written.",
-                record.id,
-                exc_info=True,
-            )
+            try:
+                written = await upload()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # No row: an element whose blob is not in the bucket points at
+                # nothing. This is the invariant the legacy create_element got
+                # from doing the upload and the insert in one coroutine.
+                logger.warning(
+                    "Upload for element %s failed; the element row is not written.",
+                    record.id,
+                    exc_info=True,
+                )
+                return
+        finally:
+            in_flight = self._uploading.get(record.id, [])
+            if entry in in_flight:
+                in_flight.remove(entry)
+            if not in_flight:
+                self._uploading.pop(record.id, None)
+        if not entry.doomed:
+            self.submit(SaveElement(written if written is not None else record))
             return
-        self.submit(SaveElement(written if written is not None else record))
+        # Deleted while uploading: no row, and the blob goes too -- unless a
+        # later upload of the same element is still in flight, in which case
+        # the key is about to be overwritten and is that upload's to keep.
+        key = written.object_key if written is not None else None
+        if key and not self._uploading.get(record.id):
+            await discard_blobs(self.persistence.storage, [key])
 
     def open_gate(self, prelude: Optional[Op] = None) -> None:
         """Release the held writes, behind ``prelude`` if one is given.

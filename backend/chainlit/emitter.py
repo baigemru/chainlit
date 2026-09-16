@@ -156,6 +156,11 @@ class Emitter:
         if payload.for_id and (entry := self._entry(payload.for_id)) is not None:
             entry.elements[:] = [e for e in entry.elements if e.id != payload.id]
             entry.elements.append(payload)
+        # Attaching only ever wrote the copy hanging off ``forId``. A panel
+        # slot holds the same element under no step at all, and a second send
+        # left it holding the props of the first one -- which a reconnect then
+        # replayed over the card the user had already changed.
+        self.session.remember_element(payload)
         self.session.send(ElementUpsert(element=payload))
 
     def remove_element(self, element_id: str) -> None:

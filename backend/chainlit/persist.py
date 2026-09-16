@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Union
 
 import msgspec
 
@@ -30,24 +30,58 @@ from chainlit.persistence.writer import (
     SaveStep,
     SessionWriter,
 )
+from chainlit.ws.sidebar import SIDEBAR_META_KEY, sidebar_meta
 
 if TYPE_CHECKING:
     from chainlit.ws.session import Session
 
 __all__ = [
+    "ENGINE_METADATA_KEYS",
     "delete_element",
     "delete_step",
+    "drop_elements",
     "open_thread",
+    "patch_sidebar",
     "save_element",
     "save_step",
+    "split_engine_metadata",
     "writer_of",
 ]
+
+# Thread metadata keys the engine owns. They share the row's ``metadata``
+# with whatever the application put in ``user_session``, and they must never
+# cross that line in either direction: ``thread_state`` writes them from the
+# engine's own state and not from ``session.state``, ``split_engine_metadata``
+# takes them out before a resume hands the rest to the application, and the
+# share route keeps them off a public thread. One set, three readers.
+ENGINE_METADATA_KEYS = frozenset({SIDEBAR_META_KEY})
 
 # State keys that describe a live session, never a thread. ``transit`` is a
 # hand-off between two sessions and would resurrect on every resume; the
 # rest are mirrors of the session the accessor keeps for the app's
 # convenience, and the conversation log, which is the steps table's job.
-_VOLATILE_STATE = frozenset({"transit_message", "__chat_messages", "id", "user", "env"})
+# The engine's own keys join them so an application writing one into
+# ``user_session`` cannot shadow the engine's record.
+_VOLATILE_STATE = (
+    frozenset({"transit_message", "__chat_messages", "id", "user", "env"})
+    | ENGINE_METADATA_KEYS
+)
+
+
+def split_engine_metadata(
+    metadata: Optional[Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A stored thread's metadata as ``(engine's, application's)``.
+
+    The one place the line is drawn on the way *in*: ``_resume`` reads the
+    first half itself and hands only the second to ``session.state``, the
+    hooks and the snapshot.
+    """
+    engine: dict[str, Any] = {}
+    app: dict[str, Any] = {}
+    for key, value in (metadata or {}).items():
+        (engine if key in ENGINE_METADATA_KEYS else app)[key] = value
+    return engine, app
 
 
 def writer_of(session: Optional["Session"] = None) -> Optional[SessionWriter]:
@@ -133,6 +167,51 @@ def delete_element(element_id: str, thread_id: Optional[str] = None) -> None:
         writer.submit(DeleteElement(element_id, thread_id))
 
 
+def drop_elements(session: "Session", element_ids: Sequence[str]) -> None:
+    """Delete the rows of elements nothing in the session is showing any more.
+
+    The panel's half of ``element.remove``: a card taken off the screen whose
+    row survives is a card the next cold resume puts back. The caller has
+    already asked the slot whether its elements were rows; nothing here
+    second-guesses that from the id.
+    """
+    writer = writer_of(session)
+    if writer is None:
+        return
+    for element_id in element_ids:
+        writer.submit(DeleteElement(element_id, session.thread_id))
+
+
+def patch_sidebar(session: "Session") -> None:
+    """Write down what the element panel is, as one metadata patch.
+
+    Submitted *after* the deletes of the same mutation, so the queue orders
+    those. The rows are a different matter: an element with a blob -- and a
+    custom element's props are one -- is written only once its upload
+    finishes, so the record can name a row that lands a moment later. That
+    window is harmless (``state_from_meta`` drops an id with no row, and the
+    row is there long before anybody resumes); what the writer does guard
+    is the other order, a delete overtaking the save it should undo.
+
+    Only structural moves reach here -- filling a slot, closing one, clearing
+    the panel, and the user closing a tab. ``hide``, ``show`` and ``activate``
+    do not: a click must not cost a database write, and a ``visible`` lost to
+    a crash costs the user one chevron.
+
+    The patch merges by key, so naming ``__sidebar`` alone is enough and the
+    rest of the thread's metadata is left where it is.
+    """
+    writer = writer_of(session)
+    if writer is None or not session.thread_id:
+        return
+    writer.submit(
+        PatchThread(
+            session.thread_id,
+            ThreadPatch(metadata={SIDEBAR_META_KEY: sidebar_meta(session.sidebar)}),
+        )
+    )
+
+
 async def open_thread(session: "Session", name: str, *, announce: bool = True) -> None:
     """The thread's first interaction: name the row, then release the writes.
 
@@ -189,6 +268,13 @@ def thread_state(session: "Session") -> dict[str, Any]:
     state["client_type"] = session.client_type
     state["device"] = session.device
     state["env"] = dict(session.user_env) if config.project.persist_user_env else {}
+    # After the filter rather than through it, so the panel's own record
+    # wins over an application key of the same name. Every existing
+    # ``PatchThread`` site carries it from here -- the ``open_thread``
+    # prelude, the disconnect, the release -- which is what makes the
+    # immediate patches of ``patch_sidebar`` insurance rather than the only
+    # record.
+    state[SIDEBAR_META_KEY] = sidebar_meta(session.sidebar)
     return _jsonable(state)
 
 

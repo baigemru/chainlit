@@ -258,7 +258,14 @@ class Element:
         persistence.delete_element(self.id, self.thread_id)
         context.emitter.remove_element(self.id)
 
-    async def send(self, for_id: str, persist: bool = True):
+    async def send(self, for_id: Optional[str], persist: bool = True):
+        """Spool, write and show the element, attached to the step ``for_id``.
+
+        ``for_id=None`` is an element that hangs off no step: the element
+        panel's own contents. It is written with ``forId NULL``, which is
+        what a cold resume recognises them by -- an empty string would not,
+        because ``forId`` is a ``uuid`` column and ``""`` is not a uuid.
+        """
         self.for_id = for_id
 
         if not self.mime:

@@ -18,14 +18,19 @@ time a PDF was opened beside it.
 from __future__ import annotations
 
 import asyncio
-from typing import List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 import msgspec
 
+# Aliased: ``set_slot(persist=...)`` is a public keyword and would shadow it.
+from chainlit import persist as persistence
 from chainlit.context import context
 from chainlit.element import ElementBased
 from chainlit.protocol.payloads import Element as ElementPayload
-from chainlit.ws.sidebar import PREVIEW_SLOT, SidebarState, orphaned
+from chainlit.ws.sidebar import PREVIEW_SLOT, SidebarState, release, row_id
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from chainlit.ws.session import Session
 
 __all__ = ["Sidebar", "SidebarState"]
 
@@ -47,6 +52,7 @@ class Sidebar:
         activate: bool = True,
         closable: bool = True,
         canvas: bool = False,
+        persist: bool = True,
     ) -> None:
         """Put ``elements`` in the slot ``id``, creating it if it is new.
 
@@ -74,8 +80,31 @@ class Sidebar:
         click in the feed, and an application writing into it would erase
         what they were looking at -- and be erased by their next click.
 
+        ``persist`` decides whether the slot's contents are *rows*. They are
+        by default, written with ``forId NULL``, which is how the panel comes
+        back after the last tab on this conversation was closed a day ago --
+        restoring it is the engine's job, not a recipe the application keeps
+        and replays in ``on_chat_resume``. ``persist=False`` is for content
+        that is not worth a row: a loader, a progress card, anything the next
+        call replaces anyway.
+
+        The id the application gives a persisted element is *its* name for
+        it, not the row's: the row id is minted from the thread and that
+        name, the same on every call (``ws.sidebar.row_id``), and the element
+        is sent under it. So ``id="cards"`` is stable, updates in
+        place, and is a different row in every conversation -- ``elements.id``
+        is the table's only key, and a name shared by every user of a
+        deployment would otherwise be one row they all overwrite. An element
+        that already hangs off a step keeps the id it has.
+
+        A persisted element may not arrive carrying an ``object_key`` of its
+        own: the panel deletes its rows when a tab closes, and deleting a row
+        discards the blob its key names. A file the application owns goes in
+        by ``url=``, which the row keeps and the delete leaves alone.
+
         Raises:
-            ValueError: ``id`` is the reserved preview address.
+            ValueError: ``id`` is the reserved preview address, or a persisted
+                element names a blob the panel would delete.
         """
         _refuse_preview(id)
         session = context.session
@@ -85,14 +114,23 @@ class Sidebar:
             await Sidebar.close_slot(id)
             return
 
+        if persist:
+            _mint_row_ids(session, elements)
+
         # Sent first, and before the model is touched: ``send`` is what mints
         # the element's key and url, so ``to_dict()`` is only the truth
-        # afterwards. ``persist=False`` with an empty ``forId`` keeps them out
-        # of the transcript -- the panel is their home, and a step they were
-        # never attached to must not replay them.
+        # afterwards. An element that already hangs off a step keeps that
+        # step: putting a feed element in a tab must not detach its row from
+        # the message it came from. One that hangs off nothing is the panel's
+        # own, and ``None`` is the persisted spelling of "no step" -- ``forId``
+        # is a uuid column and ``""`` does not parse as one; ``""`` stays the
+        # throw-away spelling so a ``persist=False`` element is unchanged.
         await asyncio.gather(
             *(
-                element.send(for_id=element.for_id or "", persist=False)
+                element.send(
+                    for_id=element.for_id or (None if persist else ""),
+                    persist=persist,
+                )
                 for element in elements
             )
         )
@@ -103,7 +141,11 @@ class Sidebar:
         # Decided inside the model, where "is this slot new?" is asked at the
         # moment of the mutation. Asked out here it was read before the
         # ``await`` above and acted on after it -- a ``sidebar.user close``
-        # arriving in that window answered the question for us.
+        # arriving in that window answered the question for us. What the
+        # displaced elements *were* -- rows or not -- is the slot's answer as
+        # it stood before the mutation, and it is read in the same breath.
+        existing = sidebar.slot(id)
+        had_rows = existing.persisted if existing is not None else persist
         dropped = sidebar.set_slot(
             id,
             payloads,
@@ -111,8 +153,10 @@ class Sidebar:
             activate=activate,
             closable=closable,
             canvas=canvas,
+            persisted=persist,
         )
-        _release(dropped)
+        release(session, dropped, rows=had_rows)
+        persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
     @staticmethod
@@ -124,7 +168,8 @@ class Sidebar:
         """
         _refuse_preview(id)
         session = context.session
-        _release(session.sidebar.close_slot(id))
+        _close(session, id)
+        persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
     @staticmethod
@@ -147,8 +192,17 @@ class Sidebar:
 
     @staticmethod
     async def clear() -> None:
-        """Close every slot."""
-        _release(context.session.sidebar.clear())
+        """Close every slot, and put the panel away with them."""
+        session = context.session
+        # One tab at a time, so each slot's leavings are let go with that
+        # slot's own answer to "were these rows"; the model's ``clear`` would
+        # hand back one list with the answer already lost. It is still called,
+        # for the panel itself: an empty panel the chevron opened is on screen
+        # with no tab to close, and ``clear`` means "away" even then.
+        for slot in list(session.sidebar.slots):
+            _close(session, slot.id)
+        session.sidebar.clear()
+        persistence.patch_sidebar(session)
         context.emitter.sidebar_state()
 
     @staticmethod
@@ -166,15 +220,37 @@ def _refuse_preview(slot_id: str) -> None:
         )
 
 
-def _release(element_ids: Sequence[str]) -> None:
-    """Take the panel's own leavings off the client, and nothing else.
+def _close(session: Session, slot_id: str) -> None:
+    """Drop one slot and let its elements go, rows and all if it had rows."""
+    slot = session.sidebar.slot(slot_id)
+    if slot is None:
+        return
+    release(session, session.sidebar.close_slot(slot_id), rows=slot.persisted)
 
-    ``orphaned`` is the gate: an element still in another slot, or hanging
-    off a step in the transcript, belongs to something that is still showing
-    it. A ``preview`` slot holds an element of the *feed*, and removing that
-    because the tab went away would blank the attachment in the message it
-    came from.
+
+def _mint_row_ids(session: Session, elements: Sequence[ElementBased]) -> None:
+    """Give each new element of a persisted slot the id its row will have.
+
+    Minted once: an element the panel is already showing is under its row id
+    and is left alone (minting again would mint a *different* id from the
+    minted one, and every refresh would be unmount-and-mount). An element
+    hanging off a step is the feed's and keeps the id its row already has.
+
+    The ``object_key`` refusal lives here because it is the same question --
+    "what will this row be" -- asked before anything is sent. The engine's
+    own uploads set the key on the *record*, inside the writer, never on the
+    element, so this cannot fire on a blob the panel minted itself.
     """
-    session = context.session
-    for element_id in orphaned(session, element_ids):
-        context.emitter.remove_element(element_id)
+    thread_id = session.thread_id or ""
+    already = set(session.sidebar.element_ids())
+    for element in elements:
+        if element.for_id:
+            continue
+        if getattr(element, "object_key", None):
+            raise ValueError(
+                f"element {element.id!r} names a blob ({element.object_key!r}) "
+                f"the panel would discard when its tab closes; pass url= for "
+                f"a file the application owns, or persist=False"
+            )
+        if element.id not in already:
+            element.id = row_id(thread_id, element.id)

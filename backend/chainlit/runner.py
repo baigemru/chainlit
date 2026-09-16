@@ -47,6 +47,7 @@ from chainlit.utils import utc_now
 from chainlit.ws.handshake import Arrival
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
+from chainlit.ws.sidebar import SIDEBAR_META_KEY, state_from_meta
 
 if TYPE_CHECKING:
     from chainlit.persistence.config import Persistence
@@ -337,7 +338,23 @@ class ApplicationRunner:
         # get a thread already free of the steps a resume takes away.
         detail = hide_resume_deleted(detail, self.registry)
 
-        metadata = dict(detail.metadata or {})
+        # The element panel's rows, taken out of the thread before anything
+        # is built from it. They hang off no step, so ``forId`` is NULL and
+        # that is what names them. Left in, a fifty-card panel would go out
+        # twice -- once inside ``thread.resume``, once again as the upserts
+        # ``restore()`` sends ahead of the panel frame -- and the dict
+        # ``on_chat_resume`` receives would be mostly panel.
+        # The lookup below is over *every* row, though: a feed element the
+        # application put in a tab keeps its step, so its row is not a panel
+        # row, and the tab still has to find it.
+        all_rows = list(detail.elements)
+        detail.elements = [row for row in detail.elements if row.for_id is not None]
+
+        # The engine's half of the metadata is read here and goes no further:
+        # the dict ``on_chat_resume`` receives is the same one the snapshot is
+        # built from, and neither is the place for the panel's record.
+        engine_metadata, metadata = persist.split_engine_metadata(detail.metadata)
+        detail.metadata = metadata
         session.state.update(
             # ``device`` joins the excluded mirrors for the same reason: it
             # describes the connection reading the thread, not the thread. A
@@ -352,6 +369,17 @@ class ApplicationRunner:
             session.chat_profile = profile
         session.parent_thread_id = detail.parent_thread_id
         session.transcript[:] = _transcript_of(detail)
+        # Only on this path. A session that is merely reconnecting is
+        # ``kept`` and never reaches here, and its panel is the live model --
+        # rebuilding it from rows would undo whatever the application has
+        # done to it since.
+        session.sidebar = state_from_meta(
+            engine_metadata.get(SIDEBAR_META_KEY),
+            [
+                msgspec.convert(_present(msgspec.to_builtins(row)), Element)
+                for row in all_rows
+            ],
+        )
         session.first_interaction = "resume"
         session.resumed_thread_id = thread_id
         # A resume *is* the start of this chat.

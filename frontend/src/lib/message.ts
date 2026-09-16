@@ -5,7 +5,10 @@ const toSafeLinkTarget = (name: string) =>
     .replace(/\(/g, '%28')
     .replace(/\)/g, '%29'); // Encode parentheses to avoid issues in URLs
 
-const isForIdMatch = (id: string | number | undefined, forId: string) => {
+const isForIdMatch = (
+  id: string | number | undefined,
+  forId: string | undefined
+) => {
   if (!forId || !id) {
     return false;
   }

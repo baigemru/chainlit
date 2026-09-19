@@ -136,6 +136,7 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
         rev=7,
     ),
     "toast": s.Toast(message="Saved", type="success"),
+    "account.badge": s.AccountBadge(count=3),
 }
 
 

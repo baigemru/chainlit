@@ -1,4 +1,4 @@
-"""The account page's two routes.
+"""The account page's routes: read it, save it, press a button on it.
 
 ``/project/account``, not ``/account``: the second is a client-side route and
 a server handler there would take the page away from the SPA.
@@ -6,15 +6,20 @@ a server handler there would take the page away from the SPA.
 There is no ``[UI]`` mirror of "is an account registered". The page asks this
 controller and a 404 here *is* the not-configured state -- one fact, in one
 place, answered by the thing that knows it.
+
+The action route borrows rather than reimplements: the page it may answer with
+is the one ``build_page`` produces for the other two, and the conversation it
+may open is minted by ``transit_store.mint_handover``, which is the same pair
+of steps ``emitter.set_chat_profile`` takes. A second way to hand a message to
+a successor session would be a second set of rules about who may claim it.
 """
 
 from __future__ import annotations
 
-import inspect
 from typing import Any, Dict, Optional, Type
 
 import msgspec
-from litestar import Controller, get, put
+from litestar import Controller, get, post, put
 from litestar.connection import ASGIConnection
 from litestar.di import NamedDependency
 from litestar.exceptions import (
@@ -24,14 +29,31 @@ from litestar.exceptions import (
     ValidationException,
 )
 from litestar.handlers.base import BaseRouteHandler
-from litestar.params import SkipValidation
+from litestar.params import FromPath, SkipValidation
 from litestar.types import Empty
 
 import chainlit.config
-from chainlit.account import AccountPage, as_account, build_page, decode_stored
+from chainlit.account import (
+    AccountActionCall,
+    AccountActionResponse,
+    AccountPage,
+    OpenThread,
+    OpenThreadOutcome,
+    PageOutcome,
+    Refresh,
+    Toast,
+    as_account,
+    build_page,
+    call_hook,
+    decode_stored,
+    element_type_at,
+)
+from chainlit.account_badge import push_account_badge
 from chainlit.controllers.caller import caller
+from chainlit.controllers.sessions import UserSessions
 from chainlit.persistence.services import UserService
 from chainlit.security import AuthedRequest, Identity
+from chainlit.transit_store import TransitStore, mint_handover
 
 __all__ = ("AccountController", "require_identity")
 
@@ -61,15 +83,21 @@ class AccountController(Controller):
     async def read(
         self,
         request: AuthedRequest,
+        sessions: NamedDependency[UserSessions],
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
     ) -> AccountPage:
         """The form, the values behind it, and whether it can be saved."""
         cls = _registered()
         identity = caller(request)
-        return build_page(
+        page = build_page(
             await _current(cls, identity, user_service),
             readonly=_readonly(user_service),
         )
+        # After the values, not before: the application marks things seen
+        # inside ``on_account_load``, so the count computed ahead of it is
+        # the one the user is looking at rather than the one that is left.
+        await push_account_badge(sessions, identity)
+        return page
 
     @put()
     async def write(
@@ -104,7 +132,7 @@ class AccountController(Controller):
         identity = caller(request)
         message: Optional[str] = None
         if code.on_account_update is not None:
-            returned = await _call(code.on_account_update, identity, account)
+            returned = await call_hook(code.on_account_update, identity, account)
             # Anything but a string was not asking for a toast.
             message = returned if isinstance(returned, str) and returned else None
         if user_service is not None and identity is not None:
@@ -119,6 +147,84 @@ class AccountController(Controller):
             await _current(cls, identity, user_service),
             readonly=readonly,
             message=message,
+        )
+
+    @post("/actions/{name:str}")
+    async def act(
+        self,
+        request: AuthedRequest,
+        name: FromPath[str],
+        data: AccountActionCall,
+        transit: NamedDependency[TransitStore],
+        user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
+    ) -> AccountActionResponse:
+        """Run the hook a button on the page names, and say what follows.
+
+        Three refusals before any application code runs, in order of cost:
+        an action nobody registered is a 404, a ``path`` the registered
+        Struct cannot address is a 400, and an ``item`` that does not fit
+        the type the *schema* says sits at that path is a 400 carrying
+        msgspec's own message -- which names the offending field and is the
+        only field addressing the client has.
+        """
+        cls = _registered()
+        hook = chainlit.config.config.code.account_actions.get(name)
+        if hook is None:
+            raise NotFoundException(f"No account action named {name!r}.")
+
+        try:
+            element_type = element_type_at(cls, data.path)
+        except LookupError as error:
+            raise ValidationException(detail=str(error)) from error
+
+        item: Any = None
+        if data.item is not None:
+            # A tab action addresses a Struct too, but its item is null and
+            # converting the tab itself would hand the hook a copy of the
+            # whole tab the user never edited.
+            try:
+                item = msgspec.convert(data.item, element_type)
+            except msgspec.ValidationError as error:
+                raise ValidationException(detail=str(error)) from error
+
+        identity = caller(request)
+        outcome = await call_hook(hook, identity, item)
+
+        if isinstance(outcome, Toast):
+            return AccountActionResponse(outcome=outcome)
+        if isinstance(outcome, Refresh):
+            return AccountActionResponse(
+                outcome=PageOutcome(
+                    page=build_page(
+                        await _current(cls, identity, user_service),
+                        readonly=_readonly(user_service),
+                    ),
+                    message=outcome.message,
+                )
+            )
+        if isinstance(outcome, OpenThread):
+            # The same handover a profile switch performs, from a page
+            # instead of from a session: the engine mints the thread and
+            # parks the record, the browser opens it, and the socket that
+            # arrives claims it. ``owner`` is the caller -- the route runs
+            # behind the guard, so there is always one.
+            owner = identity.identifier if identity is not None else None
+            thread_id = await mint_handover(
+                transit,
+                outcome.transit_message,
+                owner,
+                parent=outcome.parent,
+            )
+            return AccountActionResponse(
+                outcome=OpenThreadOutcome(
+                    thread_id=thread_id,
+                    chat_profile=outcome.chat_profile,
+                    has_transit_message=outcome.transit_message is not None,
+                )
+            )
+        raise TypeError(
+            f"@cl.account_action({name!r}) returned {outcome!r}. It must "
+            "return cl.AccountToast, cl.AccountRefresh or cl.AccountOpenThread."
         )
 
 
@@ -144,24 +250,9 @@ async def _current(
     """The values to render: the app's, else the engine's, else the defaults."""
     code = chainlit.config.config.code
     if code.on_account_load is not None:
-        loaded = await _call(code.on_account_load, identity)
+        loaded = await call_hook(code.on_account_load, identity)
         if loaded is not None:
             return as_account(loaded, cls)
     if user_service is not None and identity is not None:
         return decode_stored(await user_service.get_account(identity.identifier), cls)
     return cls()
-
-
-async def _call(hook: Any, *args: Any) -> Any:
-    """Run an app hook, sync or async, and let whatever it raises out.
-
-    Not ``wrap_user_function``: that wrapper logs an exception and answers
-    ``None``, which the session hooks want and these do not -- a load hook
-    that crashed would silently fall back to the stored values, and a save
-    hook that crashed would be followed by a store and a "saved". Litestar's
-    exception handling turns the raise into the 500 it is.
-    """
-    result = hook(*args)
-    if inspect.isawaitable(result):
-        return await result
-    return result

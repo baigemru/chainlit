@@ -15,7 +15,14 @@ const mockNavigate = vi.fn();
 
 vi.mock('@chainlit/react-client', () => ({
   useAuth: () => mockUseAuth(),
-  useConfig: () => mockUseConfig()
+  useConfig: () => mockUseConfig(),
+  accountBadgeState: { key: 'AccountBadge' }
+}));
+
+// The badge is `userNavBadge.spec.tsx`'s subject; here it is always absent,
+// which is what the row counts assume.
+vi.mock('recoil', () => ({
+  useRecoilValue: () => undefined
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -39,7 +46,8 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
 }));
 
 vi.mock('@/components/i18n/Translator', () => ({
-  default: ({ path }: { path: string }) => <span>{path}</span>
+  default: ({ path }: { path: string }) => <span>{path}</span>,
+  useTranslation: () => ({ t: (path: string) => path })
 }));
 
 const someone = {

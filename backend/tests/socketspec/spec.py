@@ -177,7 +177,9 @@ class Given:
     sidebar_hidden: bool = False
     """The user put the panel away. The slots above are still there."""
 
-    hooks: Tuple[Literal["chat_start", "chat_resume", "thread_ready"], ...] = ()
+    hooks: Tuple[
+        Literal["chat_start", "chat_resume", "thread_ready", "account_badge"], ...
+    ] = ()
     """Which callbacks the running application registered.
 
     Application state, not transport state: the same app runs on either

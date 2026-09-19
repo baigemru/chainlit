@@ -1,11 +1,13 @@
 import capitalize from 'lodash/capitalize';
 import { useContext, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import Page from 'pages/Page';
 
 import {
   ChainlitContext,
+  type IAccountActionResponse,
   type IAccountPage,
   cloneClient,
   useApi,
@@ -20,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useTranslation } from 'components/i18n/Translator';
 
 import { useLayoutMaxWidth } from '@/hooks/useLayoutMaxWidth';
+import { useSessionHandoff } from '@/hooks/useSessionHandoff';
 
 /**
  * The account page: whatever the application declared with `@cl.account`.
@@ -38,6 +41,14 @@ export default function Account() {
   const apiClient = useContext(ChainlitContext);
   const layoutMaxWidth = useLayoutMaxWidth();
   const { t } = useTranslation();
+  const handoff = useSessionHandoff();
+
+  // The address bar is the only tab state there is, so a tab is linkable and
+  // survives a reload. Nothing writes the first tab into the URL: a page
+  // opened without `?tab=` stays clean and `SchemaForm` falls back to the
+  // first one on its own.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') ?? undefined;
 
   const { data, error, isLoading, mutate } =
     useApi<IAccountPage>('/project/account');
@@ -80,6 +91,54 @@ export default function Account() {
     }
   };
 
+  /**
+   * A button declared by `x-actions` was pressed.
+   *
+   * The page does not know what the action means; it posts the element the
+   * form is holding and applies whichever of the three outcomes came back.
+   * Same silenced client as the save, for the same reason: one failure, one
+   * toast, carrying the server's `detail`.
+   */
+  const onAction = async (name: string, path: string, item: unknown | null) => {
+    try {
+      const res = await saveClient.post(`/project/account/actions/${name}`, {
+        path,
+        item
+      });
+      const { outcome } = (await res.json()) as IAccountActionResponse;
+      switch (outcome.t) {
+        case 'toast':
+          toast.success(outcome.message);
+          break;
+        case 'page':
+          // The hook answered with the page rebuilt, exactly as a save does,
+          // so the form adopts it without a second round trip.
+          mutate(outcome.page, false);
+          if (outcome.message) toast.success(outcome.message);
+          break;
+        case 'open_thread':
+          // The very path a `session.handoff` frame takes, through the shared
+          // hook: the server has already minted the successor thread and
+          // parked the hand-over record under it, so this is a hand-off that
+          // happens to have been asked for over HTTP.
+          handoff({
+            t: 'session.handoff',
+            chatProfile: outcome.chat_profile,
+            nextThreadId: outcome.thread_id ?? undefined,
+            keepTranscript: false,
+            hasTransitMessage: outcome.has_transit_message
+          });
+          break;
+      }
+    } catch (err) {
+      const failure = err as { detail?: string; message?: string };
+      toast.error(failure.detail || failure.message);
+      // Not rethrown, unlike the save: a card button has nothing to restore
+      // but itself, and it is re-enabled by this promise settling either
+      // way. A rejection here would only reach the form as an unhandled one.
+    }
+  };
+
   const body = () => {
     if (isLoading) {
       return (
@@ -111,6 +170,22 @@ export default function Account() {
           values={data.values}
           readonly={data.readonly}
           onSubmit={onSubmit}
+          onAction={onAction}
+          activeTab={activeTab}
+          onTabChange={(name) =>
+            // Replace, not push: Back leaves the account page rather than
+            // walking backwards through the tabs the user looked at. A copy
+            // of the previous params, so a `?tab=` change keeps whatever
+            // else the address carries.
+            setSearchParams(
+              (previous) => {
+                const next = new URLSearchParams(previous);
+                next.set('tab', name);
+                return next;
+              },
+              { replace: true }
+            )
+          }
         />
       </>
     );

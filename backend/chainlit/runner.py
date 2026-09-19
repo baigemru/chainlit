@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Mapping, Optional, Sequence
 import msgspec
 
 from chainlit import persist
+from chainlit.account_badge import push_account_badge
 from chainlit.context import init_context
 from chainlit.controllers.project import hide_resume_deleted
 from chainlit.emitter import Emitter
@@ -424,7 +425,22 @@ class ApplicationRunner:
         elif arrival.start_chat:
             self._launch(session, self.code.on_chat_start())
 
+        await self._push_account_badge(session)
         emitter.resync_task_indicator()
+
+    async def _push_account_badge(self, session: Session) -> None:
+        """The unread count, on every hello. Swallowed if the hook fails.
+
+        The one of the three call sites that must not raise: an exception
+        here escapes into ``_serve``'s task group, which cancels the reader
+        and the heartbeat with it -- so a badge hook with a bad day would
+        close the socket of every user who opened the app. Nobody asked for
+        this number; it is offered, and an offer that fails is logged.
+        """
+        try:
+            await push_account_badge(self.registry, session.user)
+        except Exception:
+            logger.exception("account badge hook failed on hello")
 
     async def _resume_hooks(self, session: Session, thread: Mapping[str, Any]) -> None:
         """``on_chat_resume`` first, then ``on_thread_ready`` in its own slot.

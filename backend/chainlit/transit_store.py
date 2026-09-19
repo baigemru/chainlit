@@ -31,6 +31,7 @@ scheduled sweep is what bounds growth now.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from typing import Any, AsyncIterator, Optional, Union
@@ -47,6 +48,7 @@ __all__ = (
     "TRANSIT_STORE_NAME",
     "TransitRecord",
     "TransitStore",
+    "mint_handover",
     "transit_sweeper",
 )
 
@@ -174,6 +176,33 @@ class TransitStore:
         reap = getattr(self.store, "delete_expired", None)
         if reap is not None:
             await reap()
+
+
+async def mint_handover(
+    transit: Optional[TransitStore],
+    value: Any,
+    owner: Optional[str],
+    parent: Optional[str] = None,
+) -> Optional[str]:
+    """Mint the thread a handover lands in, and park the record under it.
+
+    ``None`` when there is nothing to hand over -- no value and no parent.
+    That is not a degenerate case: a profile switch out of a conversation
+    that has not started yet has neither, and minting a thread for it would
+    put an empty conversation in somebody's address bar.
+
+    Here rather than in the emitter because there are two ways to start a
+    handover now -- a session calling ``set_chat_profile`` and a button on
+    the account page -- and the pair "mint an id, park a record under it" is
+    the whole of what they share. Two copies of it would be two answers to
+    "which id does the successor open".
+    """
+    if value is None and parent is None:
+        return None
+    thread_id = str(uuid.uuid4())
+    if transit is not None:
+        await transit.park(thread_id, value, owner, parent=parent)
+    return thread_id
 
 
 @asynccontextmanager

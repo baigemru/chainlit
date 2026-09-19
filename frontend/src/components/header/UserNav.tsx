@@ -1,10 +1,12 @@
 import capitalize from 'lodash/capitalize';
 import { LogOut, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useRecoilValue } from 'recoil';
 
-import { useAuth, useConfig } from '@chainlit/react-client';
+import { accountBadgeState, useAuth, useConfig } from '@chainlit/react-client';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,6 +17,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Translator } from 'components/i18n';
+import { useTranslation } from 'components/i18n/Translator';
 
 interface Props {
   /**
@@ -28,10 +31,16 @@ export default function UserNav({ collapsed }: Props) {
   const { user, logout } = useAuth();
   const { config } = useConfig();
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  // Pushed by the server on `account.badge`, and `undefined` until one
+  // arrives: an application that registered no badge hook says nothing, and
+  // a zero this client invented would be an answer it never gave.
+  const badge = useRecoilValue(accountBadgeState);
 
   if (!user) return null;
   const displayName = user?.display_name || user?.identifier;
   const account = config?.ui?.account;
+  const unseen = badge ?? 0;
 
   const items = (
     <>
@@ -51,6 +60,11 @@ export default function UserNav({ collapsed }: Props) {
           ) : (
             <Translator path="navigation.user.menu.account" />
           )}
+          {unseen > 0 ? (
+            <Badge variant="destructive" className="ml-2 px-1.5 py-0">
+              {unseen}
+            </Badge>
+          ) : null}
           <UserRound className="ml-auto" />
         </DropdownMenuItem>
       ) : null}
@@ -97,6 +111,14 @@ export default function UserNav({ collapsed }: Props) {
               {capitalize(displayName[0])}
             </AvatarFallback>
           </Avatar>
+          {/* The menu is closed most of the time, so the count inside it
+              cannot be what tells the user there is something to see. */}
+          {unseen > 0 ? (
+            <span
+              aria-label={t('account.badge.aria')}
+              className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-destructive ring-2 ring-background"
+            />
+          ) : null}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-26" align="end" forceMount>

@@ -272,6 +272,40 @@ describe('SchemaForm', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('draws an image widget outside a card as the plain string field it is', () => {
+    render(
+      <SchemaForm
+        schema={{
+          $ref: '#/$defs/Root',
+          $defs: {
+            Root: {
+              title: 'Root',
+              type: 'object',
+              properties: {
+                cover: {
+                  title: 'Обложка',
+                  'x-widget': 'image',
+                  type: 'string',
+                  default: ''
+                }
+              },
+              required: []
+            }
+          }
+        }}
+        values={{ cover: 'https://example.test/a.jpg' }}
+        onSubmit={vi.fn()}
+      />
+    );
+    const cover = screen.getByLabelText('Обложка') as HTMLInputElement;
+
+    // `image` and `title` are card vocabulary; a field that is not in a card
+    // has to stay editable rather than turn into a picture of its own value.
+    expect(cover.type).toBe('text');
+    expect(cover.value).toBe('https://example.test/a.jpg');
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
   it('shows an unsupported field as JSON and says so', () => {
     mount();
 
@@ -344,10 +378,42 @@ describe('SchemaForm', () => {
 
     expect(calc).not.toHaveAttribute('hidden');
     expect(limits).toHaveAttribute('hidden');
+    // The attribute alone lost to the panel's own `flex` in a real browser
+    // (both tabs were on screen, 20.09); the Radix `data-state` variant is
+    // what actually hides it, so its presence is part of the guarantee.
+    expect(limits).toHaveAttribute('data-state', 'inactive');
+    expect(limits.className).toContain('data-[state=inactive]:hidden');
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Лимиты' }));
     expect(calc).toHaveAttribute('hidden');
     expect(limits).not.toHaveAttribute('hidden');
+  });
+
+  it('opens the tab `activeTab` names and reports a click instead of moving itself', () => {
+    const onTabChange = vi.fn();
+    mount({ activeTab: 'limits', onTabChange });
+    const limits = screen
+      .getByLabelText('Повторы')
+      .closest('[role="tabpanel"]')!;
+
+    expect(limits).not.toHaveAttribute('hidden');
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Расчёт' }));
+
+    expect(onTabChange).toHaveBeenCalledWith('calc');
+    // Controlled: the strip does not move until the caller moves it.
+    expect(limits).not.toHaveAttribute('hidden');
+  });
+
+  it('falls back to the first tab when `activeTab` names none', () => {
+    mount({ activeTab: 'gone' });
+
+    expect(
+      screen.getByLabelText('Маржа, %').closest('[role="tabpanel"]')
+    ).not.toHaveAttribute('hidden');
+    expect(
+      screen.getByLabelText('Повторы').closest('[role="tabpanel"]')
+    ).toHaveAttribute('hidden');
   });
 
   it('refuses to submit an emptied number that cannot be null', async () => {

@@ -7,6 +7,7 @@ import { Translator } from '@/components/i18n';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+import { ActionButtons } from './Cards';
 import Field from './Field';
 import { ResolvedField, resolveForm } from './resolve';
 
@@ -25,6 +26,15 @@ export interface SchemaFormProps {
   readonly?: boolean;
   /** Resolves when the server accepted; rejects (with the server's detail) otherwise. */
   onSubmit: (values: Record<string, unknown>) => Promise<void> | void;
+  /** Controlled tab. A name no tab carries shows the first one. */
+  activeTab?: string;
+  onTabChange?: (name: string) => void;
+  /** A button from `x-actions` was pressed; `item` is the card's current form value, or null for a tab action. */
+  onAction?: (
+    name: string,
+    path: string,
+    item: unknown
+  ) => Promise<void> | void;
 }
 
 /**
@@ -40,10 +50,20 @@ const SchemaForm = ({
   schema,
   values,
   readonly,
-  onSubmit
+  onSubmit,
+  activeTab,
+  onTabChange,
+  onAction
 }: SchemaFormProps) => {
   const { sections, tabs } = useMemo(() => resolveForm(schema), [schema]);
-  const [activeTab, setActiveTab] = useState(tabs[0]?.name ?? '');
+  const [ownTab, setOwnTab] = useState<string | undefined>(undefined);
+
+  // `?tab=` names a tab the application may have renamed or dropped since the
+  // link was shared; the page opens on the first tab rather than on nothing.
+  const wanted = activeTab ?? ownTab;
+  const current = tabs.some((tab) => tab.name === wanted)
+    ? (wanted as string)
+    : (tabs[0]?.name ?? '');
 
   const {
     control,
@@ -65,6 +85,7 @@ const SchemaForm = ({
       field={field}
       control={control}
       disabled={readonly}
+      onAction={onAction}
     />
   );
 
@@ -89,7 +110,16 @@ const SchemaForm = ({
       ) : null}
 
       {tabs.length > 0 ? (
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs
+          value={current}
+          onValueChange={(value) => {
+            // A controlled caller owns the tab; keeping a second copy here is
+            // how the strip and the URL end up disagreeing after a Back.
+            if (activeTab === undefined) setOwnTab(value);
+            onTabChange?.(value);
+          }}
+          className="w-full"
+        >
           <TabsList className="w-full justify-start overflow-x-auto">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.name} value={tab.name}>
@@ -106,16 +136,27 @@ const SchemaForm = ({
               // tab holding a "Required" is exactly when you need to see it.
               // `hidden` is stated here rather than left to Radix, which
               // computes it from `present` — always true under `forceMount`,
-              // so every panel would be on screen at once.
+              // so every panel would be on screen at once. The attribute
+              // alone is not enough: `flex` is a utility of the same
+              // specificity as preflight's `[hidden]` rule and comes later,
+              // so it would win and show the panel anyway. Radix still
+              // stamps `data-state` under `forceMount`, and a variant on it
+              // outranks the utility (seen live on 20.09: both tabs drawn).
               forceMount
-              hidden={tab.name !== activeTab}
-              className="flex flex-col gap-4 pt-2"
+              hidden={tab.name !== current}
+              className="flex flex-col gap-4 pt-2 data-[state=inactive]:hidden"
             >
               {tab.description ? (
                 <p className="text-sm text-muted-foreground">
                   {tab.description}
                 </p>
               ) : null}
+              <ActionButtons
+                actions={tab.actions}
+                path={tab.name}
+                item={null}
+                onAction={onAction}
+              />
               {tab.fields.map(renderField)}
             </TabsContent>
           ))}

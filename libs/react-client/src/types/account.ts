@@ -36,9 +36,24 @@ export interface IJsonSchema {
     | 'password'
     | 'radio'
     | 'markdown'
-    | 'link';
+    | 'link'
+    | 'cards'
+    | 'image'
+    | 'title';
+  'x-actions'?: IAccountAction[];
   'x-enum-labels'?: Record<string, string>;
   [key: string]: unknown;
+}
+
+/**
+ * A button the application put on a `cards` array or on a tab, run by
+ * `POST /project/account/actions/{name}`. `icon` is a lucide name, the same
+ * vocabulary `cl.Action` uses.
+ */
+export interface IAccountAction {
+  name: string;
+  label: string;
+  icon?: string | null;
 }
 
 export interface IAccountPage {
@@ -46,4 +61,27 @@ export interface IAccountPage {
   values: Record<string, unknown>;
   readonly: boolean;
   message?: string | null;
+}
+
+/** What the action route answers; the page does one of three things with it. */
+export type IAccountActionOutcome =
+  | { t: 'toast'; message: string }
+  | { t: 'page'; page: IAccountPage; message?: string | null }
+  | {
+      t: 'open_thread';
+      /** `null` when there was nothing to hand over: a plain profile switch. */
+      thread_id: string | null;
+      chat_profile: string;
+      has_transit_message: boolean;
+    };
+
+export interface IAccountActionResponse {
+  outcome: IAccountActionOutcome;
+}
+
+export interface IAccountActionCall {
+  /** Dotted address of the element, list index included; a tab action sends the field name. */
+  path: string;
+  /** The card exactly as the form holds it, unsaved edits included; `null` for a tab action. */
+  item: unknown | null;
 }

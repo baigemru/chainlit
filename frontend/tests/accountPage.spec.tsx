@@ -35,6 +35,17 @@ vi.mock('@chainlit/react-client', () => ({
   useConfig: () => mockUseConfig()
 }));
 
+// The page reads `?tab=` and can take a hand-off now; neither is this
+// spec's subject (`accountTab` and `accountActions` own them), so both are
+// answered with the quietest thing that keeps the page mounting.
+vi.mock('react-router-dom', () => ({
+  useSearchParams: () => [new URLSearchParams(), vi.fn()]
+}));
+
+vi.mock('@/hooks/useSessionHandoff', () => ({
+  useSessionHandoff: () => vi.fn()
+}));
+
 vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => mockSuccess(...args),

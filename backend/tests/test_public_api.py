@@ -26,7 +26,17 @@ import chainlit
 #     consumer; replaced by @cl.account, where one msgspec.Struct is the
 #     schema, the validator and the storage shape at once;
 #   account, on_account_load, on_account_update -- added with it.
+# Changed 2026-09-19, the account page's second wave:
+#   account_action, on_account_badge -- buttons on the page and the unread
+#     count it pushes on the socket;
+#   AccountToast, AccountRefresh, AccountOpenThread -- what an action hook
+#     returns. Prefixed because `Toast` and `Refresh` are ordinary words an
+#     application already uses, and `cl.Toast` would read as the chat toast
+#     that `cl.context.emitter.send_toast` sends.
 EXPECTED_EXPORTS = {
+    "AccountOpenThread",
+    "AccountRefresh",
+    "AccountToast",
     "Action",
     "AskActionMessage",
     "AskElementMessage",
@@ -59,12 +69,14 @@ EXPECTED_EXPORTS = {
     "Video",
     "__version__",
     "account",
+    "account_action",
     "action_callback",
     "author_rename",
     "chat_context",
     "context",
     "logger",
     "oauth_callback",
+    "on_account_badge",
     "on_account_load",
     "on_account_update",
     "on_app_shutdown",

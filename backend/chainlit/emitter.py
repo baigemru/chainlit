@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
 import msgspec
 
+from chainlit.account_badge import push_account_badge
 from chainlit.logger import logger
 from chainlit.protocol.payloads import (
     Action,
@@ -58,6 +58,7 @@ from chainlit.protocol.server import (
     Toast,
     ToastType,
 )
+from chainlit.transit_store import mint_handover
 from chainlit.types import AskSlotBusyError
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 from chainlit.ws.sidebar import state_frame
@@ -366,13 +367,9 @@ class Emitter:
             # previous one would otherwise outlive the switch that replaced it.
             await self.transit.discard(session.pending_transit_id)
 
-        next_thread_id: Optional[str] = None
-        if transit_message is not None or parent is not None:
-            next_thread_id = str(uuid.uuid4())
-            if self.transit is not None:
-                await self.transit.park(
-                    next_thread_id, transit_message, owner, parent=parent
-                )
+        next_thread_id = await mint_handover(
+            self.transit, transit_message, owner, parent=parent
+        )
         session.pending_transit_id = next_thread_id
 
         session.send(
@@ -383,6 +380,21 @@ class Emitter:
                 has_transit_message=transit_message is not None,
             )
         )
+
+    async def refresh_account_badge(self) -> None:
+        """Say the account page's unread count changed, and push the new one.
+
+        What a run in the chat calls after it put something on the page.
+        The number is not passed in: the hook is the only thing that knows
+        it, and an argument here would be a second source for it that could
+        disagree with what the page itself reports a moment later.
+        """
+        runner = self.session.runner
+        if runner is None:
+            # A session built without the application half -- a unit test,
+            # never a live socket -- has nobody to fan out to.
+            return
+        await push_account_badge(runner.registry, self.session.user)
 
     def open_thread(self, thread_id: str, *, keep_transcript: bool = True) -> None:
         self.session.send(

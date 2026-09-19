@@ -2,6 +2,7 @@ import { useCallback, useContext, useMemo, useRef } from 'react';
 import { useRecoilCallback, useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 import {
+  accountBadgeState,
   actionState,
   askUserState,
   chatProfileState,
@@ -92,6 +93,7 @@ const useChatSession = () => {
   const setTasklists = useSetRecoilState(tasklistState);
   const setActions = useSetRecoilState(actionState);
   const setProtocolError = useSetRecoilState(protocolErrorState);
+  const setAccountBadge = useSetRecoilState(accountBadgeState);
   // The setter alone, not `useAuthState()`: ten components call this hook, and
   // that hook subscribes its caller to `userState` and `authState` for a value
   // nothing here reads. Same setter, no re-render.
@@ -435,6 +437,13 @@ const useChatSession = () => {
       },
 
       // ---- misc ------------------------------------------------------
+      'account.badge': ({ count }) => {
+        // Whatever the hook said, written as given. The server recomputes
+        // and pushes on every occasion that can change it, so there is
+        // nothing here to decrement and nothing to zero on a visit.
+        setAccountBadge(count);
+      },
+
       toast: ({ message, type }) => {
         if (!message) {
           console.warn('No message received for toast.');
@@ -466,6 +475,7 @@ const useChatSession = () => {
       endAsk,
       idToResume,
       pruneStaleAskActions,
+      setAccountBadge,
       setActions,
       setAskUser,
       setChatProfile,

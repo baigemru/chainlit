@@ -449,6 +449,10 @@ class ChainlitPlugin(InitPlugin):
             Provide(lambda: self._sessions, sync_to_thread=False, use_cache=True),
         )
         app_config.dependencies.setdefault(
+            "transit",
+            Provide(lambda: self._transit, sync_to_thread=False, use_cache=True),
+        )
+        app_config.dependencies.setdefault(
             "persistence_enabled",
             Provide(lambda: self._persistence is not None, sync_to_thread=False),
         )

@@ -227,3 +227,19 @@ export const currentThreadIdState = atom<string | undefined>({
   key: 'CurrentThreadId',
   default: undefined
 });
+
+/**
+ * How many things the account page holds that the user has not seen.
+ *
+ * Pushed, never polled: the server sends `account.badge` when it has a new
+ * answer and this atom is the projection. `undefined` means "the application
+ * registered no badge hook, or nothing has arrived yet" and renders nothing —
+ * a client-invented `0` would claim an answer the app never gave.
+ *
+ * Not reset by `clear()`: the count belongs to the user, not to the session,
+ * and blanking it on every new chat would flicker the dot off and back on.
+ */
+export const accountBadgeState = atom<number | undefined>({
+  key: 'AccountBadge',
+  default: undefined
+});

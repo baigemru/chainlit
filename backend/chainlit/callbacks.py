@@ -466,6 +466,64 @@ def on_account_update(
     return func
 
 
+def account_action(
+    name: str,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Answer a button the account page's schema declares in ``x-actions``.
+
+    The hook is called ``(user, item)``: ``item`` is the card the button
+    sits on, already converted to the Struct the *schema* says it is, or
+    ``None`` for a button in a tab header. Return ``cl.AccountToast``,
+    ``cl.AccountRefresh`` or ``cl.AccountOpenThread``; anything else is a
+    bug in the application and is reported as a 500.
+
+    Stored unwrapped, like the other account hooks: a button that failed
+    must fail the request rather than be logged away while the page
+    answers "done".
+
+    Example:
+        @cl.account_action("compare")
+        async def compare(user, item: WatchedItem | None):
+            return cl.AccountOpenThread(chat_profile="Fast", transit_message=item)
+
+    Args:
+        name (str): The ``name`` the schema's ``x-actions`` entry carries.
+
+    Returns:
+        Callable: The decorator that registers the hook and returns it.
+    """
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        config.code.account_actions[name] = func
+        return func
+
+    return decorator
+
+
+def on_account_badge(
+    func: Callable[[Optional[User]], Awaitable[int]],
+) -> Callable[[Optional[User]], Awaitable[int]]:
+    """Say how many things on the account page the user has not seen.
+
+    Called by the engine, never by the client: the number is pushed on the
+    socket after every hello, after the page is read, and whenever a
+    session asks for it with ``cl.context.emitter.refresh_account_badge()``.
+    An application that does not register this hook sends no badge frame at
+    all, and the client shows nothing -- it never invents a zero.
+
+    Stored unwrapped: a hook that raises on a request the user made is a
+    500, not a silently missing badge.
+
+    Args:
+        func (Callable[[Optional[User]], Awaitable[int]]): The count hook.
+
+    Returns:
+        Callable[[Optional[User]], Awaitable[int]]: The decorated hook.
+    """
+    config.code.on_account_badge = func
+    return func
+
+
 def on_shared_thread_view(
     func: Callable[[ThreadDict, Optional[User]], Awaitable[bool]],
 ) -> Callable[[ThreadDict, Optional[User]], Awaitable[bool]]:

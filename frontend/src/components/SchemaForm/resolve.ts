@@ -1,4 +1,4 @@
-import type { IJsonSchema } from '@chainlit/react-client';
+import type { IAccountAction, IJsonSchema } from '@chainlit/react-client';
 
 /**
  * Flattens the JSON Schema `msgspec.json.schema` emits into the handful of
@@ -23,10 +23,17 @@ export type FieldKind =
   | 'tags'
   | 'markdown'
   | 'link'
+  | 'cards'
   | 'group'
   | 'unsupported';
 
-export type FieldWidget = 'slider' | 'textarea' | 'password' | 'radio';
+export type FieldWidget =
+  | 'slider'
+  | 'textarea'
+  | 'password'
+  | 'radio'
+  | 'image'
+  | 'title';
 
 export interface ResolvedField {
   name: string;
@@ -49,6 +56,14 @@ export interface ResolvedField {
   widget?: FieldWidget;
   /** `group` only. */
   fields?: ResolvedField[];
+  /**
+   * `cards` only: the element's fields, addressed **relative to one element**.
+   * The card prefixes `<field>.<index>` — the index is a rendering fact, not a
+   * schema one, and baking it in here would make the resolution per-card.
+   */
+  itemFields?: ResolvedField[];
+  /** `cards` only: the buttons `x-actions` put on every card. */
+  actions?: IAccountAction[];
 }
 
 export interface ResolvedTab {
@@ -56,6 +71,8 @@ export interface ResolvedTab {
   title: string;
   description?: string;
   fields: ResolvedField[];
+  /** The buttons `x-actions` put in the tab header. */
+  actions?: IAccountAction[];
 }
 
 export interface ResolvedForm {
@@ -147,6 +164,25 @@ const labelsOf = (schema: IJsonSchema): Record<string, string> | undefined => {
   return isSchema(labels) ? (labels as Record<string, string>) : undefined;
 };
 
+/**
+ * `x-actions`, entry by entry.
+ *
+ * An entry missing `name` or `label` is dropped rather than drawn: a button
+ * with no name posts to no route, and one with no label is a blank rectangle
+ * the user is invited to press.
+ */
+const actionsOf = (schema: IJsonSchema): IAccountAction[] | undefined => {
+  const raw: unknown = schema['x-actions'];
+  if (!Array.isArray(raw)) return undefined;
+  const actions = (raw as unknown[]).filter(
+    (entry): entry is IAccountAction =>
+      isSchema(entry) &&
+      typeof entry.name === 'string' &&
+      typeof entry.label === 'string'
+  );
+  return actions.length > 0 ? actions : undefined;
+};
+
 const stepOf = (schema: IJsonSchema): number | 'any' => {
   if (typeof schema.multipleOf === 'number') return schema.multipleOf;
   return schema.type === 'integer' ? 1 : 'any';
@@ -235,8 +271,16 @@ const buildField = (
       ...base,
       kind: 'string',
       format: typeof schema.format === 'string' ? schema.format : undefined,
+      // `image` and `title` mean something only inside a card; outside one the
+      // card component never sees them and Field falls back to a text box,
+      // which is what a string field is.
       widget:
-        widget === 'textarea' || widget === 'password' ? widget : undefined
+        widget === 'textarea' ||
+        widget === 'password' ||
+        widget === 'image' ||
+        widget === 'title'
+          ? widget
+          : undefined
     };
   }
 
@@ -244,6 +288,17 @@ const buildField = (
     if (!isSchema(schema.items)) return unsupported();
     const items = resolveSchema(schema.items, defs);
     if (items.unsupported) return unsupported();
+    // An array of objects is a list of cards only when the application asked
+    // for cards. Without the widget there is no layout for it, and guessing
+    // one would draw a Struct the author meant to keep off the page.
+    if (widget === 'cards' && isObjectSchema(items)) {
+      return {
+        ...base,
+        kind: 'cards',
+        itemFields: buildFields(items.schema, [], defs, false),
+        actions: actionsOf(schema)
+      };
+    }
     if (Array.isArray(items.schema.enum)) {
       return {
         ...base,
@@ -312,7 +367,10 @@ export const resolveForm = (schema: IJsonSchema): ResolvedForm => {
           typeof resolution.schema.description === 'string'
             ? resolution.schema.description
             : undefined,
-        fields: buildFields(resolution.schema, [name], defs, true)
+        fields: buildFields(resolution.schema, [name], defs, true),
+        // The property's keys are layered over the `$ref`ed def, so an
+        // `x-actions` written beside the `$ref` is visible here.
+        actions: actionsOf(resolution.schema)
       });
       continue;
     }

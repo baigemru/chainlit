@@ -538,6 +538,13 @@ class CodeSettings:
     on_account_update: Optional[
         Callable[[Optional["User"], Any], Awaitable[Optional[str]]]
     ] = None
+    # The buttons `x-actions` puts on a card or a tab, by name. The engine
+    # resolves the item's type from the account Struct and hands the hook a
+    # converted instance; what it returns says what the page does next.
+    account_actions: Dict[str, Callable[..., Any]] = field(default_factory=dict)
+    # How many things on the account page the user has not seen. Pushed on
+    # the socket, never polled.
+    on_account_badge: Optional[Callable[[Optional["User"]], Awaitable[int]]] = None
     # Auth callbacks
     password_auth_callback: Optional[
         Callable[[str, str], Awaitable[Optional["User"]]]

@@ -252,10 +252,14 @@
     "saved": "Saved",
     "unsupported": "This field cannot be edited here.",
     "actions": {
-      "save": "Save"
+      "save": "Save",
+      "working": "Working…"
     },
     "tags": {
       "placeholder": "Type and press Enter"
+    },
+    "badge": {
+      "aria": "unread"
     }
   },
   "alerts": {

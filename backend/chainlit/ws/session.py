@@ -82,6 +82,17 @@ class CallbackRunner(Protocol):
     recorder, which is the whole reason this is a port rather than an import.
     """
 
+    @property
+    def registry(self) -> Any:
+        """The live sessions, for the one frame addressed to a *user*.
+
+        ``account.badge`` goes to every tab that person has open, and a
+        session knows only about itself. Typed loosely because the registry
+        belongs to the application half and naming it here would point this
+        port back at the module it exists to keep out.
+        """
+        ...
+
     async def call_action(self, session: "Session", action: Mapping[str, Any]) -> Any:
         """Run the callback registered for ``action["name"]``.
 

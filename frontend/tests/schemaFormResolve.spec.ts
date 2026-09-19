@@ -75,6 +75,78 @@ const ACCOUNT: IJsonSchema = {
   }
 };
 
+/**
+ * The cards fixture, generated on 19.09.2026 by msgspec 0.21.1 from the Struct
+ * pair in the contract (`WatchedItem` / `Watch`) and pasted verbatim. Note
+ * where the generator puts things: `x-widget` and `x-actions` sit on the array
+ * *property* while the element is a bare `$ref`, and the tab's `x-actions` sit
+ * beside its `$ref` rather than in the def.
+ */
+const WATCH: IJsonSchema = {
+  $ref: '#/$defs/Account',
+  $defs: {
+    Account: {
+      title: 'Account',
+      type: 'object',
+      properties: {
+        watch: {
+          title: 'Слежение',
+          'x-actions': [
+            { name: 'recheck', label: 'Проверить всё', icon: 'refresh-cw' }
+          ],
+          $ref: '#/$defs/Watch'
+        },
+        notify: { title: 'Уведомления', type: 'boolean', default: true }
+      },
+      required: []
+    },
+    Watch: {
+      title: 'Watch',
+      description: 'Мои товары',
+      type: 'object',
+      properties: {
+        items: {
+          title: 'Товары',
+          description: 'Пока пусто: добавьте товар из чата.',
+          'x-widget': 'cards',
+          'x-actions': [
+            { name: 'compare', label: 'Где дешевле', icon: 'search' }
+          ],
+          type: 'array',
+          items: { $ref: '#/$defs/WatchedItem' },
+          default: []
+        }
+      },
+      required: []
+    },
+    WatchedItem: {
+      title: 'WatchedItem',
+      type: 'object',
+      properties: {
+        image: { 'x-widget': 'image', type: 'string', default: '' },
+        title: { 'x-widget': 'title', type: 'string', default: '' },
+        price: { title: 'Цена', type: 'string', default: '' },
+        watch: { title: 'Следить', type: 'boolean', default: false },
+        tags: { type: 'array', items: { type: 'string' }, default: [] },
+        source: {
+          title: 'Открыть на 1688',
+          readOnly: true,
+          'x-widget': 'link',
+          type: 'string',
+          default: ''
+        },
+        diff: {
+          readOnly: true,
+          'x-widget': 'markdown',
+          type: 'string',
+          default: ''
+        }
+      },
+      required: []
+    }
+  }
+};
+
 /** One flat Struct, for the cases the fixture above does not carry. */
 const wrap = (properties: Record<string, IJsonSchema>): IJsonSchema => ({
   $ref: '#/$defs/Root',
@@ -297,6 +369,101 @@ describe('resolveForm', () => {
     expect(group.fields!.map((field) => field.name)).toEqual(['c']);
     expect(group.fields![0].kind).toBe('unsupported');
     expect(group.fields![0].path).toEqual(['a', 'b', 'c']);
+  });
+
+  it('resolves an array of objects marked `x-widget: cards` into item fields', () => {
+    const [watch] = resolveForm(WATCH).tabs;
+    const items = watch.fields[0];
+
+    expect(items.kind).toBe('cards');
+    expect(items.description).toBe('Пока пусто: добавьте товар из чата.');
+    expect(items.itemFields!.map((field) => field.name)).toEqual([
+      'image',
+      'title',
+      'price',
+      'watch',
+      'tags',
+      'source',
+      'diff'
+    ]);
+    // Relative to one element: the index belongs to the card, not the schema.
+    expect(items.itemFields!.map((field) => field.path)).toEqual([
+      ['image'],
+      ['title'],
+      ['price'],
+      ['watch'],
+      ['tags'],
+      ['source'],
+      ['diff']
+    ]);
+    const byName = Object.fromEntries(
+      items.itemFields!.map((field) => [field.name, field])
+    );
+    expect(byName.image.kind).toBe('string');
+    expect(byName.image.widget).toBe('image');
+    expect(byName.title.widget).toBe('title');
+    expect(byName.price.kind).toBe('string');
+    expect(byName.watch.kind).toBe('boolean');
+    expect(byName.tags.kind).toBe('tags');
+    expect(byName.source.kind).toBe('link');
+    expect(byName.diff.kind).toBe('markdown');
+  });
+
+  it('reads x-actions on the cards array and on the tab property', () => {
+    const [watch] = resolveForm(WATCH).tabs;
+
+    expect(watch.actions).toEqual([
+      { name: 'recheck', label: 'Проверить всё', icon: 'refresh-cw' }
+    ]);
+    expect(watch.fields[0].actions).toEqual([
+      { name: 'compare', label: 'Где дешевле', icon: 'search' }
+    ]);
+  });
+
+  it('drops an x-actions entry that could not be drawn or posted', () => {
+    // Cast, because the whole point is a shape the declared type forbids: the
+    // server sends whatever the application wrote into `extra_json_schema`.
+    const messy = {
+      title: 'Товары',
+      'x-widget': 'cards',
+      'x-actions': [
+        { label: 'Безымянная' },
+        { name: 'quiet' },
+        'compare',
+        { name: 'compare', label: 'Где дешевле' }
+      ],
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { title: { type: 'string', default: '' } },
+        required: []
+      },
+      default: []
+    } as unknown as IJsonSchema;
+
+    const field = resolveForm(wrap({ items: messy })).sections[0];
+
+    expect(field.actions).toEqual([{ name: 'compare', label: 'Где дешевле' }]);
+  });
+
+  it('leaves an array of objects without the widget unsupported', () => {
+    const bare = resolveForm(
+      wrap({
+        items: {
+          title: 'Товары',
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { title: { type: 'string', default: '' } },
+            required: []
+          },
+          default: []
+        }
+      })
+    ).sections[0];
+
+    expect(bare.kind).toBe('unsupported');
+    expect(bare.itemFields).toBeUndefined();
   });
 
   it('answers a schema it does not understand with `unsupported`, not a throw', () => {

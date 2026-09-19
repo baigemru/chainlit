@@ -3,7 +3,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { IJsonSchema } from '@chainlit/react-client';
 
-import SchemaForm from '@/components/SchemaForm';
+import SchemaForm, {
+  SchemaSection,
+  SchemaSubmit,
+  useSchemaForm
+} from '@/components/SchemaForm';
+import { ActionButtons } from '@/components/SchemaForm/Cards';
 
 vi.mock('@/components/i18n', () => ({
   Translator: ({ path }: { path: string }) => <span>{path}</span>
@@ -132,9 +137,27 @@ const values = (count: number) => ({
   watch: { items: Array.from({ length: count }, (_, index) => item(index)) }
 });
 
+/**
+ * The section's own `x-actions` row, composed the way the dialog composes it:
+ * out of `useSchemaForm()`, above the fields rather than inside them. The
+ * form stopped drawing this when it stopped being a layout.
+ */
+const SectionActions = () => {
+  const { form, onAction } = useSchemaForm();
+  const tab = form.tabs[0];
+  return (
+    <ActionButtons
+      actions={tab.actions}
+      path={tab.name}
+      item={null}
+      onAction={onAction}
+    />
+  );
+};
+
 const mount = (
   count: number,
-  overrides: Partial<Parameters<typeof SchemaForm>[0]> = {}
+  overrides: Partial<Omit<Parameters<typeof SchemaForm>[0], 'children'>> = {}
 ) => {
   const onSubmit = vi.fn(() => Promise.resolve());
   const onAction = vi.fn(() => Promise.resolve());
@@ -145,7 +168,11 @@ const mount = (
       onSubmit={onSubmit}
       onAction={onAction}
       {...overrides}
-    />
+    >
+      <SectionActions />
+      <SchemaSection name="watch" />
+      <SchemaSubmit />
+    </SchemaForm>
   );
   return { onSubmit, onAction, ...utils };
 };
@@ -304,7 +331,7 @@ describe('SchemaForm cards', () => {
     expect(saved.watch.items[2].nested).toEqual({ depth: 2 });
   });
 
-  it('calls a tab action with the tab name and no item', async () => {
+  it('calls a section action with the section name and no item', async () => {
     const { onAction } = mount(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Проверить всё' }));

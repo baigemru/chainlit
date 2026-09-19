@@ -39,6 +39,14 @@ def translation_dir(tmp_path: Path) -> Path:
 class TestLoadTranslation:
     """Regression tests for the load_translation fallback chain."""
 
+    @pytest.fixture(autouse=True)
+    def no_packaged_translations(self, tmp_path: Path, monkeypatch):
+        """The chain alone: an empty package directory, so only the app's
+        copies answer and the equalities below stay exact."""
+        empty = tmp_path / "pkg"
+        empty.mkdir()
+        monkeypatch.setattr(chainlit_config, "TRANSLATIONS_DIR", str(empty))
+
     def test_exact_match_regional(
         self,
         test_config: ChainlitConfig,
@@ -134,6 +142,76 @@ class TestLoadTranslation:
             chainlit_config, "config_translation_dir", str(translation_dir)
         )
         assert test_config.load_translation("fr") == {"greeting": "Hello"}
+
+
+class TestTranslationLayering:
+    """The package's file is the base, the app's copy is laid over it.
+
+    ``init_config`` copies the packaged files once; a key the package gained in
+    a later release never reached an app initialised before it, and the client
+    drew ``...`` for it. The two are merged, section by section, so a release
+    can add a string without the app touching its copies.
+    """
+
+    @pytest.fixture
+    def dirs(self, tmp_path: Path, monkeypatch):
+        pkg = tmp_path / "pkg"
+        app = tmp_path / "app"
+        pkg.mkdir()
+        app.mkdir()
+        monkeypatch.setattr(chainlit_config, "TRANSLATIONS_DIR", str(pkg))
+        monkeypatch.setattr(chainlit_config, "config_translation_dir", str(app))
+        return pkg, app
+
+    @staticmethod
+    def _write(directory: Path, name: str, content: dict) -> None:
+        (directory / name).write_text(json.dumps(content), encoding="utf-8")
+
+    def test_a_key_the_copy_never_saw_comes_from_the_package(
+        self, test_config: ChainlitConfig, dirs
+    ):
+        pkg, app = dirs
+        self._write(pkg, "ru.json", {"account": {"title": "Account", "new": "New"}})
+        self._write(app, "ru.json", {"account": {"title": "Кабинет"}})
+
+        assert test_config.load_translation("ru") == {
+            "account": {"title": "Кабинет", "new": "New"}
+        }
+
+    def test_the_copy_wins_where_it_speaks(self, test_config: ChainlitConfig, dirs):
+        pkg, app = dirs
+        self._write(pkg, "ru.json", {"greeting": "Hello", "nav": {"a": "1", "b": "2"}})
+        self._write(app, "ru.json", {"greeting": "Привет", "nav": {"b": "два"}})
+
+        assert test_config.load_translation("ru") == {
+            "greeting": "Привет",
+            "nav": {"a": "1", "b": "два"},
+        }
+
+    def test_a_language_only_the_package_ships_still_resolves(
+        self, test_config: ChainlitConfig, dirs
+    ):
+        # An app initialised before the package gained a language has no copy
+        # of it; the wheel's own file answers on its own.
+        pkg, _ = dirs
+        self._write(pkg, "kk.json", {"greeting": "Сәлем"})
+
+        assert test_config.load_translation("kk") == {"greeting": "Сәлем"}
+
+    def test_the_fallback_chain_picks_one_stem_for_both_directories(
+        self, test_config: ChainlitConfig, dirs
+    ):
+        # `es-419` has no file anywhere; the parent `es` is chosen once, and
+        # both halves come from `es.json` rather than one from each language.
+        pkg, app = dirs
+        self._write(pkg, "es.json", {"greeting": "Hola", "extra": "x"})
+        self._write(pkg, "en-US.json", {"greeting": "Hello", "extra": "en"})
+        self._write(app, "es.json", {"greeting": "¡Hola!"})
+
+        assert test_config.load_translation("es-419") == {
+            "greeting": "¡Hola!",
+            "extra": "x",
+        }
 
 
 class TestLoadSettings:

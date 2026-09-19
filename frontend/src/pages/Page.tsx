@@ -5,6 +5,7 @@ import { useRecoilValue } from 'recoil';
 
 import { useConfig, useElementSidebar } from '@chainlit/react-client';
 
+import AccountDialog from '@/components/AccountDialog';
 import ChatProfileSwitchListener from '@/components/ChatProfileSwitchListener';
 import ElementSideView from '@/components/ElementSideView';
 import LeftSidebar from '@/components/LeftSidebar';
@@ -79,6 +80,10 @@ const Page = ({ children }: Props) => {
       )}
     >
       <ChatProfileSwitchListener />
+      {/* Route-independent like the rest of this block: the account is a
+          modal over whatever chat is behind it, and it opens itself when the
+          address says `/account`. */}
+      <AccountDialog />
       <MobileNotice />
       <ThreadReturnListener />
       <ThreadAddressSync />

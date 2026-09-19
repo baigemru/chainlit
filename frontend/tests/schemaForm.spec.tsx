@@ -3,7 +3,12 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { IJsonSchema } from '@chainlit/react-client';
 
-import SchemaForm from '@/components/SchemaForm';
+import SchemaForm, {
+  LEADING,
+  SchemaSection,
+  SchemaSubmit,
+  useSchemaForm
+} from '@/components/SchemaForm';
 
 vi.mock('@/components/i18n', () => ({
   Translator: ({ path }: { path: string }) => <span>{path}</span>
@@ -160,7 +165,15 @@ const VALUES = () => ({
   weird: { keep: 1 }
 });
 
-const mount = (overrides: Partial<Parameters<typeof SchemaForm>[0]> = {}) => {
+/**
+ * The layout the form no longer draws, spelled out the way the dialog does it:
+ * the leading section, then every section, then the Save/Reset row. Sections
+ * the dialog would keep off screen are all mounted here on purpose — one spec
+ * should not have to click a menu to reach the field it is about.
+ */
+const mount = (
+  overrides: Partial<Omit<Parameters<typeof SchemaForm>[0], 'children'>> = {}
+) => {
   const onSubmit = vi.fn(() => Promise.resolve());
   const utils = render(
     <SchemaForm
@@ -168,7 +181,12 @@ const mount = (overrides: Partial<Parameters<typeof SchemaForm>[0]> = {}) => {
       values={VALUES()}
       onSubmit={onSubmit}
       {...overrides}
-    />
+    >
+      <SchemaSection name={LEADING} />
+      <SchemaSection name="calc" />
+      <SchemaSection name="limits" />
+      <SchemaSubmit />
+    </SchemaForm>
   );
   return { onSubmit, ...utils };
 };
@@ -177,14 +195,65 @@ const openSelect = (trigger: HTMLElement) =>
   fireEvent.keyDown(trigger, { key: 'ArrowDown' });
 
 describe('SchemaForm', () => {
-  it('draws the leading section above a tab strip', () => {
+  it('draws the fields of the sections the layout asked for, and no headings', () => {
     mount();
 
-    expect(screen.getByRole('tab', { name: 'Расчёт' })).toBeInTheDocument();
-    expect(screen.getByText('Параметры расчёта')).toBeInTheDocument();
-    // The non-object fields lead, with no invented heading over them.
+    // The leading scalars and a nested Struct's fields, addressed by name.
     expect(screen.getByLabelText('Уведомления')).toBeInTheDocument();
+    expect(screen.getByLabelText('Маржа, %')).toBeInTheDocument();
+    expect(screen.getByLabelText('Повторы')).toBeInTheDocument();
+    // Fields only: the title, the description and the section's own actions
+    // belong to whatever draws the header above them.
+    expect(screen.queryByText('Расчёт')).not.toBeInTheDocument();
+    expect(screen.queryByText('Параметры расчёта')).not.toBeInTheDocument();
     expect(screen.queryByText('General')).not.toBeInTheDocument();
+  });
+
+  it('draws nothing for a section the schema does not carry', () => {
+    const { container } = render(
+      <SchemaForm schema={SCHEMA} values={VALUES()} onSubmit={vi.fn()}>
+        <SchemaSection name="gone" />
+      </SchemaForm>
+    );
+
+    // A `?tab=` someone shared before the application renamed the Struct
+    // field: nothing to draw is not a reason to take the dialog down.
+    expect(container.querySelector('form')!.children).toHaveLength(0);
+  });
+
+  it('hands the layout the resolved schema and the submitting flag', () => {
+    const seen: string[] = [];
+    const Probe = () => {
+      const { form, readonly, isSubmitting } = useSchemaForm();
+      seen.push(
+        `${form.tabs.map((tab) => tab.name).join(',')}|${readonly}|${isSubmitting}`
+      );
+      return null;
+    };
+
+    render(
+      <SchemaForm schema={SCHEMA} values={VALUES()} onSubmit={vi.fn()}>
+        <Probe />
+      </SchemaForm>
+    );
+
+    // The section menu is drawn from this and nothing else.
+    expect(seen[0]).toBe('calc,limits|false|false');
+  });
+
+  it('puts className on the form element', () => {
+    const { container } = render(
+      <SchemaForm
+        schema={SCHEMA}
+        values={VALUES()}
+        onSubmit={vi.fn()}
+        className="contents"
+      >
+        <SchemaSubmit />
+      </SchemaForm>
+    );
+
+    expect(container.querySelector('form')).toHaveClass('contents');
   });
 
   it('toggles a switch', () => {
@@ -295,7 +364,9 @@ describe('SchemaForm', () => {
         }}
         values={{ cover: 'https://example.test/a.jpg' }}
         onSubmit={vi.fn()}
-      />
+      >
+        <SchemaSection name={LEADING} />
+      </SchemaForm>
     );
     const cover = screen.getByLabelText('Обложка') as HTMLInputElement;
 
@@ -367,55 +438,6 @@ describe('SchemaForm', () => {
     });
   });
 
-  it('hides the panel of every tab but the active one', () => {
-    mount();
-    const calc = screen
-      .getByLabelText('Маржа, %')
-      .closest('[role="tabpanel"]')!;
-    const limits = screen
-      .getByLabelText('Повторы')
-      .closest('[role="tabpanel"]')!;
-
-    expect(calc).not.toHaveAttribute('hidden');
-    expect(limits).toHaveAttribute('hidden');
-    // The attribute alone lost to the panel's own `flex` in a real browser
-    // (both tabs were on screen, 20.09); the Radix `data-state` variant is
-    // what actually hides it, so its presence is part of the guarantee.
-    expect(limits).toHaveAttribute('data-state', 'inactive');
-    expect(limits.className).toContain('data-[state=inactive]:hidden');
-
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Лимиты' }));
-    expect(calc).toHaveAttribute('hidden');
-    expect(limits).not.toHaveAttribute('hidden');
-  });
-
-  it('opens the tab `activeTab` names and reports a click instead of moving itself', () => {
-    const onTabChange = vi.fn();
-    mount({ activeTab: 'limits', onTabChange });
-    const limits = screen
-      .getByLabelText('Повторы')
-      .closest('[role="tabpanel"]')!;
-
-    expect(limits).not.toHaveAttribute('hidden');
-
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Расчёт' }));
-
-    expect(onTabChange).toHaveBeenCalledWith('calc');
-    // Controlled: the strip does not move until the caller moves it.
-    expect(limits).not.toHaveAttribute('hidden');
-  });
-
-  it('falls back to the first tab when `activeTab` names none', () => {
-    mount({ activeTab: 'gone' });
-
-    expect(
-      screen.getByLabelText('Маржа, %').closest('[role="tabpanel"]')
-    ).not.toHaveAttribute('hidden');
-    expect(
-      screen.getByLabelText('Повторы').closest('[role="tabpanel"]')
-    ).toHaveAttribute('hidden');
-  });
-
   it('refuses to submit an emptied number that cannot be null', async () => {
     const { onSubmit } = mount();
 
@@ -449,7 +471,9 @@ describe('SchemaForm', () => {
     process.on('unhandledRejection', collect);
 
     render(
-      <SchemaForm schema={SCHEMA} values={VALUES()} onSubmit={onSubmit} />
+      <SchemaForm schema={SCHEMA} values={VALUES()} onSubmit={onSubmit}>
+        <SchemaSubmit />
+      </SchemaForm>
     );
     const save = screen.getByText('account.actions.save').closest('button')!;
 

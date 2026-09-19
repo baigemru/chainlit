@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Control, FieldValues, useWatch } from 'react-hook-form';
+import { useWatch } from 'react-hook-form';
 
 import type { IAccountAction } from '@chainlit/react-client';
 
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 
 import { optionLabel } from './EnumSelect';
 import Field from './Field';
+import { useSchemaForm } from './index';
 import type { ResolvedField } from './resolve';
 
 /**
@@ -99,9 +100,6 @@ export const ActionButtons = ({
 
 interface Props {
   field: ResolvedField;
-  control: Control<FieldValues>;
-  disabled?: boolean;
-  onAction?: ActionHandler;
 }
 
 const asText = (value: unknown): string =>
@@ -113,10 +111,12 @@ const isNestedObject = (field: ResolvedField): boolean =>
   field.schema.type === 'object' &&
   field.schema.properties !== undefined;
 
-const Cards = ({ field, control, disabled, onAction }: Props) => {
+const Cards = ({ field }: Props) => {
+  const { onAction } = useSchemaForm();
   const name = field.path.join('.');
   const itemFields = field.itemFields ?? [];
-  const list = useWatch({ control, name });
+  // No `control`: `useWatch` takes it from the `FormProvider` the form put up.
+  const list = useWatch({ name });
   // A stored value can be missing the key entirely — a card list that throws
   // on that would take the whole page down with it.
   const items: unknown[] = Array.isArray(list) ? list : [];
@@ -222,14 +222,7 @@ const Cards = ({ field, control, disabled, onAction }: Props) => {
                   child.kind === 'link' ||
                   (child.kind === 'boolean' && !child.readOnly)
                 ) {
-                  return (
-                    <Field
-                      key={child.name}
-                      field={bind(child)}
-                      control={control}
-                      disabled={disabled}
-                    />
-                  );
+                  return <Field key={child.name} field={bind(child)} />;
                 }
                 // Anything with nothing to show goes undrawn; its value stays
                 // in the form and goes back on the next save regardless.

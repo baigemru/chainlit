@@ -2,16 +2,18 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import Account from '@/pages/Account';
+import AccountDialog from '@/components/AccountDialog';
 
 /**
- * What the page does with an action.
+ * What the dialog does with an action.
  *
- * The form draws the buttons `x-actions` declares (agent B's subject) and
- * hands the press up as `(name, path, item)`. From there the page owns the
+ * The form draws the buttons `x-actions` declares (agent D's subject) and
+ * hands the press up as `(name, path, item)`. From there the dialog owns the
  * whole round trip: one POST, and one of three outcomes — a toast, the page
  * rebuilt, or a hand-off into a fresh chat. The form is stubbed down to a
- * button that presses one action, so what is pinned here is the page's half.
+ * button that presses one action, so what is pinned here is the dialog's
+ * half; `accountDialog.spec.tsx` pins the other end, where a real header
+ * button reaches this handler.
  */
 
 const mockUseApi = vi.fn();
@@ -33,9 +35,18 @@ vi.mock('@chainlit/react-client', () => ({
   useConfig: () => ({ config: { ui: {}, chatProfiles: [] } })
 }));
 
+// The address is what opens the dialog; `?tab=` and where closing leads are
+// `accountDialog.spec.tsx`'s subject.
 vi.mock('react-router-dom', () => ({
+  useLocation: () => ({ pathname: '/account', key: 'k1' }),
+  useNavigate: () => vi.fn(),
   useSearchParams: () => [new URLSearchParams(), vi.fn()]
 }));
+
+// The desktop layout, and one less reason for this spec to answer for the
+// package's breakpoint constant: `useIsMobile` reads it off the mocked
+// `@chainlit/react-client` above, where it is not.
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 
 // The hook itself is `useSessionHandoff.spec.tsx`'s subject; here it is the
 // seam, and the assertion is the payload the page builds out of the outcome.
@@ -50,7 +61,16 @@ vi.mock('sonner', () => ({
   }
 }));
 
+// The provider and every piece of the layout it feeds: the dialog imports
+// them all, so the factory has to answer for them all. Only the default is
+// this spec's seam -- the children are left unrendered, which is what keeps
+// the round trip below the subject.
 vi.mock('@/components/SchemaForm', () => ({
+  LEADING: '$leading',
+  useSchemaForm: () => ({ form: { sections: [], tabs: [] }, readonly: false }),
+  SchemaSection: () => null,
+  SchemaMatches: () => null,
+  SchemaSubmit: () => null,
   default: (props: Record<string, unknown>) => {
     formProps = props;
     return (
@@ -71,8 +91,8 @@ vi.mock('@/components/SchemaForm', () => ({
   }
 }));
 
-vi.mock('pages/Page', () => ({
-  default: ({ children }: { children: JSX.Element }) => <div>{children}</div>
+vi.mock('@/components/SchemaForm/Cards', () => ({
+  ActionButtons: () => null
 }));
 
 vi.mock('@/components/i18n/Translator', () => ({
@@ -107,7 +127,7 @@ const mount = async () => {
   const { ChainlitContext } = await import('@chainlit/react-client');
   return render(
     <ChainlitContext.Provider value={{ post: mockPost }}>
-      <Account />
+      <AccountDialog />
     </ChainlitContext.Provider>
   );
 };
@@ -238,7 +258,7 @@ describe('an account action', () => {
     const { ChainlitContext } = await import('@chainlit/react-client');
     render(
       <ChainlitContext.Provider value={client}>
-        <Account />
+        <AccountDialog />
       </ChainlitContext.Provider>
     );
     press();

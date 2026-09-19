@@ -359,16 +359,30 @@ rather than performing a transition; there is no debounce and no guard. A second
 effect toasts once on `superseded`; a third picks the default profile.
 
 `router.tsx` routes `/`, `/env`, `/thread/:id?`, `/element/:id`, `/login`,
-`/login/callback`, `/share/:id`, `/account`, `*` → `/`.
+`/login/callback`, `/share/:id`, `/account`, `*` → `/`. `/account` is the chat home:
+its element is `<Home />`, and the account is a dialog over it.
 
-**The account page.** `pages/Account.tsx` fetches `GET /project/account` with `useApi`
-and gets back four things: the JSON Schema `msgspec.json.schema` emitted for the
+**The account dialog.** `components/AccountDialog` is mounted in `pages/Page.tsx`
+beside the other route-independent pieces and is open exactly when
+`useLocation().pathname === '/account'` — so the chat behind the blurred overlay
+(`DialogOverlay` carries `backdrop-blur-sm`, which every dialog in the app now does) is
+the live session, not a picture of one. Nothing else opens it; the user-menu row still
+navigates to `/account`, and a shared `/account?tab=watch` works as it did. Closing —
+the ×, Esc, a click on the overlay, all one Radix callback — is `navigate(-1)`, or
+`navigate('/', { replace: true })` when `useLocation().key === 'default'`, react-router's
+own marker for an entry it did not create: a direct open has nothing behind it. Because
+the fetch lives in a child that mounts only on `/account`, it never runs on another
+route — `GET /project/account` is the occasion on which the application marks things
+seen, so a hook on every page would blank the badge for a user who never opened the
+account.
+
+It gets back four things: the JSON Schema `msgspec.json.schema` emitted for the
 `msgspec.Struct` the application registered with `@cl.account`, the current values, a
 `readonly` flag and an optional message. A 404 is a configuration fact rather than a
 breakage — the application declared no account page — so it renders as an info notice
-and not as an error. The page itself knows nothing about the fields: it hands schema and
-values to `components/SchemaForm`, which resolves the schema into controls (a top-level
-nested Struct becomes a tab, a deeper one a fieldset; `boolean` a switch, an `enum` a
+and not as an error. The dialog itself knows nothing about the fields: it hands schema
+and values to `components/SchemaForm`, which resolves the schema into controls (a
+top-level nested Struct becomes a section, a deeper one a fieldset; `boolean` a switch, an `enum` a
 select, a number an input or — with `x-widget: slider` — a range, `date`/`date-time` the
 native pickers, `list[str]` a tag input, `list[Literal]` a checkbox list) and reads the
 two `x-` extensions this fork puts in `Meta(extra_json_schema=…)`: `x-widget` picks the
@@ -382,9 +396,26 @@ in it (`at $.calculation.margin`) is the only field addressing the form has. Tha
 goes out through a copy of the context client with `onError` cleared, the way `useApi`
 silences it for reads, so one failure raises one toast.
 
-**Actions on that page.** `x-actions` puts buttons on a card or in a tab header; a press
-reaches the page as `(name, path, item)` — the dotted address of the element, list index
-included, and the value the form is holding for it. The page `POST`s
+**The layout is the dialog's, the form is a provider.** `SchemaForm` draws no strip of
+its own any more: it owns the resolved schema, react-hook-form, submit, reset and the
+action wiring, and publishes them through RHF's `FormProvider` plus `useSchemaForm()`.
+`components/AccountDialog/Layout.tsx` composes the rest inside that `<form>` — a left
+column (search box, the signed-in user, one row per section with the lucide icon its
+`x-icon` names, or `settings-2`, the top-level scalars listed first as
+`account.general`), and a right column (the section's title and description, its
+`x-actions` buttons, the fields under them, Save/Reset at the foot — replaced by the
+`account.readonly` notice where the engine will not store). A non-empty query swaps the
+section body for `SchemaMatches`, the matches across every section, bound to the same
+form; picking a section clears it. Under `useIsMobile` the column becomes a strip above
+the content: the search box and the sections as scrolling chips, and the dialog takes
+the whole screen. Two details are bugs, not taste: every menu row and chip is
+`type="button"` and the search box swallows Enter, because both sit inside the form the
+account is saved with and the default there is submit.
+
+**Actions on that page.** `x-actions` puts buttons on a card or in a section header; a
+press reaches the dialog as `(name, path, item)` — the dotted address of the element,
+list index included, and the value the form is holding for it; a header button passes
+the section name and a `null` item. The dialog `POST`s
 `/project/account/actions/<name>` with `{path, item}` through the same silenced client
 and applies one of three outcomes, tagged on `t`: `toast` says something, `page` carries
 the whole page rebuilt (`mutate(page, false)` — the hook already answered with what it
@@ -395,16 +426,19 @@ and a rejection would only reach the form as an unhandled one — which is where
 differs from the save, whose rejection is what puts the Save button back.
 
 `open_thread` is **the hand-off path, not a second one**. The switch logic lives in
-`frontend/src/hooks/useSessionHandoff.ts`, which the page and
-`ChatProfileSwitchListener` each instantiate; the page calls it with a `session.handoff`
-payload built from the outcome (`keepTranscript: false`), so an action that opens a chat
-does exactly what the frame does — teardown order, `flushSync` and all.
+`frontend/src/hooks/useSessionHandoff.ts`, which the dialog and
+`ChatProfileSwitchListener` each instantiate; the dialog calls it with a
+`session.handoff` payload built from the outcome (`keepTranscript: false`), so an action
+that opens a chat does exactly what the frame does — teardown order, `flushSync` and
+all. The navigation it ends in leaves `/account`, so the dialog closes with no code of
+its own.
 
-**The tab is the address.** `SchemaForm` is controlled through `activeTab`/`onTabChange`
-and the page holds that state in `?tab=` (`useSearchParams`), so a tab is linkable and
-survives a reload. Nothing writes a tab into a clean URL: without the parameter the form
-shows its first tab, and a name that matches none does the same. A change is a `replace`,
-so Back leaves the page rather than walking backwards through the tabs.
+**The section is the address.** The layout reads `?tab=` (`useSearchParams`) and writes
+it on every pick, so a section is linkable and survives a reload; `$leading` is the name
+the scalars go under. Nothing writes one into a clean URL: without the parameter the
+first section opens, and a name that matches none does the same. A change is a
+`replace`, so Back leaves the account rather than walking backwards through the sections
+the user looked at.
 
 **The badge.** `@cl.on_account_badge` makes the server push `account.badge` — after every
 `session.ready`, after a `GET /project/account` (the application marks things seen inside
@@ -456,7 +490,7 @@ reload, and `Thread.tsx` renders `/thread/<id>` read-only for it.
 `ChatProfileSwitchListener.tsx` and `ThreadReturnListener.tsx` subscribe via
 `transport.onMessage`, so they outlive every socket the transport builds and never
 re-register. The switch listener is now only that subscription and a ref: the switch
-itself is `useSessionHandoff`, shared with the account page, because an `open_thread`
+itself is `useSessionHandoff`, shared with the account dialog, because an `open_thread`
 action outcome arrives at the same place over HTTP and the two must not drift. The ref
 stays in the listener — the hook closure is rebuilt on every render, and re-subscribing
 on each one would tear the listener off the transport mid-frame. What the hook does on
@@ -591,19 +625,22 @@ while a 1006 leaves the signed-in user exactly where it was. Other specs cover
 message-tree merging, ask-action
 pruning, transcript freezing, wait messages, compact steps, icons, content rendering,
 `NewChat`, `openThread` and `threadAddressSync` (both directions of the
-address↔session loop). The account page has six: `schemaFormResolve.spec.ts` drives
+address↔session loop). The account has six: `schemaFormResolve.spec.ts` drives
 the pure `resolveForm` against schemas `msgspec.json.schema` really emits,
 `schemaForm.spec.tsx` renders the controls it resolves, `schemaFormCards.spec.tsx` the
 `cards` grid (0/1/20 elements, the image, the title, the badges, a switch bound to
-`<field>.<index>.<name>`, and the card and tab buttons reporting a `path`), and
-`accountPage.spec.tsx`
-stubs `SchemaForm` to pin what the page alone owns — the four fetch states, what it
-hands the form, and that a save puts the values back, re-renders from the response and
-raises exactly one toast either way. `accountActions.spec.tsx` pins the action round
-trip: the POST carries `{path, item}`, each of the three outcomes does its one thing
-(`open_thread` through the mocked handoff hook, with the server's ids verbatim), and a
-refusal toasts the `detail` without rejecting at the form. `accountTab.spec.tsx` pins
-`?tab=` in both directions, including the clean URL that stays clean.
+`<field>.<index>.<name>`, and the card and section buttons reporting a `path`),
+`schemaFormSearch.spec.tsx` the `searchFields` walk and the matches it renders, and
+`accountDialog.spec.tsx`
+stubs every piece of the provider to pin what the dialog alone owns — that it is shut,
+and asks for nothing, on any other address; where the × and Esc lead on a direct open
+and on one from inside the app; the four fetch states; the menu, its icons and `?tab=`
+in both directions; the search box, including the Enter it refuses; and that a save puts
+the values back, re-renders from the response and raises exactly one toast either way.
+`accountActions.spec.tsx` pins the action round trip: the POST carries `{path, item}`,
+each of the three outcomes does its one thing (`open_thread` through the mocked handoff
+hook, with the server's ids verbatim), and a refusal toasts the `detail` without
+rejecting at the form.
 `useSessionHandoff.spec.tsx` drives the _listener_ — so it guards the subscription and
 the lifted switch at once: only `session.handoff` is forwarded, an unknown profile and a
 no-op are refused, a parked transit message makes a same-profile switch real, the kept

@@ -41,6 +41,8 @@ export interface IJsonSchema {
     | 'image'
     | 'title';
   'x-actions'?: IAccountAction[];
+  /** A lucide name, on a nested Struct: the icon of its row in the section menu. */
+  'x-icon'?: string;
   'x-enum-labels'?: Record<string, string>;
   [key: string]: unknown;
 }

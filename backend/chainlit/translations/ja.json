@@ -260,7 +260,13 @@
     },
     "badge": {
       "aria": "unread"
-    }
+    },
+    "general": "General",
+    "search": {
+      "placeholder": "Search settings",
+      "empty": "Nothing matches."
+    },
+    "close": "Close"
   },
   "alerts": {
     "info": "Info",

@@ -29,7 +29,9 @@ from typing import (
     Dict,
     List,
     Literal,
+    Mapping,
     Optional,
+    Sequence,
     Type,
     Union,
 )
@@ -594,6 +596,71 @@ class ChainlitConfigOverrides(Settings):
     project: Optional[ProjectSettings] = None
 
 
+def _translation_stem(language: str, directories: Sequence[Path]) -> Optional[str]:
+    """Which ``<stem>.json`` answers ``language``, by the fallback chain.
+
+    Exact match, then the parent language (``es-419`` → ``es``), then a
+    regional variant of a bare language (``da`` → ``da-DK``, the first in
+    sorted order so the answer is stable), then ``en-US``. A file counts when
+    either directory has it, so a language the package ships but the app
+    never copied still resolves -- and the stem, not a path, is returned,
+    because both directories are read for it afterwards.
+    """
+    parent = language.split("-")[0]
+
+    def present(stem: str) -> bool:
+        for directory in directories:
+            file = directory / f"{stem}.json"
+            if is_path_inside(file, directory) and file.is_file():
+                return True
+        return False
+
+    if present(language):
+        return language
+    if present(parent):
+        logger.warning(
+            f"Translation file for {language} not found. Using parent translation {parent}."
+        )
+        return parent
+    if language == parent:
+        variants = sorted(
+            {
+                candidate.stem
+                for directory in directories
+                for candidate in directory.glob(f"{parent}-*.json")
+                if is_path_inside(candidate, directory) and candidate.is_file()
+            }
+        )
+        if variants:
+            logger.info(
+                f"Translation file for {language} not found. Using regional variant {variants[0]}."
+            )
+            return variants[0]
+    if present("en-US"):
+        logger.warning(
+            f"Translation file for {language} not found. Using default translation en-US."
+        )
+        return "en-US"
+    return None
+
+
+def _merge_translation(into: Dict[str, Any], overlay: Mapping[str, Any]) -> None:
+    """Lay ``overlay`` over ``into`` in place, section by section.
+
+    Recursive on dicts and nothing else: a section the app rewrote keeps the
+    keys it did not mention, and a string the app set wins over the package's.
+    """
+    for key, value in overlay.items():
+        current = into.get(key)
+        if isinstance(value, Mapping) and isinstance(current, dict):
+            _merge_translation(current, value)
+        elif isinstance(value, Mapping):
+            into[key] = {}
+            _merge_translation(into[key], value)
+        else:
+            into[key] = value
+
+
 def _overlay(base: Struct, override: Struct) -> Struct:
     """``base`` with the fields ``override`` sets, recursing into sections.
 
@@ -650,65 +717,34 @@ class ChainlitConfig:
         self.project = project
         self.code = code if code is not None else CodeSettings()
 
-    def load_translation(self, language: str):
-        translation = {}
-        default_language = "en-US"
-        parent_language = language.split("-")[0]
+    def load_translation(self, language: str) -> Dict[str, Any]:
+        """The UI strings for ``language``: the package's file, with the app's
+        copy laid over it.
 
-        translation_dir = Path(config_translation_dir)
+        Two directories, one answer. ``init_config`` copies every packaged
+        translation into ``.chainlit/translations/`` once, and that copy used
+        to be the only file ever read -- so a key added to the package by a
+        later release never reached a deployment that had been initialised
+        before it, and the client drew ``...`` where the string should be
+        (seen on 20.09.2026 with the account dialog's own keys). The package
+        file is the base and the copy an overlay: a string the app changed
+        stays changed, a string the app never saw arrives with the wheel.
 
-        # 1. Exact match (e.g. "da-DK.json" or "da.json")
-        translation_lib_file_path = translation_dir / f"{language}.json"
-        if (
-            is_path_inside(translation_lib_file_path, translation_dir)
-            and translation_lib_file_path.is_file()
-        ):
-            translation = json.loads(
-                translation_lib_file_path.read_text(encoding="utf-8")
-            )
-            return translation
-
-        # 2. Parent/base language fallback (e.g. "de-DE" → "de.json")
-        translation_lib_parent_language_file_path = (
-            translation_dir / f"{parent_language}.json"
+        The fallback chain (exact, parent language, regional variant,
+        ``en-US``) picks one file name for both directories, so the two halves
+        are always the same language.
+        """
+        stem = _translation_stem(
+            language, (Path(config_translation_dir), Path(TRANSLATIONS_DIR))
         )
-        if (
-            is_path_inside(translation_lib_parent_language_file_path, translation_dir)
-            and translation_lib_parent_language_file_path.is_file()
-        ):
-            logger.warning(
-                f"Translation file for {language} not found. Using parent translation {parent_language}."
-            )
-            translation = json.loads(
-                translation_lib_parent_language_file_path.read_text(encoding="utf-8")
-            )
-            return translation
-
-        # 3. Regional variant lookup (e.g. "da" → "da-DK.json")
-        if language == parent_language:
-            for candidate in sorted(translation_dir.glob(f"{parent_language}-*.json")):
-                if is_path_inside(candidate, translation_dir) and candidate.is_file():
-                    variant = candidate.stem
-                    logger.info(
-                        f"Translation file for {language} not found. Using regional variant {variant}."
-                    )
-                    translation = json.loads(candidate.read_text(encoding="utf-8"))
-                    return translation
-
-        # 4. Default fallback
-        default_translation_lib_file_path = translation_dir / f"{default_language}.json"
-        if (
-            is_path_inside(default_translation_lib_file_path, translation_dir)
-            and default_translation_lib_file_path.is_file()
-        ):
-            logger.warning(
-                f"Translation file for {language} not found. Using default translation {default_language}."
-            )
-            translation = json.loads(
-                default_translation_lib_file_path.read_text(encoding="utf-8")
-            )
-
-        return translation
+        if stem is None:
+            return {}
+        merged: Dict[str, Any] = {}
+        for directory in (Path(TRANSLATIONS_DIR), Path(config_translation_dir)):
+            file = directory / f"{stem}.json"
+            if is_path_inside(file, directory) and file.is_file():
+                _merge_translation(merged, json.loads(file.read_text(encoding="utf-8")))
+        return merged
 
     def with_overrides(
         self, overrides: Optional[ChainlitConfigOverrides]

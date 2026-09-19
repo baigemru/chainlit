@@ -91,6 +91,7 @@ const WATCH: IJsonSchema = {
       properties: {
         watch: {
           title: 'Слежение',
+          'x-icon': 'eye',
           'x-actions': [
             { name: 'recheck', label: 'Проверить всё', icon: 'refresh-cw' }
           ],
@@ -418,6 +419,34 @@ describe('resolveForm', () => {
     expect(watch.fields[0].actions).toEqual([
       { name: 'compare', label: 'Где дешевле', icon: 'search' }
     ]);
+  });
+
+  it('reads x-icon off the section property and leaves it out when absent', () => {
+    const [watch] = resolveForm(WATCH).tabs;
+    expect(watch.icon).toBe('eye');
+
+    // No icon and an empty one are the same thing: the menu row falls back to
+    // its default rather than asking lucide for a component named "".
+    const [calc] = resolveForm(ACCOUNT).tabs;
+    expect(calc.icon).toBeUndefined();
+    const [blank] = resolveForm({
+      $ref: '#/$defs/Root',
+      $defs: {
+        Root: {
+          title: 'Root',
+          type: 'object',
+          properties: { a: { title: 'A', 'x-icon': '', $ref: '#/$defs/A' } },
+          required: []
+        },
+        A: {
+          title: 'A',
+          type: 'object',
+          properties: { b: { type: 'string', default: '' } },
+          required: []
+        }
+      }
+    }).tabs;
+    expect(blank.icon).toBeUndefined();
   });
 
   it('drops an x-actions entry that could not be drawn or posted', () => {

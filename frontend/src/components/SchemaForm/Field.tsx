@@ -1,4 +1,4 @@
-import { Control, Controller, FieldValues } from 'react-hook-form';
+import { Controller, FieldValues, useFormContext } from 'react-hook-form';
 
 import { Markdown } from '@/components/Markdown';
 import { Translator } from '@/components/i18n';
@@ -9,18 +9,14 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
-import Cards, { type ActionHandler } from './Cards';
+import Cards from './Cards';
 import EnumSelect, { optionLabel } from './EnumSelect';
 import TagsInput from './TagsInput';
+import { useSchemaForm } from './index';
 import type { ResolvedField } from './resolve';
 
 interface Props {
   field: ResolvedField;
-  control: Control<FieldValues>;
-  /** The whole form is read-only, or this field is. */
-  disabled?: boolean;
-  /** An `x-actions` button on a card was pressed. */
-  onAction?: ActionHandler;
 }
 
 const asList = (value: unknown): unknown[] =>
@@ -37,22 +33,17 @@ const Description = ({ text }: { text?: string }) =>
  * object, which would quietly delete every read-only value the server sent —
  * `plan`, a link, anything the page only displays.
  */
-const Field = ({ field, control, disabled, onAction }: Props) => {
+const Field = ({ field }: Props) => {
+  const { control } = useFormContext<FieldValues>();
+  const { readonly } = useSchemaForm();
   const name = field.path.join('.');
-  const off = disabled || field.readOnly;
+  const off = readonly || field.readOnly;
 
   // Outside the Controller below: a card list owns one Controller per switch
   // it draws, and a Controller around all of them would register the array
   // itself as a field.
   if (field.kind === 'cards') {
-    return (
-      <Cards
-        field={field}
-        control={control}
-        disabled={disabled}
-        onAction={onAction}
-      />
-    );
+    return <Cards field={field} />;
   }
 
   if (field.kind === 'group') {
@@ -61,13 +52,7 @@ const Field = ({ field, control, disabled, onAction }: Props) => {
         <legend className="px-1 text-sm font-medium">{field.title}</legend>
         <Description text={field.description} />
         {(field.fields ?? []).map((child) => (
-          <Field
-            key={child.path.join('.')}
-            field={child}
-            control={control}
-            disabled={disabled}
-            onAction={onAction}
-          />
+          <Field key={child.path.join('.')} field={child} />
         ))}
       </fieldset>
     );

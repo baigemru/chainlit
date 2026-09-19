@@ -73,17 +73,34 @@ export interface ResolvedTab {
   fields: ResolvedField[];
   /** The buttons `x-actions` put in the tab header. */
   actions?: IAccountAction[];
+  /** `x-icon`: a lucide name for the menu row, the vocabulary `cl.Action` uses. */
+  icon?: string;
 }
 
 export interface ResolvedForm {
   /**
-   * The top-level fields that are not objects, in declaration order. They are
-   * drawn above the tab strip as one leading section with no heading: msgspec
-   * gives us no name for them, and "General" would be an invention the
-   * application never wrote.
+   * The top-level fields that are not objects, in declaration order. They form
+   * the leading section, the one msgspec gives us no name for — which is why
+   * it is addressed by `LEADING` rather than by a title the application never
+   * wrote, and why the label over it is a translation and not schema text.
    */
   sections: ResolvedField[];
   tabs: ResolvedTab[];
+}
+
+/**
+ * The name of the section holding the top-level scalars.
+ *
+ * A `$` prefix because a section name is otherwise a Struct field name, and
+ * `$` is not one msgspec can emit.
+ */
+export const LEADING = '$leading';
+
+/** One section's matches, as `searchFields` groups them. */
+export interface SearchGroup {
+  /** `title` is empty for `LEADING`: its label is the caller's translation. */
+  section: { name: string; title: string };
+  fields: ResolvedField[];
 }
 
 const DEF_PREFIX = '#/$defs/';
@@ -181,6 +198,11 @@ const actionsOf = (schema: IJsonSchema): IAccountAction[] | undefined => {
       typeof entry.label === 'string'
   );
   return actions.length > 0 ? actions : undefined;
+};
+
+const iconOf = (schema: IJsonSchema): string | undefined => {
+  const icon = schema['x-icon'];
+  return typeof icon === 'string' && icon ? icon : undefined;
 };
 
 const stepOf = (schema: IJsonSchema): number | 'any' => {
@@ -370,7 +392,8 @@ export const resolveForm = (schema: IJsonSchema): ResolvedForm => {
         fields: buildFields(resolution.schema, [name], defs, true),
         // The property's keys are layered over the `$ref`ed def, so an
         // `x-actions` written beside the `$ref` is visible here.
-        actions: actionsOf(resolution.schema)
+        actions: actionsOf(resolution.schema),
+        icon: iconOf(resolution.schema)
       });
       continue;
     }
@@ -378,4 +401,48 @@ export const resolveForm = (schema: IJsonSchema): ResolvedForm => {
   }
 
   return { sections, tabs };
+};
+
+/**
+ * A group matches when its own text does or any field under it does.
+ *
+ * Why the whole group and not the child: a fieldset is one value the
+ * application grouped on purpose, and half of it on screen — the half whose
+ * caption happened to carry the query — reads as a different form.
+ */
+const matches = (field: ResolvedField, needle: string): boolean =>
+  field.title.toLowerCase().includes(needle) ||
+  (field.description ?? '').toLowerCase().includes(needle) ||
+  (field.fields ?? []).some((child) => matches(child, needle));
+
+/**
+ * The fields of every section whose caption or helper text carries `query`.
+ *
+ * Pure, and deliberately not a component: what the search finds is a claim
+ * worth testing without a DOM. Declaration order is kept throughout — the
+ * application's layout is the only ordering this form has — and a card's
+ * element fields are not searched: they are values of one field, not fields
+ * of the page, and matching one would have to draw a card out of its list.
+ */
+export const searchFields = (
+  form: ResolvedForm,
+  query: string
+): SearchGroup[] => {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+
+  const groups: SearchGroup[] = [];
+  const take = (
+    section: { name: string; title: string },
+    fields: ResolvedField[]
+  ) => {
+    const found = fields.filter((field) => matches(field, needle));
+    if (found.length > 0) groups.push({ section, fields: found });
+  };
+
+  take({ name: LEADING, title: '' }, form.sections);
+  for (const tab of form.tabs) {
+    take({ name: tab.name, title: tab.title }, tab.fields);
+  }
+  return groups;
 };

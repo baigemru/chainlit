@@ -1,7 +1,6 @@
 import getRouterBasename from '@/lib/router';
 import { Navigate, createBrowserRouter } from 'react-router-dom';
 
-import Account from 'pages/Account';
 import AuthCallback from 'pages/AuthCallback';
 import Element from 'pages/Element';
 import Env from 'pages/Env';
@@ -40,8 +39,11 @@ export const router = createBrowserRouter(
       element: <Thread />
     },
     {
+      // The chat, with the account dialog over it: `Page` mounts the dialog
+      // and it opens on this address, so the session the user was in is what
+      // shows through the blur.
       path: '/account',
-      element: <Account />
+      element: <Home />
     },
     {
       path: '*',

@@ -213,8 +213,9 @@ class SessionRegistry:
 
     The thread map is the registry; the id map is a lookup table for the
     HTTP routes, which are handed a session id and nothing else. There is
-    deliberately no index by user -- nothing asks that question, and a third
-    index is a third thing to keep consistent.
+    deliberately no index by user: ``sessions_of`` scans, because a third
+    index would be a third thing to keep consistent and the answer is
+    wanted once per account-page read, not once per frame.
     """
 
     def __init__(self) -> None:
@@ -277,6 +278,26 @@ class SessionRegistry:
         """The session in this conversation, for the routes that act on threads."""
         entry = self.entry_of_thread(thread_id)
         return None if entry is None else cast("Session", entry.session)
+
+    def sessions_of(self, user_identifier: Optional[str]) -> list["Session"]:
+        """Every session this user is in, connected or not.
+
+        The one fan-out this registry performs, and it exists because a
+        person is usually in two tabs: the chat that changed something and
+        the account page that has to hear about it. Ownership is the same
+        predicate the takeover uses, so an anonymous deployment -- where
+        every session matches every caller -- behaves consistently with
+        how it already hands conversations over.
+
+        A disconnected session is included: its queue drains onto the next
+        socket, and a frame it never receives is replaced by the one its
+        own hello triggers.
+        """
+        return [
+            cast("Session", entry.session)
+            for entry in self._by_thread.values()
+            if is_owned_by(entry, user_identifier)
+        ]
 
     def holds(self, entry: SessionEntry) -> bool:
         """Whether this exact entry is still the tenant of its thread.

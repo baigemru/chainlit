@@ -264,6 +264,32 @@ class UserService(
         )
         return row_to_user(await self.fetch_one(statement))
 
+    async def get_account(self, identifier: str) -> Dict[str, Any]:
+        """The account values this user last saved, or ``{}`` for a new one.
+
+        Read as a scalar rather than through ``to_record``: ``UserRecord`` is
+        what ``/user`` answers with, and the account values are nobody's
+        business but the account page's.
+        """
+        stored = await self.fetch_scalar(statements.user_account_query(identifier))
+        return stored or {}
+
+    async def set_account(self, identifier: str, values: Dict[str, Any]) -> None:
+        """Store the account values, minting the row if no login has yet.
+
+        One statement, for the same reason ``save`` is one: a user whose row
+        the login flow has not written -- an app with authentication but no
+        ``/user`` call yet -- must not turn this into a duplicate-key error.
+        """
+        await self.execute(
+            statements.upsert_user_account(
+                user_id=uuid.uuid4(),
+                identifier=identifier,
+                account=values,
+                created_at=now(),
+            )
+        )
+
     def to_record(self, model: User) -> UserRecord:
         return UserRecord(
             id=str(model.id),

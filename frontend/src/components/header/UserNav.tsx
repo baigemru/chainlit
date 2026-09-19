@@ -1,13 +1,12 @@
 import capitalize from 'lodash/capitalize';
-import { LogOut } from 'lucide-react';
-import { useState } from 'react';
+import { LogOut, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useRecoilValue } from 'recoil';
 
-import { useAuth, useConfig } from '@chainlit/react-client';
+import { accountBadgeState, useAuth, useConfig } from '@chainlit/react-client';
 
-import IframeModal from '@/components/IframeModal';
-import LinkIcon from '@/components/LinkIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -18,6 +17,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Translator } from 'components/i18n';
+import { useTranslation } from 'components/i18n/Translator';
 
 interface Props {
   /**
@@ -31,14 +31,16 @@ export default function UserNav({ collapsed }: Props) {
   const { user, logout } = useAuth();
   const { config } = useConfig();
   const navigate = useNavigate();
-  const [iframeLink, setIframeLink] = useState<{
-    name: string;
-    url: string;
-  } | null>(null);
+  const { t } = useTranslation();
+  // Pushed by the server on `account.badge`, and `undefined` until one
+  // arrives: an application that registered no badge hook says nothing, and
+  // a zero this client invented would be an answer it never gave.
+  const badge = useRecoilValue(accountBadgeState);
 
   if (!user) return null;
   const displayName = user?.display_name || user?.identifier;
-  const menuLinks = config?.ui?.user_menu_links || [];
+  const account = config?.ui?.account;
+  const unseen = badge ?? 0;
 
   const items = (
     <>
@@ -47,53 +49,26 @@ export default function UserNav({ collapsed }: Props) {
           <p className="text-sm font-medium leading-none">{displayName}</p>
         </div>
       </DropdownMenuLabel>
+      {/* The account page is the menu's one destination besides the door out:
+          anything the application wants to offer here — the billing portal
+          included — is a field on the Struct it registers with `@cl.account`,
+          not a row of its own. */}
+      {account?.enabled ? (
+        <DropdownMenuItem onClick={() => navigate('/account')}>
+          {account.title ? (
+            <span>{account.title}</span>
+          ) : (
+            <Translator path="navigation.user.menu.account" />
+          )}
+          {unseen > 0 ? (
+            <Badge variant="destructive" className="ml-2 px-1.5 py-0">
+              {unseen}
+            </Badge>
+          ) : null}
+          <UserRound className="ml-auto" />
+        </DropdownMenuItem>
+      ) : null}
       <DropdownMenuSeparator />
-      {menuLinks.map((link, index) => {
-        if (link.target === 'iframe') {
-          return (
-            <DropdownMenuItem
-              key={`${link.name}-${index}`}
-              // Collapsed, the modal is mounted inside the menu that this
-              // row would close, so it would unmount on the way in.
-              onSelect={collapsed ? (e) => e.preventDefault() : undefined}
-              onClick={() =>
-                setIframeLink({
-                  name: link.display_name || link.name,
-                  url: link.url
-                })
-              }
-            >
-              <span>{link.display_name || link.name}</span>
-              <LinkIcon
-                iconUrl={link.icon_url}
-                iconUrlLight={link.icon_url_light}
-                iconUrlDark={link.icon_url_dark}
-                iconMask={link.icon_mask}
-                className="ml-auto size-4"
-              />
-            </DropdownMenuItem>
-          );
-        }
-        return (
-          <DropdownMenuItem key={`${link.name}-${index}`} asChild>
-            <a
-              href={link.url}
-              target={link.target ?? '_blank'}
-              rel="noopener noreferrer"
-            >
-              <span>{link.display_name || link.name}</span>
-              <LinkIcon
-                iconUrl={link.icon_url}
-                iconUrlLight={link.icon_url_light}
-                iconUrlDark={link.icon_url_dark}
-                iconMask={link.icon_mask}
-                className="ml-auto size-4"
-              />
-            </a>
-          </DropdownMenuItem>
-        );
-      })}
-      {menuLinks.length > 0 && <DropdownMenuSeparator />}
       <DropdownMenuItem
         onClick={() => {
           // Home first, then the logout's reload. The address bar is the
@@ -115,51 +90,40 @@ export default function UserNav({ collapsed }: Props) {
     </>
   );
 
-  const modal = iframeLink && (
-    <IframeModal
-      open={true}
-      onOpenChange={(open) => {
-        if (!open) setIframeLink(null);
-      }}
-      title={iframeLink.name}
-      url={iframeLink.url}
-    />
-  );
-
   if (collapsed) {
-    return (
-      <>
-        {items}
-        {modal}
-      </>
-    );
+    return items;
   }
 
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            id="user-nav-button"
-            variant="ghost"
-            className="relative h-8 w-8 rounded-full"
-          >
-            <Avatar className="h-8 w-8">
-              {/* `GET /user` omits an empty `metadata` (msgspec
-                  `omit_defaults`), so a user with nothing in it arrives
-                  without the key at all. */}
-              <AvatarImage src={user?.metadata?.image} alt="user image" />
-              <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
-                {capitalize(displayName[0])}
-              </AvatarFallback>
-            </Avatar>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-26" align="end" forceMount>
-          {items}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {modal}
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          id="user-nav-button"
+          variant="ghost"
+          className="relative h-8 w-8 rounded-full"
+        >
+          <Avatar className="h-8 w-8">
+            {/* `GET /user` omits an empty `metadata` (msgspec
+                `omit_defaults`), so a user with nothing in it arrives
+                without the key at all. */}
+            <AvatarImage src={user?.metadata?.image} alt="user image" />
+            <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
+              {capitalize(displayName[0])}
+            </AvatarFallback>
+          </Avatar>
+          {/* The menu is closed most of the time, so the count inside it
+              cannot be what tells the user there is something to see. */}
+          {unseen > 0 ? (
+            <span
+              aria-label={t('account.badge.aria')}
+              className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-destructive ring-2 ring-background"
+            />
+          ) : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-26" align="end" forceMount>
+        {items}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

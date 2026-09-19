@@ -14,7 +14,11 @@ if env_found:
 
 import asyncio
 
-import chainlit.input_widget as input_widget
+from chainlit.account import (
+    OpenThread as AccountOpenThread,
+    Refresh as AccountRefresh,
+    Toast as AccountToast,
+)
 from chainlit.action import Action
 from chainlit.chat_context import chat_context
 from chainlit.context import context
@@ -55,9 +59,14 @@ from chainlit.user_session import user_session
 from chainlit.version import __version__
 
 from .callbacks import (
+    account,
+    account_action,
     action_callback,
     author_rename,
     oauth_callback,
+    on_account_badge,
+    on_account_load,
+    on_account_update,
     on_app_shutdown,
     on_app_startup,
     on_chat_end,
@@ -85,6 +94,9 @@ def sleep(duration: int):
 
 
 __all__ = [
+    "AccountOpenThread",
+    "AccountRefresh",
+    "AccountToast",
     "Action",
     "AskActionMessage",
     "AskElementMessage",
@@ -116,13 +128,17 @@ __all__ = [
     "User",
     "Video",
     "__version__",
+    "account",
+    "account_action",
     "action_callback",
     "author_rename",
     "chat_context",
     "context",
-    "input_widget",
     "logger",
     "oauth_callback",
+    "on_account_badge",
+    "on_account_load",
+    "on_account_update",
     "on_app_shutdown",
     "on_app_startup",
     "on_chat_end",

@@ -5,16 +5,33 @@ One declaration, shared by every controller, satisfied by the real
 only what they touch, so a test can hand them a stub with five attributes
 instead of building a websocket; the transport keeps everything else to
 itself.
+
+Two registry ports, not one, and ``UserSessions`` says why: Litestar resolves
+a ``NamedDependency`` by ``isinstance`` against the annotation, so these
+Protocols are live gates and a method added to one is a method every stub
+that ever satisfied it must now grow.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AbstractSet, Any, Mapping, Optional, Protocol, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    AbstractSet,
+    Any,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    runtime_checkable,
+)
 
 from chainlit.protocol.payloads import Element
 
-__all__ = ["LiveSession", "SessionRegistry"]
+if TYPE_CHECKING:
+    from chainlit.protocol.server import ServerMsg
+
+__all__ = ["LiveSession", "SessionRegistry", "UserSessions"]
 
 
 @runtime_checkable
@@ -63,6 +80,15 @@ class LiveSession(Protocol):
     def files_spec(self) -> Mapping[str, Any]:
         """The upload constraints of each pending file ask, keyed by the
         id of the message that asked."""
+        ...
+
+    def send(self, msg: "ServerMsg") -> bool:
+        """Queue one frame for this session's client.
+
+        Safe from a route: it is a write to the session's outbound queue,
+        not a socket operation, so an HTTP handler on another task may do
+        it without reaching into the connection the session is wearing.
+        """
         ...
 
     async def persist_file(
@@ -135,4 +161,25 @@ class SessionRegistry(Protocol):
 
     def protected_step_ids(self, thread_id: Optional[str]) -> AbstractSet[str]:
         """Steps a live question on this thread is holding on screen."""
+        ...
+
+
+@runtime_checkable
+class UserSessions(Protocol):
+    """Bound under the same ``sessions`` key, for the one route that fans out.
+
+    Its own declaration rather than a fifth method on ``SessionRegistry``
+    because that protocol is a *runtime* gate: Litestar resolves a
+    ``NamedDependency`` by ``isinstance`` against its annotation, so a
+    method added there would stop every stub that satisfies the narrow port
+    from being accepted by routes that never asked for it. Narrow ports are
+    what this module is; widening one to reach a new caller is the opposite.
+    """
+
+    def sessions_of(self, user_identifier: Optional[str]) -> Sequence[LiveSession]:
+        """Every live session belonging to that user.
+
+        The one route that asks is the account page: what it changes is
+        visible in the chat tab as well, and a person is usually in both.
+        """
         ...

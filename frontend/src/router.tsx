@@ -39,6 +39,13 @@ export const router = createBrowserRouter(
       element: <Thread />
     },
     {
+      // The chat, with the account dialog over it: `Page` mounts the dialog
+      // and it opens on this address, so the session the user was in is what
+      // shows through the blur.
+      path: '/account',
+      element: <Home />
+    },
+    {
       path: '*',
       element: <Navigate replace to="/" />
     }

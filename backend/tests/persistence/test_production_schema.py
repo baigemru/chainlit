@@ -103,6 +103,12 @@ ADDED_BY_0002: Dict[str, Set[Tuple[str, bool]]] = {
     "elements": {("autoPlay", True), ("playerConfig", True)},
 }
 
+# Columns revision 0004 adds: `users.account`, where `@cl.account` stores what
+# a user saved. NOT NULL with a `'{}'` server default, so no backfill runs.
+ADDED_BY_0004: Dict[str, Set[Tuple[str, bool]]] = {
+    "users": {("account", False)},
+}
+
 MODELS = {
     "users": models.User,
     "threads": models.Thread,
@@ -114,7 +120,11 @@ MODELS = {
 
 @pytest.mark.parametrize("table_name", sorted(PRODUCTION_COLUMNS))
 def test_model_columns_match_production(table_name: str) -> None:
-    expected = PRODUCTION_COLUMNS[table_name] | ADDED_BY_0002.get(table_name, set())
+    expected = (
+        PRODUCTION_COLUMNS[table_name]
+        | ADDED_BY_0002.get(table_name, set())
+        | ADDED_BY_0004.get(table_name, set())
+    )
     actual = {
         (column.name, column.nullable is True)
         for column in MODELS[table_name].__table__.columns

@@ -8,10 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from chainlit.persistence.models import SCHEMA_NAME, Base
 
 # Taken from the production database (PostgreSQL, schema `chainlit`), plus the
-# three columns migration 0002 adds. If a model column is not in this map, it
+# three columns migration 0002 adds and the one migration 0004 adds. If a model column is not in this map, it
 # does not exist in production and every query using it would fail there.
 PRODUCTION_COLUMNS: Dict[str, Set[str]] = {
-    "users": {"id", "identifier", "metadata", "createdAt"},
+    "users": {
+        "id",
+        "identifier",
+        "metadata",
+        "createdAt",
+        # 0004
+        "account",
+    },
     "threads": {
         "id",
         "createdAt",

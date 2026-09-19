@@ -78,6 +78,22 @@ def test_a_post_to_an_unrouted_path_404s_even_from_a_browser(frontend_dir: Path)
     assert response.status_code == 404
 
 
+def test_the_account_page_is_the_spa_and_its_api_is_not(frontend_dir: Path):
+    """`/account` is a client-side route and `/project/account` is the route
+    behind it. Putting a handler on the first would take the page away from
+    the SPA; letting the second fall back to the SPA would answer a fetch
+    with HTML and a 200."""
+    with _client(frontend_dir) as client:
+        page = client.get("/account", headers=BROWSER)
+        api = client.get("/project/account")
+
+    assert page.status_code == 200
+    assert INDEX_MARKER in page.text
+    # Nobody is signed in: the controller's guard refuses before anything else.
+    assert api.status_code == 401
+    assert INDEX_MARKER not in api.text
+
+
 def test_the_assets_router_serves_real_files(frontend_dir: Path):
     with _client(frontend_dir) as client:
         response = client.get("/assets/app.js")

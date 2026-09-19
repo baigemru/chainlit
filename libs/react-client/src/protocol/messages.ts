@@ -4,6 +4,11 @@
 // `ServerMsg` and `ClientMsg` are discriminated on `t`, so a switch over it
 // narrows to one branch and a missing case is a compile error.
 
+export interface AccountBadge {
+  t: 'account.badge';
+  count: number;
+}
+
 export interface Action {
   id: string;
   name: string;
@@ -550,7 +555,8 @@ export type ServerMsg =
   | ThreadOpen
   | SessionHandoff
   | SidebarState
-  | Toast;
+  | Toast
+  | AccountBadge;
 
 export type ServerMsgTag =
   | 'session.ready'
@@ -575,7 +581,8 @@ export type ServerMsgTag =
   | 'thread.open'
   | 'session.handoff'
   | 'sidebar.state'
-  | 'toast';
+  | 'toast'
+  | 'account.badge';
 
 /** Exhaustive handler table: omitting a message is a compile error. */
 export type ServerMsgHandlers = {

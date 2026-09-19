@@ -164,9 +164,35 @@ HANDSHAKE_SCENARIOS = (
         ),
         given=Given(server_holds_session=False, hooks=("chat_start",)),
         when=(HELLO, HELLO),
+        # An application that declares no badge hook has no unread count,
+        # and a frame saying so would make the client render a zero it was
+        # never told.
+        forbid=("account.badge",),
         then=lambda result: assert_that(
             result.state["hook_runs"].get("chat_start") == 1,
             "the start callback did not run exactly once",
+        ),
+    ),
+    Scenario(
+        name="the unread count goes out on every hello, from the hook",
+        why=(
+            "A browser that has been shut for a day arrives knowing nothing "
+            "about the account page, and there is no route to ask: the count "
+            "is pushed or it is wrong. Every hello, not only the first -- a "
+            "reconnect is exactly the case where the client's copy is stale."
+        ),
+        given=Given(server_holds_session=False, hooks=("account_badge",)),
+        when=(HELLO, HELLO),
+        expect=(Expect("account.badge", {"count": 7}),),
+        then=lambda result: (
+            assert_that(
+                result.state["hook_runs"].get("account_badge") == 2,
+                "the badge hook did not run once per hello",
+            ),
+            assert_that(
+                result.state["account_badge_user"] == "user-1",
+                "the badge hook was not asked about the session's user",
+            ),
         ),
     ),
     Scenario(

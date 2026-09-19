@@ -25,6 +25,7 @@ from chainlit.protocol.payloads import (
 
 __all__ = [
     "SERVER_TAGS",
+    "AccountBadge",
     "ActionAdd",
     "ActionRemove",
     "AskEnd",
@@ -304,6 +305,19 @@ class Toast(_Msg, tag="toast"):
     type: ToastType = "info"
 
 
+class AccountBadge(_Msg, tag="account.badge"):
+    """How many things the account page holds that the user has not seen.
+
+    New in this protocol, and pushed rather than polled: the count is the
+    application's to know, it changes because of work in the chat, and a
+    client asking for it on a timer is wrong for the length of the
+    interval. Sent on every hello, after the account page is read, and
+    whenever a session says the number moved.
+    """
+
+    count: int
+
+
 ServerMsg = Union[
     SessionReady,
     Error,
@@ -328,6 +342,7 @@ ServerMsg = Union[
     SessionHandoff,
     SidebarState,
     Toast,
+    AccountBadge,
 ]
 
 SERVER_TAGS: frozenset[str] = frozenset(

@@ -233,7 +233,8 @@
         "settings": "הגדרות",
         "settingsKey": "ה",
         "apiKeys": "מפתחות API",
-        "logout": "התנתק"
+        "logout": "התנתק",
+        "account": "Account"
       }
     }
   },
@@ -243,6 +244,30 @@
     "success": {
       "saved": "נשמר בהצלחה"
     }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save",
+      "working": "Working…"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
+    },
+    "badge": {
+      "aria": "unread"
+    },
+    "general": "General",
+    "search": {
+      "placeholder": "Search settings",
+      "empty": "Nothing matches."
+    },
+    "close": "Close"
   },
   "alerts": {
     "info": "Info",

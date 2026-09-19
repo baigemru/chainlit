@@ -101,6 +101,10 @@ __all__ = ["KNOWN_BUGS", "NativeDriver"]
 
 SESSION_ID = "s1"
 USER = "user-1"
+
+ACCOUNT_BADGE_COUNT = 7
+"""What the recording badge hook answers. Any number a row can assert on;
+the point is that it is the *hook's* number and not one the engine made up."""
 SOMEONE_ELSE = "someone-else"
 DEFAULT_THREAD = "thread-main"
 #: How many loop turns a frame is given to settle. Fixed, never gated on
@@ -341,10 +345,16 @@ class _Run:
         async def on_thread_ready(thread: Mapping[str, Any]) -> None:
             runs["thread_ready"] = runs.get("thread_ready", 0) + 1
 
+        async def on_account_badge(user: Any) -> int:
+            runs["account_badge"] = runs.get("account_badge", 0) + 1
+            seen["account_badge_user"] = getattr(user, "identifier", None)
+            return ACCOUNT_BADGE_COUNT
+
         hooks = {
             "chat_start": on_chat_start,
             "chat_resume": on_chat_resume,
             "thread_ready": on_thread_ready,
+            "account_badge": on_account_badge,
         }
         for name in self.given.hooks:
             setattr(code, f"on_{name}", hooks[name])
@@ -732,6 +742,7 @@ class _Run:
             "hook_runs": dict(self.hook_runs),
             "chat_start_saw_handover": self.seen.get("chat_start_saw_handover"),
             "chat_resume_thread": self.seen.get("chat_resume_thread"),
+            "account_badge_user": self.seen.get("account_badge_user"),
             "has_first_interaction": bool(session and session.first_interaction),
             "handover_delivered": (
                 session.state.get("transit_message") if session else None

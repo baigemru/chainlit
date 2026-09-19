@@ -232,7 +232,8 @@
         "settings": "設定",
         "settingsKey": "S",
         "apiKeys": "APIキー",
-        "logout": "ログアウト"
+        "logout": "ログアウト",
+        "account": "Account"
       }
     }
   },
@@ -241,6 +242,20 @@
     "description": "このアプリを使用するには、以下のAPIキーが必要です。キーはお使いのデバイスのローカルストレージに保存されます。",
     "success": {
       "saved": "保存が完了しました"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

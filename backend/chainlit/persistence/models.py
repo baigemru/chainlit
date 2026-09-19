@@ -32,6 +32,7 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -131,6 +132,17 @@ class User(Base):
     # the attribute; the column keeps its name.
     metadata_: Mapped[Dict[str, Any]] = mapped_column(
         "metadata", types.JsonB, nullable=False, default=dict
+    )
+    # What ``@cl.account`` stores, added by revision 0004. A column of its own
+    # rather than a key in ``metadata``: ``upsert_user`` replaces that column
+    # wholesale at every sign-in, so anything the engine kept there would be
+    # gone by the user's next login.
+    account: Mapped[Dict[str, Any]] = mapped_column(
+        "account",
+        types.JsonB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
     created_at: Mapped[Optional[datetime]] = mapped_column(
         "createdAt", ISOTimestamp(), nullable=True

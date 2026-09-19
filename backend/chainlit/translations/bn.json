@@ -233,7 +233,8 @@
         "settings": "সেটিংস",
         "settingsKey": "S",
         "apiKeys": "এপিআই কী",
-        "logout": "লগআউট"
+        "logout": "লগআউট",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "এই অ্যাপ্লিকেশন ব্যবহার করতে নিম্নলিখিত এপিআই কী প্রয়োজন। কীগুলি আপনার ডিভাইসের লোকাল স্টোরেজে সংরক্ষিত থাকে।",
     "success": {
       "saved": "সফলভাবে সংরক্ষিত হয়েছে"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

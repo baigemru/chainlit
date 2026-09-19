@@ -233,7 +233,8 @@
         "settings": "सेटिंग्ज",
         "settingsKey": "S",
         "apiKeys": "API कीज",
-        "logout": "लॉगआउट"
+        "logout": "लॉगआउट",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "हे अॅप वापरण्यासाठी खालील API कीज आवश्यक आहेत. कीज तुमच्या डिव्हाइसच्या लोकल स्टोरेजमध्ये साठवल्या जातात.",
     "success": {
       "saved": "यशस्वीरित्या जतन केले"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

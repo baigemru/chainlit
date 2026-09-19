@@ -233,7 +233,8 @@
         "settings": "설정",
         "settingsKey": "S",
         "apiKeys": "API 키",
-        "logout": "로그아웃"
+        "logout": "로그아웃",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "이 앱을 사용하려면 다음 API 키가 필요합니다. 키는 기기의 로컬 저장소에 저장됩니다.",
     "success": {
       "saved": "성공적으로 저장되었습니다"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

@@ -20,7 +20,7 @@ client rewrite has exactly one directory to read.
 ```
 payloads.py   Step, StepPatch, Wait, Element (union), Action,
               AskSpec (union), AskReplyValue (union), Thread, Command,
-              Mode, InputWidgetSpec, Feedback
+              Mode, Feedback
 server.py     ServerMsg  — 23 branches, tag_field="t"
 client.py     ClientMsg  — 6 branches, tag_field="t"
 codec.py      encode/decode, CloseCode, ErrorCode

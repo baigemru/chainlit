@@ -155,6 +155,38 @@ def upsert_user(
     ).returning(*USERS.c)
 
 
+def user_account_query(identifier: str) -> Select[Any]:
+    """One user's stored ``@cl.account`` values."""
+    return select(USERS.c["account"]).where(USERS.c["identifier"] == identifier)
+
+
+def upsert_user_account(
+    user_id: UUID,
+    identifier: str,
+    account: Mapping[str, Any],
+    created_at: datetime,
+) -> Insert:
+    """Store one user's account values, creating the row if no login has.
+
+    ``metadata`` is deliberately not in the conflict clause. ``upsert_user``
+    owns that column and rewrites it whole at every sign-in; a second writer
+    touching it from here would quietly undo the login that ran a moment
+    earlier. The INSERT half has to supply it anyway -- the column is NOT NULL
+    -- but only for a row that did not exist.
+    """
+    statement = insert(USERS).values(
+        id=user_id,
+        identifier=identifier,
+        metadata={},
+        account=dict(account),
+        createdAt=created_at,
+    )
+    return statement.on_conflict_do_update(
+        index_elements=[USERS.c["identifier"]],
+        set_={"account": statement.excluded["account"]},
+    )
+
+
 def merge_thread_metadata(
     thread_id: UUID,
     patch: Mapping[str, Any],

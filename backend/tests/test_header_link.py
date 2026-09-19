@@ -1,6 +1,6 @@
 import msgspec
 
-from chainlit.config import HeaderLink, UISettings, UserMenuLink
+from chainlit.config import HeaderLink, UISettings
 
 
 class TestHeaderLink:
@@ -62,19 +62,6 @@ class TestHeaderLink:
         assert link.icon_url_light == "/public/buy_light.svg"
         assert link.icon_url_dark == "/public/buy_dark.svg"
         assert HeaderLink(name="x", url="y").icon_url_light is None
-
-    def test_user_menu_link_theme_fields(self):
-        link = UserMenuLink(
-            name="Account",
-            url="https://example.com/account",
-            icon_url_light="/public/account_light.svg",
-            icon_url_dark="/public/account_dark.svg",
-            icon_mask=True,
-        )
-
-        assert link.icon_url is None
-        assert link.icon_mask is True
-        assert UserMenuLink(name="x", url="y").icon_mask is False
 
     def test_ui_settings_parses_header_links(self):
         """``[[UI.header_links]]`` tables decode the way ``load_settings`` does.

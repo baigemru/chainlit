@@ -61,6 +61,7 @@ from litestar.types import Empty, EmptyType
 import chainlit.config
 from chainlit.config import APP_ROOT, FILES_DIRECTORY, ChainlitConfig, CodeSettings
 from chainlit.controllers import FRONTEND_DIST
+from chainlit.controllers.account import AccountController
 from chainlit.controllers.auth import (
     AuthController,
     provide_user_service,
@@ -332,6 +333,7 @@ class ChainlitPlugin(InitPlugin):
         embedding Chainlit inherits neither app-wide.
         """
         handlers: list[Any] = [
+            AccountController,
             AuthController,
             ProjectController,
             FilesController,

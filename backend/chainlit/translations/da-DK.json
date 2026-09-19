@@ -232,7 +232,8 @@
         "settings": "Indstillinger",
         "settingsKey": "S",
         "apiKeys": "API-nøgler",
-        "logout": "Log ud"
+        "logout": "Log ud",
+        "account": "Account"
       }
     }
   },
@@ -241,6 +242,20 @@
     "description": "For at bruge denne app kræves følgende API-nøgler. Nøglerne gemmes på din enheds lokale lager.",
     "success": {
       "saved": "Gemt succesfuldt"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

@@ -21,6 +21,11 @@ import chainlit
 #   on_window_message, send_window_message -- no wire message;
 #   switch_chat_profile -- built on the socket.io profile switch.
 # Added: ``logger``, which applications already reached as an attribute.
+# Changed 2026-09-19, the account page:
+#   input_widget -- the chat-settings widget layer had no wire message and no
+#     consumer; replaced by @cl.account, where one msgspec.Struct is the
+#     schema, the validator and the storage shape at once;
+#   account, on_account_load, on_account_update -- added with it.
 EXPECTED_EXPORTS = {
     "Action",
     "AskActionMessage",
@@ -53,13 +58,15 @@ EXPECTED_EXPORTS = {
     "User",
     "Video",
     "__version__",
+    "account",
     "action_callback",
     "author_rename",
     "chat_context",
     "context",
-    "input_widget",
     "logger",
     "oauth_callback",
+    "on_account_load",
+    "on_account_update",
     "on_app_shutdown",
     "on_app_startup",
     "on_chat_end",

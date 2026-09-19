@@ -25,18 +25,6 @@ if TYPE_CHECKING:
     from chainlit.element import ElementDict
     from chainlit.step import StepDict
 
-InputWidgetType = Literal[
-    "switch",
-    "slider",
-    "select",
-    "textinput",
-    "tags",
-    "numberinput",
-    "multiselect",
-    "checkbox",
-    "radio",
-    "datepicker",
-]
 ToastType = Literal["info", "success", "warning", "error"]
 
 

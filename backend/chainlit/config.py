@@ -30,6 +30,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Type,
     Union,
 )
 
@@ -173,12 +174,6 @@ name = "Assistant"
 # does not disable the return: a server-sent thread.open still reaches the parent.
 # show_parent_thread_button = false
 
-# Chat settings display location: "message_composer" (default) or "sidebar" (header)
-# chat_settings_location = "message_composer"
-
-# Default state of chat settings sidebar when location is "sidebar"
-# default_chat_settings_open = false
-
 # Whether to prompt user confirmation on clicking 'New Chat'
 confirm_new_chat = true
 
@@ -281,17 +276,11 @@ default_avatar_file_url = ""
 #     label_refresh_interval = 60  # Optional. Re-fetch the label every N seconds.
 #     collapse_on_mobile = true    # Optional, defaults to true. false keeps the link in the header on a narrow screen.
 
-# Specify optional one or more custom links inside the user menu (the dropdown
-# opened by clicking the avatar in the top-right corner).
-# [[UI.user_menu_links]]
-#     name = "Account"
-#     url = "https://example.com/account"
-#     icon_url = "/public/account.svg"     # Optional. Renders to the right of the label.
-#     icon_url_light = "/public/account_light.svg"  # Optional. Icon for the light theme; icon_url is the fallback.
-#     icon_url_dark = "/public/account_dark.svg"    # Optional. Icon for the dark theme; icon_url is the fallback.
-#     icon_mask = false                    # Optional. Render the icon with the current text color (theme-aware); requires a monochrome icon.
-#     display_name = "Manage account"      # Optional. Defaults to `name`.
-#     target = "_blank"                    # Optional, defaults to "_blank". "_self", "_parent", "_top".
+# The account page (`/account`), filled from the msgspec Struct the app registers with
+# `@cl.account`. The row in the user menu appears only when this table is present.
+# [UI.account]
+#     enabled = true
+#     title = "Account"    # Optional. Menu row and page heading; empty uses the UI translation.
 
 [meta]
 generated_by = "{__version__}"
@@ -391,18 +380,20 @@ class HeaderLink(Settings):
     label_refresh_interval: Optional[int] = None
 
 
-class UserMenuLink(Settings):
-    name: str
-    url: str
-    icon_url: Optional[str] = None
-    # Per-theme icon overrides; icon_url is the fallback for both themes.
-    icon_url_light: Optional[str] = None
-    icon_url_dark: Optional[str] = None
-    # Render the icon through a CSS mask filled with the current text color,
-    # so it follows the active theme. Requires a monochrome icon.
-    icon_mask: bool = False
-    display_name: Optional[str] = None
-    target: Optional[Literal["_blank", "_self", "_parent", "_top", "iframe"]] = None
+class AccountSection(Settings):
+    """The account page's row in the user menu, and its heading.
+
+    Absent means the row is not shown at all -- the same convention as
+    ``mobile_notice``. What the page *contains* is not configured here: the
+    application declares a ``msgspec.Struct`` with ``@cl.account`` and the
+    form is derived from it.
+    """
+
+    enabled: bool = True
+    # Empty falls back to the client's ``account.title`` translation, so a
+    # deployment that has nothing special to call it gets the user's language
+    # rather than an English word pinned in a TOML file.
+    title: str = ""
 
 
 class MobileNotice(Settings):
@@ -457,10 +448,6 @@ class UISettings(Settings):
     language: Optional[str] = None
     layout: Optional[Literal["default", "wide"]] = "default"
     default_sidebar_state: Optional[Literal["open", "closed", "hidden"]] = "open"
-    chat_settings_location: Optional[Literal["message_composer", "sidebar"]] = (
-        "message_composer"
-    )
-    default_chat_settings_open: bool = False
     confirm_new_chat: bool = True
     github: Optional[str] = None
     custom_css: Optional[str] = None
@@ -486,7 +473,6 @@ class UISettings(Settings):
     avatar_size: Optional[int] = None
     custom_build: Optional[str] = None
     header_links: Optional[List[HeaderLink]] = None
-    user_menu_links: Optional[List[UserMenuLink]] = None
     # Built-in header buttons kept in the header on a narrow screen; the rest
     # move into the overflow menu. Known names: "new_chat", "chat_profiles",
     # "share", "readme", "api_keys", "theme", "user_nav".
@@ -496,6 +482,9 @@ class UISettings(Settings):
     # The notice a phone gets about the desktop version; None means the
     # section is absent, which is the same as disabled.
     mobile_notice: Optional[MobileNotice] = None
+    # The account page; None means the section is absent and the user menu
+    # has no row for it.
+    account: Optional[AccountSection] = None
 
 
 @dataclass
@@ -539,6 +528,15 @@ class CodeSettings:
     ] = None
     on_shared_thread_view: Optional[
         Callable[["ThreadDict", Optional["User"]], Awaitable[bool]]
+    ] = None
+
+    # The account page. The Struct is the type, the JSON Schema the client
+    # renders, the validator a save runs through and the storage shape at
+    # once; the two hooks let the app supply and accept the values itself.
+    account: Optional[Type[Struct]] = None
+    on_account_load: Optional[Callable[[Optional["User"]], Awaitable[Any]]] = None
+    on_account_update: Optional[
+        Callable[[Optional["User"], Any], Awaitable[Optional[str]]]
     ] = None
     # Auth callbacks
     password_auth_callback: Optional[

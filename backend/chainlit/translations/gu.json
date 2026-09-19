@@ -233,7 +233,8 @@
         "settings": "સેટિંગ્સ",
         "settingsKey": "S",
         "apiKeys": "API કી",
-        "logout": "લૉગઆઉટ"
+        "logout": "લૉગઆઉટ",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "આ એપ્લિકેશન વાપરવા માટે, નીચેની API કી જરૂરી છે. કી તમારા ડિવાઇસના લોકલ સ્ટોરેજમાં સંગ્રહિત થશે.",
     "success": {
       "saved": "સફળતાપૂર્વક સાચવ્યું"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

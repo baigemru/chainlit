@@ -48,8 +48,6 @@ __all__ = [
     "FileElement",
     "FileRef",
     "ImageElement",
-    "InputWidgetSpec",
-    "InputWidgetType",
     "Mode",
     "ModeOption",
     "PdfElement",
@@ -84,19 +82,6 @@ StepType = Literal[
 
 ElementDisplay = Literal["inline", "side", "page"]
 ElementSize = Literal["small", "medium", "large"]
-
-InputWidgetType = Literal[
-    "switch",
-    "slider",
-    "select",
-    "textinput",
-    "tags",
-    "numberinput",
-    "multiselect",
-    "checkbox",
-    "radio",
-    "datepicker",
-]
 
 ToastType = Literal["info", "success", "warning", "error"]
 
@@ -451,37 +436,3 @@ class Mode(msgspec.Struct, rename="camel", omit_defaults=True):
     id: str
     name: str
     options: list[ModeOption] = []
-
-
-class InputWidgetSpec(msgspec.Struct, rename="camel", omit_defaults=True):
-    """One field of the chat-settings form.
-
-    Deliberately one struct rather than a tagged union: the widget kinds
-    share a single renderer on the client and differ only by which optional
-    knobs they set, so a union would buy nothing and break every app that
-    adds a widget kind.
-    """
-
-    id: str
-    label: str
-    type: InputWidgetType = "textinput"
-    initial: Any = None
-    tooltip: str | None = None
-    description: str | None = None
-    disabled: bool = False
-    # slider / numberinput
-    min: float | None = None
-    max: float | None = None
-    step: float | None = None
-    # select / multiselect / radio
-    items: Any = None
-    # textinput
-    placeholder: str | None = None
-    multiline: bool = False
-    # datepicker
-    mode: str | None = None
-    format: str | None = None
-    min_date: str | None = None
-    max_date: str | None = None
-    # tags
-    inputs: Any = None

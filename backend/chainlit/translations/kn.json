@@ -233,7 +233,8 @@
         "settings": "ಸೆಟ್ಟಿಂಗ್‌ಗಳು",
         "settingsKey": "S",
         "apiKeys": "API ಕೀಗಳು",
-        "logout": "ಲಾಗ್ ಔಟ್"
+        "logout": "ಲಾಗ್ ಔಟ್",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "ಈ ಅಪ್ಲಿಕೇಶನ್ ಬಳಸಲು, ಈ ಕೆಳಗಿನ API ಕೀಗಳು ಅಗತ್ಯವಿರುತ್ತವೆ. ಕೀಗಳನ್ನು ನಿಮ್ಮ ಸಾಧನದ ಸ್ಥಳೀಯ ಸಂಗ್ರಹಣೆಯಲ್ಲಿ ಸಂಗ್ರಹಿಸಲಾಗುತ್ತದೆ.",
     "success": {
       "saved": "ಯಶಸ್ವಿಯಾಗಿ ಉಳಿಸಲಾಗಿದೆ"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

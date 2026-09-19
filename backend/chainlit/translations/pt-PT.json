@@ -233,7 +233,8 @@
         "settings": "Configurações",
         "settingsKey": "S",
         "apiKeys": "Chaves API",
-        "logout": "Terminar sessão"
+        "logout": "Terminar sessão",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "Para utilizar esta aplicação, são necessárias as seguintes chaves API. As chaves são guardadas localmente no seu dispositivo.",
     "success": {
       "saved": "Guardado com sucesso"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

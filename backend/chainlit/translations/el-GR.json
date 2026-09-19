@@ -233,7 +233,8 @@
         "settings": "Ρυθμίσεις",
         "settingsKey": "S",
         "apiKeys": "Κλειδιά API",
-        "logout": "Αποσύνδεση"
+        "logout": "Αποσύνδεση",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "Για να χρησιμοποιήσετε αυτήν την εφαρμογή, απαιτούνται τα ακόλουθα κλειδιά API. Τα κλειδιά είναι αποθηκευμένα στον τοπικό χώρο αποθήκευσης της συσκευής σας.",
     "success": {
       "saved": "Αποθηκεύτηκε με επιτυχία"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

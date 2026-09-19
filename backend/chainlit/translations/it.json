@@ -233,7 +233,8 @@
         "settings": "Impostazioni",
         "settingsKey": "S",
         "apiKeys": "Chiavi API",
-        "logout": "Disconnettiti"
+        "logout": "Disconnettiti",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "Per utilizzare l'app, sono necessarie le seguenti chiavi API. Le chiavi sono salvate nella memoria locale del tuo dispositivo.",
     "success": {
       "saved": "Salvataggio riuscito"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

@@ -233,7 +233,8 @@
         "settings": "ക്രമീകരണങ്ങൾ",
         "settingsKey": "S",
         "apiKeys": "API കീകൾ",
-        "logout": "ലോഗ്ഔട്ട്"
+        "logout": "ലോഗ്ഔട്ട്",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "ഈ ആപ്പ് ഉപയോഗിക്കാൻ, താഴെപ്പറയുന്ന API കീകൾ ആവശ്യമാണ്. കീകൾ നിങ്ങളുടെ ഉപകരണത്തിന്റെ ലോക്കൽ സ്റ്റോറേജിൽ സംഭരിക്കപ്പെടുന്നു.",
     "success": {
       "saved": "വിജയകരമായി സംരക്ഷിച്ചു"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

@@ -233,7 +233,8 @@
         "settings": "Paramètres",
         "settingsKey": "S",
         "apiKeys": "Clés API",
-        "logout": "Se déconnecter"
+        "logout": "Se déconnecter",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "Pour utiliser cette application, les clés API suivantes sont requises. Les clés sont stockées dans le stockage local de votre appareil.",
     "success": {
       "saved": "Enregistré avec succès"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

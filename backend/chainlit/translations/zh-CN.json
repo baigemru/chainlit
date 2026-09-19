@@ -233,7 +233,8 @@
         "settings": "设置",
         "settingsKey": "S",
         "apiKeys": "API密钥",
-        "logout": "退出登录"
+        "logout": "退出登录",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "使用此应用需要以下API密钥。这些密钥存储在您设备的本地存储中。",
     "success": {
       "saved": "保存成功"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

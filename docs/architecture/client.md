@@ -358,7 +358,36 @@ rather than performing a transition; there is no debounce and no guard. A second
 effect toasts once on `superseded`; a third picks the default profile.
 
 `router.tsx` routes `/`, `/env`, `/thread/:id?`, `/element/:id`, `/login`,
-`/login/callback`, `/share/:id`, `*` → `/`.
+`/login/callback`, `/share/:id`, `/account`, `*` → `/`.
+
+**The account page.** `pages/Account.tsx` fetches `GET /project/account` with `useApi`
+and gets back four things: the JSON Schema `msgspec.json.schema` emitted for the
+`msgspec.Struct` the application registered with `@cl.account`, the current values, a
+`readonly` flag and an optional message. A 404 is a configuration fact rather than a
+breakage — the application declared no account page — so it renders as an info notice
+and not as an error. The page itself knows nothing about the fields: it hands schema and
+values to `components/SchemaForm`, which resolves the schema into controls (a top-level
+nested Struct becomes a tab, a deeper one a fieldset; `boolean` a switch, an `enum` a
+select, a number an input or — with `x-widget: slider` — a range, `date`/`date-time` the
+native pickers, `list[str]` a tag input, `list[Literal]` a checkbox list) and reads the
+two `x-` extensions this fork puts in `Meta(extra_json_schema=…)`: `x-widget` picks the
+control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link`) and
+`x-enum-labels` names the options. A control the resolver does not recognise renders
+read-only rather than disappearing — the form has to keep submitting a field it cannot
+draw. Saving `PUT`s the values object back and re-renders from the response, which is
+what the engine stored; a rejection carries the server's `detail`, and the msgspec path
+in it (`at $.calculation.margin`) is the only field addressing the form has. That save
+goes out through a copy of the context client with `onError` cleared, the way `useApi`
+silences it for reads, so one failure raises one toast.
+
+An outbound link belongs on that page as a field, not as a menu row: «Платёжный кабинет»
+→ the application's own `/billing/portal` is a `readOnly` string with
+`x-widget: "link"`, which `SchemaForm` draws as a button-styled anchor whose `href` is
+the value. The row that opens the page lives in `components/header/UserNav.tsx` and
+appears only when the config carries `ui.account.enabled`; its text is
+`ui.account.title` when the application set one, else the `navigation.user.menu.account`
+translation. That is the whole user menu now — name, account, logout — in both the
+avatar dropdown and the phone overflow rendering, which are the same `items` fragment.
 
 `ThreadAddressSync.tsx` (mounted in `pages/Page.tsx`, so on every route) owns **both**
 directions of "the URL asks and `session.ready` answers". They used to be two
@@ -521,7 +550,14 @@ while a 1006 leaves the signed-in user exactly where it was. Other specs cover
 message-tree merging, ask-action
 pruning, transcript freezing, wait messages, compact steps, icons, content rendering,
 `NewChat`, `openThread` and `threadAddressSync` (both directions of the
-address↔session loop). `displayModePrecedence.spec.ts`, whose three failures were the
+address↔session loop). The account page has three: `schemaFormResolve.spec.ts` drives
+the pure `resolveForm` against schemas `msgspec.json.schema` really emits,
+`schemaForm.spec.tsx` renders the controls it resolves, and `accountPage.spec.tsx`
+stubs `SchemaForm` to pin what the page alone owns — the four fetch states, what it
+hands the form, and that a save puts the values back, re-renders from the response and
+raises exactly one toast either way. `userNavAccount.spec.tsx` guards the reduced user
+menu: the row appears only for a configured account page, prefers the configured title,
+navigates to `/account`, and no longer grows rows for anything else. `displayModePrecedence.spec.ts`, whose three failures were the
 standing known-red, is deleted along with the embedder whose display mode it resolved.
 
 E2E is Cypress: 48 spec directories under `cypress/e2e/`, each with its own `main.py`

@@ -33,6 +33,7 @@ called as `cl.*` by an application author. Everything else is internal.
 | `controllers/files.py`                                                                            | Upload/download, `/favicon`, `/logo`, `/avatars/*`.                                                                                                                          | internal               |
 | `controllers/index.py`                                                                            | `render_index` — fills the built SPA shell with title, favicon, OG tags, theme.                                                                                              | internal               |
 | `controllers/sessions.py`                                                                         | `LiveSession` / `SessionRegistry` protocols the routes are allowed to see.                                                                                                   | internal               |
+| `controllers/account.py`                                                                          | `AccountController` (`/project/account`) and the `require_identity` guard.                                                                                                   | internal               |
 | `controllers/caller.py`                                                                           | `caller`, `caller_identifier`, `assert_session_owner` — reading the scope safely.                                                                                            | internal               |
 | `persistence/`                                                                                    | `records` → `models` → `statements` → `repositories`/`services` → `config` → `writer`.                                                                                       | internal               |
 | `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`; the panel's `drop_elements`, `patch_sidebar`; `split_engine_metadata`.       | internal               |
@@ -40,6 +41,7 @@ called as `cl.*` by an application author. Everything else is internal.
 | `oauth_providers.py`                                                                              | The configured OAuth providers and their token exchanges.                                                                                                                    | internal               |
 | `transit_store.py`                                                                                | `TransitStore` — the TTL'd one-shot profile-switch handover on a `litestar.stores` store.                                                                                    | internal               |
 | `config.py`                                                                                       | `.chainlit/config.toml` decoded with msgspec, plus `config.code` (the registered callbacks).                                                                                 | internal               |
+| `account.py`                                                                                      | `@cl.account`'s rules, the JSON Schema, the lenient decode of a stored object.                                                                                               | public (`cl.account`)  |
 | `callbacks.py`                                                                                    | The `@cl.on_*` decorators; each stores a wrapped function on `config.code`.                                                                                                  | public                 |
 | `context.py`                                                                                      | `ChainlitContext`, `context_var`, `init_context`, and the `cl.context` proxy.                                                                                                | public (`cl.context`)  |
 | `emitter.py`                                                                                      | `Emitter` — one method per thing the app can put on screen; produces frames, never rows.                                                                                     | internal               |
@@ -47,7 +49,6 @@ called as `cl.*` by an application author. Everything else is internal.
 | `step.py`                                                                                         | `Step` and the `@cl.step` decorator.                                                                                                                                         | public                 |
 | `element.py`                                                                                      | `Image`, `Pdf`, `Text`, `File`, `Video`, `Audio`, `Plotly`, `Pyplot`, `Dataframe`, `CustomElement`, `TaskList`.                                                              | public                 |
 | `action.py`                                                                                       | `Action` — a button attached to a message.                                                                                                                                   | public                 |
-| `input_widget.py`                                                                                 | Input widget dataclasses (`cl.input_widget`).                                                                                                                                | public                 |
 | `user_session.py`                                                                                 | `cl.user_session` — a thin view over `Session.state`.                                                                                                                        | public                 |
 | `chat_context.py`                                                                                 | `cl.chat_context` — the conversation's messages, kept on the session's state.                                                                                                | public                 |
 | `sidebar.py`, `mode.py`, `types.py`, `user.py`                                                    | `Sidebar` (the element panel's application half; the model itself is `ws/sidebar.py`), `Mode`/`ModeOption`, `ThreadDict`/`ChatProfile`/`Starter`, `User`/`PersistedUser`.    | public                 |
@@ -86,6 +87,48 @@ Chainlit needs into the host's own `AppConfig` (`plugin.py`):
   `on_app_startup`, then the transit sweeper; on exit `on_app_shutdown` and `rmtree(FILES_DIRECTORY)`.
 
 There is deliberately **no** `create_app` factory and no `mount_chainlit`.
+
+**The account page.** An application declares **one** `msgspec.Struct` with `@cl.account`, and
+the engine derives everything else from it: `msgspec.json.schema` is the form the client
+renders, `msgspec.convert` is the validator a save runs through, `msgspec.to_builtins` is what
+goes into `users.account`, and the same type documents the route. Nothing is mirrored by hand,
+which is what the retired widget layer (`input_widget.py`, `InputWidgetSpec`, `ChatSettings`)
+was — it is deleted, not shimmed. `chainlit/account.py` holds the rules: the argument must be a
+Struct and **every** field must have a default, recursively, or the page cannot be drawn for a
+user who has never saved and a stale stored value has no baseline to be dropped back to. The
+walk is over `msgspec.inspect.type_info`, so `Annotated`, `X | None` and `list[X]` are not
+places to hide a required field.
+
+`AccountController` (`controllers/account.py`) serves `GET`/`PUT /project/account` behind
+`guards=[require_identity]` — a guard, so an anonymous request never reaches a database session;
+it reads the scope the way `controllers/caller.py` does, because with no `CHAINLIT_AUTH_SECRET`
+the `user` property _raises_. The GET answers the schema, the values and a `readonly` flag; the
+values are `on_account_load`'s return if the app registered one, else the stored object decoded
+leniently (a key the Struct no longer declares, or a value that no longer converts, is dropped
+with a warning and the rest is kept), else the defaults. The PUT converts the body strictly and
+passes msgspec's own message through as the 400 `detail` — "Expected `float` <= 100.0 - at
+`$.calculation.margin`" — because the path in it is the only field addressing the client has;
+then `on_account_update`, then the store, then the page rebuilt the way the GET builds it.
+`405` when there is neither a hook nor a data layer, `404` when no Struct is registered. An
+application that keeps the values itself registers **both** hooks: with only `on_account_update`
+the next load reads whatever the engine stored — or the defaults, when there is no data layer.
+The hooks are stored unwrapped, not through `wrap_user_function`: a hook that raises fails the
+request as a 500 rather than being logged away while the engine stores and answers "saved".
+There
+is deliberately no `[UI]` mirror of "is an account registered": the 404 **is** the
+not-configured state. `/account` itself stays a client-side route — no server handler may live
+there, or the SPA loses the page.
+
+The schema conventions the client understands are plain JSON Schema plus two `x-` keys carried
+through `Meta(extra_json_schema=...)`: `x-enum-labels` maps an enum value to its label, and
+`x-widget` picks a control (`slider`, `textarea`, `password`, `radio`, `markdown`, and `link` —
+a `readOnly` string rendered as a button-styled anchor to the value, which is how an
+application puts «Платёжный кабинет» on the page pointing at its own `/billing/portal`
+redirect). `[UI.account]` in `config.toml` decides only whether the user menu shows the row and
+what it is called; what the page _contains_ is the Struct.
+
+`[[UI.user_menu_links]]` is gone with it — the user menu is the name, the account row and
+logout, and a link under the icon was the stand-in for the page that now exists.
 
 **Two entry points, one wiring.** `chainlit run app.py` (`cli/__init__.py:build_app`) loads the
 user's module, then builds `Litestar(plugins=[ChainlitPlugin(config, persistence=..., configure_logging=True)])`
@@ -390,9 +433,18 @@ other way through `Session.forget_element`: the row is gone, so the transcript a
 let go of their copies and the panel's new shape is written down — a reload and a cold resume
 must not disagree about a card the user deleted.
 
+**`users.account`.** One `jsonb` column, `NOT NULL DEFAULT '{}'`, added by revision 0004 —
+what `@cl.account` stores. Not a key in `users.metadata`: `upsert_user` replaces that column
+wholesale at every sign-in (`set_={"metadata": excluded.metadata}`), so anything the engine
+kept there would be gone by the next login, and a reserved-key filter on top of that would be
+a patch around the wrong storage. `UserService.get_account` / `set_account` are one statement
+each; the write is an `INSERT ... ON CONFLICT (identifier) DO UPDATE SET account =
+excluded.account`, so a user whose row no login has written yet gets one here — and `metadata`
+is not in the conflict clause, for the same reason.
+
 **Schema and migrations.** Schema `chainlit`, mapped to the deployed layout: lowercase tables,
 quoted camelCase columns, native `uuid` keys, timestamps as ISO **text** with a trailing `Z`.
-Migrations live in `persistence/migrations/versions/` (three revisions) and run via
+Migrations live in `persistence/migrations/versions/` (four revisions) and run via
 `LITESTAR_APP=your_module:app litestar database upgrade` — the `database` command group exists
 because `ChainlitPlugin` registers `Persistence.plugin()`.
 

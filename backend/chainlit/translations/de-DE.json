@@ -233,7 +233,8 @@
         "settings": "Einstellungen",
         "settingsKey": "S",
         "apiKeys": "API Schlüssel",
-        "logout": "Abmelden"
+        "logout": "Abmelden",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "Um diese App zu nutzen, werden die folgenden API Schlüssel benötigt. Die Schlüssel werden im lokalen Speicher Ihres Geräts gespeichert.",
     "success": {
       "saved": "Erfolgreich gespeichert"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

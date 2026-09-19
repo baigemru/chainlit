@@ -232,7 +232,8 @@
         "settings": "الإعدادات",
         "settingsKey": "S",
         "apiKeys": "مفاتيح API",
-        "logout": "تسجيل الخروج"
+        "logout": "تسجيل الخروج",
+        "account": "Account"
       }
     }
   },
@@ -241,6 +242,20 @@
     "description": "لاستخدام هذا التطبيق، مفاتيح API التالية مطلوبة. يتم تخزين المفاتيح في التخزين المحلي لجهازك.",
     "success": {
       "saved": "تم الحفظ بنجاح"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

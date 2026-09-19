@@ -14,7 +14,6 @@ if env_found:
 
 import asyncio
 
-import chainlit.input_widget as input_widget
 from chainlit.action import Action
 from chainlit.chat_context import chat_context
 from chainlit.context import context
@@ -55,9 +54,12 @@ from chainlit.user_session import user_session
 from chainlit.version import __version__
 
 from .callbacks import (
+    account,
     action_callback,
     author_rename,
     oauth_callback,
+    on_account_load,
+    on_account_update,
     on_app_shutdown,
     on_app_startup,
     on_chat_end,
@@ -116,13 +118,15 @@ __all__ = [
     "User",
     "Video",
     "__version__",
+    "account",
     "action_callback",
     "author_rename",
     "chat_context",
     "context",
-    "input_widget",
     "logger",
     "oauth_callback",
+    "on_account_load",
+    "on_account_update",
     "on_app_shutdown",
     "on_app_startup",
     "on_chat_end",

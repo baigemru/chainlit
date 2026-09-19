@@ -233,7 +233,8 @@
         "settings": "సెట్టింగ్‌లు",
         "settingsKey": "S",
         "apiKeys": "API కీలు",
-        "logout": "లాగ్ అవుట్"
+        "logout": "లాగ్ అవుట్",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "ఈ యాప్‌ని ఉపయోగించడానికి, కింది API కీలు అవసరం. కీలు మీ పరికరం యొక్క స్థానిక నిల్వలో నిల్వ చేయబడతాయి.",
     "success": {
       "saved": "విజయవంతంగా సేవ్ చేయబడింది"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

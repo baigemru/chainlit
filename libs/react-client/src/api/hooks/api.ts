@@ -10,16 +10,16 @@ const fetcher = async (client: ChainlitAPI, endpoint: string) => {
   return res?.json();
 };
 
-const cloneClient = (client: ChainlitAPI): ChainlitAPI => {
-  // Shallow clone API client.
-  // TODO: Move me to core API.
-
-  // Create new client
+/**
+ * A shallow copy of the client, for a caller that wants one of the global
+ * hooks (`onError`, `on401`) off for a single request. Exported because the
+ * account page needs the same thing for its save that `useApi` needs for its
+ * reads; a second hand-rolled copy there would be a second definition of
+ * what "the same client" means.
+ */
+export const cloneClient = (client: ChainlitAPI): ChainlitAPI => {
   const newClient = new ChainlitAPI('', 'webapp');
-
-  // Assign old properties to new client
   Object.assign(newClient, client);
-
   return newClient;
 };
 

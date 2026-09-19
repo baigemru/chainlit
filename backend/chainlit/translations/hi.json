@@ -233,7 +233,8 @@
         "settings": "सेटिंग्स",
         "settingsKey": "S",
         "apiKeys": "API कुंजियां",
-        "logout": "लॉगआउट"
+        "logout": "लॉगआउट",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "इस ऐप का उपयोग करने के लिए, निम्नलिखित API कुंजियां आवश्यक हैं। कुंजियां आपके डिवाइस के स्थानीय संग्रहण में संग्रहीत की जाती हैं।",
     "success": {
       "saved": "सफलतापूर्वक सहेजा गया"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

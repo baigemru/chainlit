@@ -9,8 +9,22 @@ bookkeeping under a new name.
 """
 
 import inspect
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+    overload,
+)
 
+from msgspec import Struct
+
+from chainlit.account import register as register_account
 from chainlit.action import Action
 from chainlit.config import config
 from chainlit.message import Message
@@ -24,6 +38,8 @@ from chainlit.types import (
 )
 from chainlit.user import User
 from chainlit.utils import wrap_user_function
+
+S = TypeVar("S", bound=Struct)
 
 
 def on_app_startup(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
@@ -378,6 +394,75 @@ def on_feedback(func: Callable) -> Callable:
         Callable[[Feedback], Any]: The decorated on_feedback function.
     """
     config.code.on_feedback = wrap_user_function(func)
+    return func
+
+
+def account(cls: Type[S]) -> Type[S]:
+    """Declare the account page, as one ``msgspec.Struct``.
+
+    The Struct is everything at once: the JSON Schema the client renders the
+    form from, the validator a save is converted through, the object the
+    values are stored as, and the type the route documents. There is no widget
+    list to keep in step with it -- that layer is deleted.
+
+    Checked here rather than at the first request: a field with no default
+    means the page cannot be drawn for a user who has never saved, and the
+    import is where that is cheapest to see.
+
+    Example:
+        @cl.account
+        class Account(msgspec.Struct):
+            notify: Annotated[bool, Meta(title="Notifications")] = True
+
+    Returns:
+        Type[S]: The class, unchanged.
+    """
+    config.code.account = register_account(cls)
+    return cls
+
+
+def on_account_load(
+    func: Callable[[Optional[User]], Awaitable[Any]],
+) -> Callable[[Optional[User]], Awaitable[Any]]:
+    """Supply the account values yourself instead of reading the stored ones.
+
+    Return the ``@cl.account`` Struct, a mapping of its values, or ``None`` to
+    let the engine answer from what it stored (or from the defaults).
+
+    Stored unwrapped, unlike the session hooks: ``wrap_user_function`` logs an
+    exception and returns ``None``, and here ``None`` means "use the stored
+    values" -- a load hook that crashed would quietly answer with somebody's
+    old data. The route lets the exception reach Litestar instead.
+
+    Args:
+        func (Callable[[Optional[User]], Awaitable[Any]]): The load hook.
+
+    Returns:
+        Callable[[Optional[User]], Awaitable[Any]]: The decorated hook.
+    """
+    config.code.on_account_load = func
+    return func
+
+
+def on_account_update(
+    func: Callable[[Optional[User], Any], Awaitable[Optional[str]]],
+) -> Callable[[Optional[User], Any], Awaitable[Optional[str]]]:
+    """React to a save, after it has been validated and before it is stored.
+
+    The second argument is an instance of the ``@cl.account`` Struct, so a
+    hook never has to check a type or a range that the Struct already states.
+    A returned string is shown to the user as a toast.
+
+    Stored unwrapped: a save hook that raises must fail the request, not be
+    logged away while the engine stores the values and answers "saved".
+
+    Args:
+        func (Callable[[Optional[User], Any], Awaitable[Optional[str]]]): The save hook.
+
+    Returns:
+        Callable[[Optional[User], Any], Awaitable[Optional[str]]]: The decorated hook.
+    """
+    config.code.on_account_update = func
     return func
 
 

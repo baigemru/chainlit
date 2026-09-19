@@ -119,16 +119,12 @@ export interface IChainlitConfig {
       dismiss_label: string;
       frequency: 'session' | 'once' | 'always';
     };
-    user_menu_links?: {
-      name: string;
-      url: string;
-      icon_url?: string;
-      icon_url_light?: string;
-      icon_url_dark?: string;
-      icon_mask?: boolean;
-      display_name?: string;
-      target?: '_blank' | '_self' | '_parent' | '_top' | 'iframe';
-    }[];
+    /**
+     * The account page. Absent means the row in the user menu is not shown —
+     * the same convention `mobile_notice` follows, so a deployment that never
+     * declared the table grows no menu entry it cannot serve.
+     */
+    account?: { enabled: boolean; title: string };
   };
   features: {
     spontaneous_file_upload?: {

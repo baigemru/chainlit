@@ -233,7 +233,8 @@
         "settings": "அமைப்புகள்",
         "settingsKey": "S",
         "apiKeys": "API விசைகள்",
-        "logout": "வெளியேறு"
+        "logout": "வெளியேறு",
+        "account": "Account"
       }
     }
   },
@@ -242,6 +243,20 @@
     "description": "இந்த பயன்பாட்டைப் பயன்படுத்த, பின்வரும் API விசைகள் தேவை. விசைகள் உங்கள் சாதனத்தின் உள்ளூர் சேமிப்பகத்தில் சேமிக்கப்படும்.",
     "success": {
       "saved": "வெற்றிகரமாக சேமிக்கப்பட்டது"
+    }
+  },
+  "account": {
+    "title": "Account",
+    "description": "Your settings for this application.",
+    "notConfigured": "This application has not declared an account page.",
+    "readonly": "These settings can be viewed but not changed here.",
+    "saved": "Saved",
+    "unsupported": "This field cannot be edited here.",
+    "actions": {
+      "save": "Save"
+    },
+    "tags": {
+      "placeholder": "Type and press Enter"
     }
   },
   "alerts": {

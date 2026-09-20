@@ -103,16 +103,16 @@ places to hide a required field.
 `AccountController` (`controllers/account.py`) serves `GET`/`PUT /project/account` behind
 `guards=[require_identity]` — a guard, so an anonymous request never reaches a database session;
 it reads the scope the way `controllers/caller.py` does, because with no `CHAINLIT_AUTH_SECRET`
-the `user` property _raises_. The GET answers the schema, the values and a `readonly` flag; the
-values are `on_account_load`'s return if the app registered one, else the stored object decoded
-leniently (a key the Struct no longer declares, or a value that no longer converts, is dropped
-with a warning and the rest is kept), else the defaults. The PUT converts the body strictly and
+the `user` property _raises_. The GET answers the schema, the values and a `readonly` flag. The
+values come from one function, `_render`, that all three routes go through: it decodes the
+stored object leniently (a key the Struct no longer declares, or a value that no longer
+converts, is dropped with a warning and the rest is kept) — or takes the defaults — and hands
+that instance to `on_account_load(user, account)`. The PUT converts the body strictly and
 passes msgspec's own message through as the 400 `detail` — "Expected `float` <= 100.0 - at
 `$.calculation.margin`" — because the path in it is the only field addressing the client has;
-then `on_account_update`, then the store, then the page rebuilt the way the GET builds it.
-`405` when there is neither a hook nor a data layer, `404` when no Struct is registered. An
-application that keeps the values itself registers **both** hooks: with only `on_account_update`
-the next load reads whatever the engine stored — or the defaults, when there is no data layer.
+then `on_account_update`, then the store, then `_render` again with what it just wrote as the
+baseline instead of a second `SELECT`.
+`405` when there is neither a hook nor a data layer, `404` when no Struct is registered.
 The hooks are stored unwrapped, not through `wrap_user_function`: a hook that raises fails the
 request as a 500 rather than being logged away while the engine stores and answers "saved".
 There
@@ -120,15 +120,61 @@ is deliberately no `[UI]` mirror of "is an account registered": the 404 **is** t
 not-configured state. `/account` itself stays a client-side route — no server handler may live
 there, or the SPA loses the page.
 
+**The load hook is handed the values, and its return is stored.** `on_account_load(user,
+account)` receives what _this request's_ session read, so an application never opens a session
+of its own — which, after a `PUT`, answered with the values from before the save, because the
+request's session commits in `before_send`. What it returns is the page, and it is also the
+next stored value: the engine compares its return with what it handed over, both through
+`strip_readonly`, and writes through the same session **only** when they differ. Marking a feed
+seen as the page opens is therefore a return value, not a write of the application's own, and a
+hook that returns its argument unchanged causes no `UPDATE`. It must return an **instance** —
+`account.as_account` refuses a mapping, because `msgspec.convert` would fill every key the
+mapping omits with the field's default and the engine would then store those defaults over
+everything the user had saved; the way to change one thing is
+`msgspec.structs.replace(account, plan="pro")`. `None` is refused with a `TypeError`
+naming the fix: the hook is given the stored values, so "fall back to the store" has nothing
+left to mean, and a missing `return` would otherwise blank the page. `@cl.on_account_load`
+checks the arity at import (`inspect.signature(...).bind(None, None)`), so the retired
+one-argument hook is a `TypeError` where the application is read rather than a 500 on the first
+page load.
+
+**`readOnly` leaves are never stored.** A field marked `readOnly` in the schema
+(`Meta(extra_json_schema={"readOnly": True})`) is derived — a rate, a balance, a quota — and the
+application recomputes it on every load. `account.strip_readonly` puts every one of them back to
+**the field's default**, and it runs at each of the three doors into the store: on the `PUT`
+before `on_account_update` (so the hook is shown what will be stored, not what the browser
+echoed back), on `on_account_load`'s return, and on an `AccountRefresh`'s `account`. Reset to
+the default rather than carried over from the stored value because a card in a `list[Struct]`
+has no stored twin to carry anything from — the list is rewritten whole and an element's
+position is not an identity — and because it is also what a row written under this rule holds,
+so the two sides of the "has anything changed" comparison agree and a legacy row does not
+provoke an `UPDATE` on every load. `readOnly` on a nested Struct field resets that subtree
+whole; the walk goes into Struct fields and into the Struct elements of a list, read off
+`msgspec.inspect`'s `Metadata.extra_json_schema`, which is the same thing
+`msgspec.json.schema` copies into the document the client renders. An application that shows
+derived values therefore needs a load hook to compute them: nothing else can, because nothing
+stores them.
+
 The schema conventions the client understands are plain JSON Schema plus three `x-` keys
 carried through `Meta(extra_json_schema=...)`: `x-enum-labels` maps an enum value to its label,
 `x-widget` picks a control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link` —
 a `readOnly` string rendered as a button-styled anchor to the value, which is how an
 application puts «Платёжный кабинет» on the page pointing at its own `/billing/portal`
 redirect — and `cards`, `image`, `title` for a `list[Struct]` drawn as one card per element),
-and `x-actions` puts buttons on a card array or on a tab. `[UI.account]` in `config.toml`
+and `x-actions` puts buttons on a card array or on a tab, `x-pinned: true` on a section field
+marks it for the pinned block in the left panel. `[UI.account]` in `config.toml`
 decides only whether the user menu shows the row and what it is called; what the page
 _contains_ is the Struct.
+
+The panel needs those sections **before** anybody opens the dialog, and `GET /project/account`
+is behind `require_identity` and runs `on_account_load`. So `/project/settings` carries the
+form as well: when a Struct is registered and `[UI.account]` is enabled, the controller puts
+`schema_of(code.account)` at `ui.account.schema` — the same document the page's own route
+serves. It is added at the controller, not declared on `AccountSection`: a field there would be
+a `schema` key a `config.toml` could write, which is a second description of a shape the Struct
+already describes and free to disagree with it. That is what the retired widget layer was.
+No Struct, or the section disabled, and the key is simply absent; no `[UI.account]` table at
+all and there is no `ui.account` for it to hang off.
 
 **Actions.** `POST /project/account/actions/{name}` runs the hook `@cl.account_action(name)`
 registered, under the same controller and the same guard. The body is
@@ -145,13 +191,23 @@ msgspec's own message, and the hook is stored unwrapped like the other two.
 The hook returns one of three Structs, and the answer is a **tagged union** discriminated on
 `t` — not one Struct with three optional fields, which could mean two things at once:
 
-| returns                                                                 | answer                                                                                                    | what the client does                                                                             |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `cl.AccountToast(message)`                                              | `{"t": "toast", …}`                                                                                       | toasts                                                                                           |
-| `cl.AccountRefresh(message=None)`                                       | `{"t": "page", "page": …}`                                                                                | replaces the page without a reload; the page is built by the same `_current` the GET and PUT use |
-| `cl.AccountOpenThread(chat_profile, transit_message=None, parent=None)` | `{"t": "open_thread", "thread_id" (null when nothing was parked), "chat_profile", "has_transit_message"}` | takes the same code path `session.handoff` takes                                                 |
+| returns                                                                 | answer                                                                                                    | what the client does                                                                            |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `cl.AccountToast(message)`                                              | `{"t": "toast", …}`                                                                                       | toasts                                                                                          |
+| `cl.AccountRefresh(message=None, account=None)`                         | `{"t": "page", "page": …}`                                                                                | replaces the page without a reload; the page is built by the same `_render` the GET and PUT use |
+| `cl.AccountOpenThread(chat_profile, transit_message=None, parent=None)` | `{"t": "open_thread", "thread_id" (null when nothing was parked), "chat_profile", "has_transit_message"}` | takes the same code path `session.handoff` takes                                                |
 
-Anything else is a `TypeError` and a 500. The handover is **the existing transit, one
+Anything else is a `TypeError` and a 500.
+
+`AccountRefresh(account=…)` is how an action **changes** what is stored — «Убрать» on a notice,
+say. The engine writes it with the request's own session, `strip_readonly` first, and then draws
+the page from it through `_render`, so the load hook enriches the action's values rather than
+re-reading a row its own session could not see yet. Without it an action had to open a session,
+commit behind the request, and watch the page the request went on to build show the value it had
+just retired. `account=None` stores nothing — an action that only looked at something is not a
+write — and the page is still rebuilt, because the load hook may have something new to say.
+
+The handover is **the existing transit, one
 implementation**: `transit_store.mint_handover` mints the successor's thread and parks the
 record under it, and both `emitter.set_chat_profile` and this route call it — the emitter keeps
 only the session state around it (discarding the id a previous switch parked). The value never
@@ -161,13 +217,13 @@ application reads `cl.user_session.get("transit_message")` in `on_chat_start`. T
 receives the store through the `transit` dependency the plugin provides by `setdefault`,
 next to `sessions`.
 
-**The badge.** `@cl.on_account_badge(user) -> int` says how many things the page holds that the
-user has not seen, and the number is **pushed** on the socket as `account.badge` — there is no
-route to poll and nothing on the client zeroes it. `chainlit/account_badge.py` holds the one
-recompute-and-push, and three places call it: `runner.on_ready` (every hello, because a browser
-that has been shut for a day knows nothing and a reconnect is exactly when its copy is stale),
-`AccountController.read` after the page is built (the application marks things seen inside
-`on_account_load`, so the count changes as the page is served), and
+**The badge.** `@cl.on_account_badge(user, account) -> int` says how many things the page holds
+that the user has not seen, and the number is **pushed** on the socket as `account.badge` —
+there is no route to poll and nothing on the client zeroes it. `chainlit/account_badge.py` holds
+the one recompute-and-push, and three places call it: `runner.on_ready` (every hello, because a
+browser that has been shut for a day knows nothing and a reconnect is exactly when its copy is
+stale), `AccountController.read` after the page is built (the application marks things seen
+inside `on_account_load`, so the count changes as the page is served), and
 `cl.context.emitter.refresh_account_badge()` (a run in the chat moved it). Each pushes to
 **every** live session of that user — `SessionRegistry.sessions_of`, scanning with the same
 `is_owned_by` the takeover uses — because the page and the chat are usually two tabs and only
@@ -176,8 +232,46 @@ that raises: an exception escaping `on_ready` lands in the connection's task gro
 the socket, and nobody asked for this number there. The other two let it raise, because they
 are answering a request the application made.
 
+The hook is **handed** the account values, exactly as `on_account_load` is, and the arity is
+checked at import the same way. The route passes `strip_readonly` of what it just rendered — so
+the mark-as-seen the load hook returned is already in what the badge counts, and the pushed
+number is right in the same request rather than one page load behind; a hook that opened a
+session of its own would read the row from before that write, which commits in `before_send`.
+The other two have no injected session, so `ApplicationRunner.stored_account` reads the row
+through the runner's own `persistence` (`isolated`, because both callers sit inside the
+websocket's task group) and decodes it with the same lenient `decode_stored` the route uses —
+a key the Struct retired must not take the badge down on every handshake. All three therefore
+hand over the values as the **store** holds them, so the hook sees one shape whichever asked;
+a derived (`readOnly`) number is the hook's to compute from them, because nothing stores one.
+`account` is `None` only when the application declared no `@cl.account`.
+
 `[[UI.user_menu_links]]` is gone with it — the user menu is the name, the account row and
 logout, and a link under the icon was the stand-in for the page that now exists.
+
+**The welcome screen is described, not drawn.** `Starter`, `StarterCategory` and `ChatProfile`
+(`types.py`) are plain dataclasses that `/project/settings` serialises with `asdict`; every
+field is a statement about intent and none of them is validated here.
+
+A `Starter` carries a `label`, a `description` (the second line: what the click will do), a
+`caption` (a short note the application sets apart — a price, a duration; the fork has no
+vocabulary for what a starter costs), `highlight`, and `disabled`, which is shown and refuses
+the click. `href`, `profile` and `message` are three answers to the same click and the client
+takes the first it is given — **`href` → `profile` → `message`**; `href` is an address inside
+the application (`/account?tab=items`) and leaves the chat alone. A `StarterCategory` is a
+section of that screen: `label`, `description`, `collapsible` (permission to fold, not state —
+a phone folds, a desktop does not) and `layout`, one of `tiles` / `plates` / `rows`.
+A `ChatProfile` adds `composer_hint` (markdown under the composer on an empty chat, in that
+profile only) and `listed`: `listed=False` is a **door** — not offered in the switcher, not
+eligible as the default, still reachable by a starter's `profile=`, by a server-side handoff
+and by resuming a thread.
+
+`layout` is a bare string for the reason `device` is: a value this side refuses is a value a
+newer application cannot ship to an older client, which would otherwise have degraded it to
+`tiles` itself. By the same rule nothing here rejects a starter that sets both `href` and
+`profile`, and nothing rejects `listed=False` with `default=True` — that last one is an
+application configuration error (a landing place nobody can land in) and it is the client's
+default-picking that skips what is not listed. `sample/starters_demo.py` is the smoke app that
+exercises the whole set in one screen.
 
 **Two entry points, one wiring.** `chainlit run app.py` (`cli/__init__.py:build_app`) loads the
 user's module, then builds `Litestar(plugins=[ChainlitPlugin(config, persistence=..., configure_logging=True)])`

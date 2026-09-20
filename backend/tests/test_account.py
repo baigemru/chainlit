@@ -19,6 +19,7 @@ from chainlit.account import (
     decode_stored,
     register,
     schema_of,
+    strip_readonly,
 )
 
 
@@ -174,19 +175,109 @@ class TestAsAccount:
     def test_an_instance_is_passed_through(self):
         account = Account(notify=False)
 
-        assert as_account(account, Account) is account
+        assert as_account(account, Account, hook="a hook") is account
 
-    def test_a_mapping_is_converted(self):
-        account = as_account({"calculation": {"margin": 30}}, Account)
+    def test_a_mapping_is_refused_because_it_would_store_defaults(self):
+        """The return is stored as well as shown, and a conversion fills every
+        key the mapping omits with the field's default -- so a hook meaning to
+        change one thing would write the defaults over everything saved."""
+        with pytest.raises(TypeError, match=r"msgspec\.structs\.replace"):
+            as_account({"calculation": {"margin": 30}}, Account, hook="a hook")
 
-        assert account.calculation.margin == 30
-        assert account.notify is True
+    def test_none_is_refused_and_the_message_says_what_to_return(self):
+        """The hook is handed the stored values now, so "fall back to the
+        store" has nothing left to mean -- and a missing `return` would blank
+        the page it was meant to fill."""
+        with pytest.raises(TypeError, match=r"return account"):
+            as_account(None, Account, hook="a hook")
 
-    def test_a_return_the_struct_refuses_raises(self):
-        """A load hook returning a shape its own Struct rejects is an
-        application bug, and the msgspec message names the field."""
-        with pytest.raises(msgspec.ValidationError, match=r"\$\.calculation\.margin"):
-            as_account({"calculation": {"margin": 300}}, Account)
+    def test_the_message_names_the_hook_that_misbehaved(self):
+        """Two hooks reach this, and «returned None» is no use without saying
+        which."""
+        with pytest.raises(TypeError, match=r"@cl\.on_account_load"):
+            as_account(None, Account, hook="@cl.on_account_load")
+
+
+class Card(msgspec.Struct):
+    title: str = ""
+    price: Annotated[float, Meta(extra_json_schema={"readOnly": True})] = 0.0
+
+
+class Feed(msgspec.Struct):
+    cards: List[Card] = []
+    unread: Annotated[int, Meta(extra_json_schema={"readOnly": True})] = 0
+    seen: bool = False
+
+
+class Derived(msgspec.Struct):
+    """One of each shape a `readOnly` leaf can hide in."""
+
+    feed: Feed = msgspec.field(default_factory=Feed)
+    balance: Annotated[Optional[float], Meta(extra_json_schema={"readOnly": True})] = (
+        None
+    )
+    notify: bool = True
+    quota: Annotated[Feed, Meta(extra_json_schema={"readOnly": True})] = msgspec.field(
+        default_factory=Feed
+    )
+
+
+class TestStripReadonly:
+    def test_a_top_level_readonly_leaf_goes_back_to_its_default(self):
+        kept = strip_readonly(Derived(balance=1250.0, notify=False))
+
+        assert kept.balance is None
+        assert kept.notify is False
+
+    def test_nothing_to_strip_hands_the_instance_straight_back(self):
+        """Identity, not equality: the comparison the engine makes before it
+        writes is cheap only if an untouched value stays the same object."""
+        account = Derived(notify=False)
+
+        assert strip_readonly(account) is account
+
+    def test_a_readonly_leaf_inside_a_nested_struct_is_reset(self):
+        kept = strip_readonly(Derived(feed=Feed(unread=9, seen=True)))
+
+        assert kept.feed.unread == 0
+        assert kept.feed.seen is True
+
+    def test_a_readonly_leaf_inside_a_list_of_structs_is_reset(self):
+        """A card has no stored twin to take a value from -- the list is
+        rewritten whole -- so the default is the one rule that works here as
+        well as at the top level."""
+        account = Derived(
+            feed=Feed(cards=[Card(title="Кружка", price=12.5), Card(title="Чай")])
+        )
+
+        kept = strip_readonly(account)
+
+        assert [(card.title, card.price) for card in kept.feed.cards] == [
+            ("Кружка", 0.0),
+            ("Чай", 0.0),
+        ]
+
+    def test_a_readonly_struct_field_is_reset_whole(self):
+        kept = strip_readonly(Derived(quota=Feed(unread=3, seen=True)))
+
+        assert kept.quota == Feed()
+
+    def test_the_argument_is_not_mutated(self):
+        """The caller goes on to show the values it passed in; stripping is
+        for the copy that gets stored."""
+        account = Derived(balance=99.0, feed=Feed(cards=[Card(price=5.0)]))
+
+        strip_readonly(account)
+
+        assert account.balance == 99.0
+        assert account.feed.cards[0].price == 5.0
+
+    def test_a_stripped_value_is_a_fixed_point(self):
+        """What the engine stores must strip to itself, or every load would
+        look like a change and write again."""
+        once = strip_readonly(Derived(balance=1.0, feed=Feed(unread=4)))
+
+        assert strip_readonly(once) is once
 
 
 class TestDecodeStored:

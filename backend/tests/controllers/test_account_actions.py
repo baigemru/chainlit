@@ -13,10 +13,11 @@ plugin's own, handed in so the test can ask it what the route parked.
 """
 
 import asyncio
-from typing import Annotated, Any, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 import msgspec
 import pytest
+from litestar.di import Provide
 from litestar.testing import create_test_client
 from msgspec import Meta
 
@@ -34,6 +35,9 @@ class WatchedItem(msgspec.Struct):
     title: Annotated[str, Meta(title="Название")] = ""
     price: Annotated[float, Meta(ge=0, title="Цена")] = 0
     watch: Annotated[bool, Meta(title="Следить")] = False
+    rate: Annotated[
+        float, Meta(title="Котировка", extra_json_schema={"readOnly": True})
+    ] = 0.0
 
 
 class Watch(msgspec.Struct):
@@ -54,6 +58,26 @@ class Watch(msgspec.Struct):
 class Account(msgspec.Struct):
     watch: Annotated[Watch, Meta(title="Товары")] = msgspec.field(default_factory=Watch)
     plan: Annotated[str, Meta(title="Тариф")] = "free"
+    balance: Annotated[
+        float, Meta(title="Баланс", extra_json_schema={"readOnly": True})
+    ] = 0.0
+
+
+class FakeUsers:
+    """The two methods the controller asks `UserService` for, as in
+    `test_account.py`: an action may store now, and what it stored is the
+    interesting half."""
+
+    def __init__(self, stored: Optional[Dict[str, Any]] = None) -> None:
+        self.stored: Dict[str, Any] = dict(stored or {})
+        self.written: List[Dict[str, Any]] = []
+
+    async def get_account(self, identifier: str) -> Dict[str, Any]:
+        return self.stored
+
+    async def set_account(self, identifier: str, values: Dict[str, Any]) -> None:
+        self.stored = values
+        self.written.append(values)
 
 
 @pytest.fixture(autouse=True)
@@ -88,10 +112,20 @@ def _auth():
     return chainlit_auth(token_secret=SECRET)
 
 
-def _client(transit: Optional[TransitStore] = None, **kwargs):
+def _client(
+    transit: Optional[TransitStore] = None,
+    users: Optional[FakeUsers] = None,
+    **kwargs,
+):
+    dependencies = kwargs.pop("dependencies", {})
+    if users is not None:
+        dependencies["user_service"] = Provide(
+            lambda: users, sync_to_thread=False, use_cache=True
+        )
     return create_test_client(
         route_handlers=[],
         plugins=[ChainlitPlugin(auth=_auth(), transit=transit)],
+        dependencies=dependencies,
         debug=False,
         **kwargs,
     )
@@ -220,11 +254,11 @@ def test_a_toast_outcome_is_the_hooks_message(registered):
 
 
 def test_a_refresh_outcome_carries_the_page_the_get_would_build(registered):
-    """Built by `_current`, not echoed: the application changed something and
+    """Built by `_render`, not echoed: the application changed something and
     the page has to show what it changed, without a reload."""
 
     @cl.on_account_load
-    async def load(user):
+    async def load(user, account):
         return Account(watch=Watch(items=[WatchedItem(title="Кружка")]))
 
     @cl.account_action("compare")
@@ -319,3 +353,130 @@ def test_open_thread_with_nothing_to_hand_over_names_no_thread(registered):
     assert outcome["thread_id"] is None
     assert outcome["chat_profile"] == "Быстрый"
     assert outcome["has_transit_message"] is False
+
+
+# --- what an action stores ---------------------------------------------------
+
+
+def test_a_refresh_with_an_account_stores_it_and_draws_the_page_from_it(registered):
+    """«Убрать» on a notice. The action changes the values and hands them
+    back; the engine stores them with the request's own session, so the hook
+    no longer opens one of its own and the page cannot show the notice it has
+    just retired."""
+
+    @cl.account_action("dismiss")
+    async def dismiss(user, item):
+        return cl.AccountRefresh(message="Убрали", account=Account(plan="pro"))
+
+    users = FakeUsers({"plan": "free", "watch": {"items": [{"title": "Кружка"}]}})
+    with _client(users=users) as client:
+        _sign_in(client)
+        response = _post(client, "dismiss", "watch.items.0", CARD)
+
+    outcome = response.json()["outcome"]
+    assert outcome["t"] == "page"
+    assert outcome["message"] == "Убрали"
+    assert outcome["page"]["values"]["plan"] == "pro"
+    assert outcome["page"]["values"]["watch"]["items"] == []
+    assert users.written == [
+        {"watch": {"items": []}, "plan": "pro", "balance": 0.0},
+    ]
+
+
+def test_a_refresh_stores_no_readonly_leaf(registered):
+    """The same rule a PUT runs, at the one other door into the store."""
+
+    @cl.account_action("dismiss")
+    async def dismiss(user, item):
+        return cl.AccountRefresh(
+            account=Account(
+                balance=1250.0,
+                watch=Watch(items=[WatchedItem(title="Кружка", rate=91.4)]),
+            )
+        )
+
+    users = FakeUsers()
+    with _client(users=users) as client:
+        _sign_in(client)
+        response = _post(client, "dismiss", "watch.items.0", CARD)
+
+    stored = users.written[0]
+    assert stored["balance"] == 0.0
+    assert stored["watch"]["items"][0] == {
+        "title": "Кружка",
+        "price": 0.0,
+        "watch": False,
+        "rate": 0.0,
+    }
+    # Shown, though: the page is built from what the hook returned.
+    assert response.json()["outcome"]["page"]["values"]["balance"] == 1250.0
+
+
+def test_a_refresh_without_an_account_stores_nothing(registered):
+    """An action that only looked at something is not a write."""
+
+    @cl.account_action("compare")
+    async def compare(user, item):
+        return cl.AccountRefresh(message="Смотрим")
+
+    users = FakeUsers({"plan": "pro"})
+    with _client(users=users) as client:
+        _sign_in(client)
+        response = _post(client, "compare", "watch.items.0", CARD)
+
+    assert users.written == []
+    assert response.json()["outcome"]["page"]["values"]["plan"] == "pro"
+
+
+def test_the_load_hook_after_a_refresh_sees_what_the_action_stored(registered):
+    """One way to produce a page: the action's values become the baseline the
+    load hook is handed, so it enriches them rather than re-reading a row its
+    own session cannot see yet."""
+    seen: List[Any] = []
+
+    @cl.on_account_load
+    async def load(user, account):
+        seen.append(account)
+        return msgspec.structs.replace(account, balance=1250.0)
+
+    @cl.account_action("dismiss")
+    async def dismiss(user, item):
+        return cl.AccountRefresh(account=Account(plan="pro"))
+
+    users = FakeUsers({"plan": "free"})
+    with _client(users=users) as client:
+        _sign_in(client)
+        response = _post(client, "dismiss", "watch.items.0", CARD)
+
+    assert seen[0].plan == "pro"
+    assert response.json()["outcome"]["page"]["values"]["balance"] == 1250.0
+    # Once, by the action. The load hook only added a derived field.
+    assert len(users.written) == 1
+
+
+def test_a_refresh_carrying_a_mapping_is_a_500(registered):
+    """Refused, not converted: the values are stored, and a mapping would put
+    the default of every key it omits into the row."""
+
+    @cl.account_action("dismiss")
+    async def dismiss(user, item):
+        return cl.AccountRefresh(account={"plan": "pro"})
+
+    with _client(users=FakeUsers(), raise_server_exceptions=False) as client:
+        _sign_in(client)
+        response = _post(client, "dismiss", "watch.items.0", CARD)
+
+    assert response.status_code == 500
+
+
+def test_a_refresh_with_an_account_and_nowhere_to_store_still_draws_it(registered):
+    @cl.account_action("dismiss")
+    async def dismiss(user, item):
+        return cl.AccountRefresh(account=Account(plan="pro"))
+
+    with _client() as client:
+        _sign_in(client)
+        response = _post(client, "dismiss", "watch.items.0", CARD)
+
+    assert response.status_code == 201
+    assert response.json()["outcome"]["page"]["values"]["plan"] == "pro"

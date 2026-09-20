@@ -49,6 +49,36 @@ class TestAccountSection:
         assert payload["account"] == {"enabled": True, "title": "Личный кабинет"}
 
 
+class TestTheSchemaIsNotConfigured:
+    """The form the client draws is derived from the `@cl.account` Struct and
+    added to `/project/settings` by the controller. It must not be reachable
+    from a TOML table: a `schema` key a deployment could write would be a
+    second description of a shape the Struct already describes, free to
+    disagree with it — which is exactly what the retired widget layer was.
+    """
+
+    def test_the_section_has_no_schema_field(self):
+        fields = {field.name for field in msgspec.structs.fields(AccountSection)}
+
+        assert "schema" not in fields
+
+    def test_a_toml_table_that_sets_one_is_ignored(self):
+        """`Settings` does not forbid unknown fields, so the table still
+        decodes — it just decodes to a section with nothing extra on it, and
+        the key never reaches the payload the controller then fills in."""
+        ui = msgspec.convert(
+            {
+                "name": "test",
+                "account": {"title": "Кабинет", "schema": {"properties": {"x": {}}}},
+            },
+            type=UISettings,
+        )
+
+        assert ui.account == AccountSection(enabled=True, title="Кабинет")
+        assert not hasattr(ui.account, "schema")
+        assert "schema" not in msgspec.to_builtins(ui)["account"]
+
+
 class TestRetiredKeys:
     def test_the_chat_settings_keys_are_gone(self):
         """The widget layer they configured is deleted; a config that still

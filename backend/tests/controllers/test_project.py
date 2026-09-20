@@ -24,16 +24,19 @@ the same choice for the same reason.
 """
 
 import uuid
-from typing import Any, AsyncIterator, Dict, List, Optional, Set
+from typing import Annotated, Any, AsyncIterator, Dict, List, Optional, Set
 
+import msgspec
 import pytest
 import pytest_asyncio
 from advanced_alchemy.extensions.litestar import SQLAlchemyInitPlugin
 from litestar.di import Provide
 from litestar.testing import create_async_test_client
+from msgspec import Meta
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 import chainlit.config
+from chainlit.account import schema_of
 from chainlit.controllers.project import ProjectController
 from chainlit.persistence import Persistence
 from chainlit.persistence.records import (
@@ -1616,6 +1619,92 @@ async def test_the_settings_describe_the_running_app(client, auth) -> None:
 
 async def test_the_settings_need_a_login(client) -> None:
     assert (await client.get("/project/settings")).status_code == 401
+
+
+class AccountStruct(msgspec.Struct):
+    """A registered account page, as small as one can be and still have a
+    field the left panel could pin."""
+
+    notify: Annotated[bool, Meta(title="Уведомления")] = True
+
+
+@pytest.fixture
+def account_page(monkeypatch):
+    """Register an account page and switch the section on, for one test.
+
+    ``chainlit.config.config`` is process-global and the rest of this module
+    assumes ``ui.account is None``; ``monkeypatch`` is what puts it back.
+    """
+
+    def arrange(*, registered: bool = True, enabled: bool = True):
+        config = chainlit.config.config
+        monkeypatch.setattr(
+            config.ui, "account", chainlit.config.AccountSection(enabled=enabled)
+        )
+        monkeypatch.setattr(
+            config.code, "account", AccountStruct if registered else None
+        )
+
+    return arrange
+
+
+async def test_the_settings_carry_the_account_form(client, auth, account_page) -> None:
+    """The left panel draws the account's sections before anything has
+    opened the dialog, and ``GET /project/account`` is behind an identity
+    guard and runs ``on_account_load``. So the form travels with the
+    settings — derived from the Struct, the same call the page itself uses.
+    """
+    account_page()
+    login(client, auth, ALICE)
+
+    body = (await client.get("/project/settings")).json()
+
+    assert body["ui"]["account"]["schema"] == schema_of(AccountStruct)
+    # Still the section the TOML describes, with a key added, not replaced.
+    assert body["ui"]["account"]["enabled"] is True
+    # The whole `msgspec.json.schema` document, `$defs` and all, which is
+    # what the page's own route serves — not a flattened copy of it.
+    assert body["ui"]["account"]["schema"]["$defs"]["AccountStruct"]["properties"] == {
+        "notify": {"title": "Уведомления", "type": "boolean", "default": True}
+    }
+
+
+async def test_no_registered_struct_means_no_form(client, auth, account_page) -> None:
+    """The row in the user menu is one decision and the page is another: an
+    app may show the row and register nothing yet. The client must see the
+    key missing rather than an empty schema it would render as a blank form.
+    """
+    account_page(registered=False)
+    login(client, auth, ALICE)
+
+    body = (await client.get("/project/settings")).json()
+
+    assert body["ui"]["account"] == {"enabled": True, "title": ""}
+
+
+async def test_a_disabled_section_gets_no_form(client, auth, account_page) -> None:
+    account_page(enabled=False)
+    login(client, auth, ALICE)
+
+    body = (await client.get("/project/settings")).json()
+
+    assert "schema" not in body["ui"]["account"]
+
+
+async def test_a_registered_struct_does_not_invent_the_section(
+    client, auth, monkeypatch
+) -> None:
+    """No ``[UI.account]`` table means no row in the user menu, and the form
+    must not be what puts one there. The two are separate decisions: an app
+    can register the Struct for its own routes and still not show the page.
+    """
+    monkeypatch.setattr(chainlit.config.config.code, "account", AccountStruct)
+    monkeypatch.setattr(chainlit.config.config.ui, "account", None)
+    login(client, auth, ALICE)
+
+    body = (await client.get("/project/settings")).json()
+
+    assert body["ui"]["account"] is None
 
 
 async def test_a_throwaway_slots_element_gets_no_row(

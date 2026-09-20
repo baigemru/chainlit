@@ -345,7 +345,7 @@ class _Run:
         async def on_thread_ready(thread: Mapping[str, Any]) -> None:
             runs["thread_ready"] = runs.get("thread_ready", 0) + 1
 
-        async def on_account_badge(user: Any) -> int:
+        async def on_account_badge(user: Any, account: Any) -> int:
             runs["account_badge"] = runs.get("account_badge", 0) + 1
             seen["account_badge_user"] = getattr(user, "identifier", None)
             return ACCOUNT_BADGE_COUNT

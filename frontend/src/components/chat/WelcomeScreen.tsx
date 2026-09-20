@@ -77,6 +77,15 @@ export default function WelcomeScreen(props: Props) {
     return <Logo className="w-[200px] mb-2" />;
   }, [chatProfiles, chatProfile]);
 
+  // The line under the composer, in the profile's own words: what pressing
+  // Enter will do. It is markdown because the applications that want one
+  // want a link in it, and it is drawn only on the empty screen — once the
+  // conversation has started the composer no longer needs explaining.
+  const composerHint = useMemo(
+    () => chatProfiles?.find((cp) => cp.name === chatProfile)?.composer_hint,
+    [chatProfiles, chatProfile]
+  );
+
   if (hasMessage(messages)) return null;
 
   return (
@@ -89,6 +98,20 @@ export default function WelcomeScreen(props: Props) {
     >
       {logo}
       <MessageComposer {...props} />
+      {composerHint ? (
+        <div className="composer-hint max-w-full -mt-2">
+          {/* The same register as the watermark: small, muted, one
+              paragraph with no margin of its own. */}
+          <Markdown
+            allowHtml={allowHtml}
+            latex={latex}
+            renderMarkdown={true}
+            className="text-xs text-muted-foreground text-center [&_p]:m-0 [&_div]:mt-0 [&_div]:leading-snug"
+          >
+            {composerHint}
+          </Markdown>
+        </div>
+      ) : null}
       <Starters />
     </div>
   );

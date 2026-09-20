@@ -75,6 +75,13 @@ export interface ResolvedTab {
   actions?: IAccountAction[];
   /** `x-icon`: a lucide name for the menu row, the vocabulary `cl.Action` uses. */
   icon?: string;
+  /**
+   * `x-pinned`: the application asked for a row of its own in the left
+   * sidebar, beside the chat history. Undefined rather than `false` for the
+   * sections that did not: the flag is a request, and a schema that never
+   * made one should read the same as one written before the key existed.
+   */
+  pinned?: boolean;
 }
 
 export interface ResolvedForm {
@@ -182,6 +189,32 @@ const labelsOf = (schema: IJsonSchema): Record<string, string> | undefined => {
 };
 
 /**
+ * The `enum` in the order the application declared, not the one msgspec
+ * emitted.
+ *
+ * `msgspec.json.schema` sorts an Enum's members, which drops "not chosen"
+ * between two province names and leaves the author no way to say otherwise.
+ * `x-enum-labels` is an object, and an object's keys keep insertion order, so
+ * the application has already written the order down — this reads it back.
+ *
+ * A stable sort rather than a rebuild: a value the labels do not name is still
+ * an option, keeps the schema's order among its kind and lands after the named
+ * ones. Nothing is dropped and nothing is duplicated, which a lookup keyed on
+ * `String(value)` could not promise for an enum mixing `1` and `"1"`.
+ */
+const orderEnum = (
+  values: unknown[],
+  labels: Record<string, string> | undefined
+): unknown[] => {
+  if (!labels) return values;
+  const declared = new Map<string, number>();
+  Object.keys(labels).forEach((key, index) => declared.set(key, index));
+  const rank = (value: unknown) =>
+    declared.get(String(value)) ?? Number.MAX_SAFE_INTEGER;
+  return [...values].sort((a, b) => rank(a) - rank(b));
+};
+
+/**
  * `x-actions`, entry by entry.
  *
  * An entry missing `name` or `label` is dropped rather than drawn: a button
@@ -204,6 +237,17 @@ const iconOf = (schema: IJsonSchema): string | undefined => {
   const icon = schema['x-icon'];
   return typeof icon === 'string' && icon ? icon : undefined;
 };
+
+/**
+ * `x-pinned`, and only the boolean `true`.
+ *
+ * A pinned row costs the sidebar vertical space the thread list wants, so the
+ * flag is read strictly: the string `"true"` a hand-written schema might carry
+ * is not a request, and treating it as one would put a section on screen that
+ * nobody asked to put there.
+ */
+const pinnedOf = (schema: IJsonSchema): boolean | undefined =>
+  schema['x-pinned'] === true ? true : undefined;
 
 const stepOf = (schema: IJsonSchema): number | 'any' => {
   if (typeof schema.multipleOf === 'number') return schema.multipleOf;
@@ -262,11 +306,12 @@ const buildField = (
   }
 
   if (Array.isArray(schema.enum)) {
+    const enumLabels = labelsOf(schema);
     return {
       ...base,
       kind: 'enum',
-      enumValues: schema.enum,
-      enumLabels: labelsOf(schema),
+      enumValues: orderEnum(schema.enum, enumLabels),
+      enumLabels,
       widget: widget === 'radio' ? 'radio' : undefined
     };
   }
@@ -322,11 +367,14 @@ const buildField = (
       };
     }
     if (Array.isArray(items.schema.enum)) {
+      // The labels may sit on the item schema or beside the array; either
+      // way they are the declaration order the checkbox list is drawn in.
+      const enumLabels = labelsOf(items.schema) ?? labelsOf(schema);
       return {
         ...base,
         kind: 'multiselect',
-        enumValues: items.schema.enum,
-        enumLabels: labelsOf(items.schema) ?? labelsOf(schema)
+        enumValues: orderEnum(items.schema.enum, enumLabels),
+        enumLabels
       };
     }
     if (items.schema.type === 'string') {
@@ -393,7 +441,8 @@ export const resolveForm = (schema: IJsonSchema): ResolvedForm => {
         // The property's keys are layered over the `$ref`ed def, so an
         // `x-actions` written beside the `$ref` is visible here.
         actions: actionsOf(resolution.schema),
-        icon: iconOf(resolution.schema)
+        icon: iconOf(resolution.schema),
+        pinned: pinnedOf(resolution.schema)
       });
       continue;
     }

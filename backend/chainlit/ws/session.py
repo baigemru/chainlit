@@ -93,6 +93,17 @@ class CallbackRunner(Protocol):
         """
         ...
 
+    async def stored_account(self, user: Any) -> Any:
+        """The account values as the store holds them, for that same frame.
+
+        Here for the same reason ``registry`` is: ``account.badge`` carries a
+        number the application computes *from* these, and the hook is handed
+        them rather than left to open a session of its own. Reading the row
+        needs the persistence the application half owns, so the port asks for
+        the answer and not for the database. Typed loosely, like ``registry``.
+        """
+        ...
+
     async def call_action(self, session: "Session", action: Mapping[str, Any]) -> Any:
         """Run the callback registered for ``action["name"]``.
 

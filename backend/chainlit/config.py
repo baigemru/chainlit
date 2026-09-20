@@ -534,9 +534,11 @@ class CodeSettings:
 
     # The account page. The Struct is the type, the JSON Schema the client
     # renders, the validator a save runs through and the storage shape at
-    # once; the two hooks let the app supply and accept the values itself.
+    # once; the two hooks let the app fill in and accept the values itself.
+    # `on_account_load` is handed the stored Struct the request's own session
+    # read, and what it returns is both the page and the next stored value.
     account: Optional[Type[Struct]] = None
-    on_account_load: Optional[Callable[[Optional["User"]], Awaitable[Any]]] = None
+    on_account_load: Optional[Callable[[Optional["User"], Any], Awaitable[Any]]] = None
     on_account_update: Optional[
         Callable[[Optional["User"], Any], Awaitable[Optional[str]]]
     ] = None
@@ -545,8 +547,9 @@ class CodeSettings:
     # converted instance; what it returns says what the page does next.
     account_actions: Dict[str, Callable[..., Any]] = field(default_factory=dict)
     # How many things on the account page the user has not seen. Pushed on
-    # the socket, never polled.
-    on_account_badge: Optional[Callable[[Optional["User"]], Awaitable[int]]] = None
+    # the socket, never polled, and handed the stored account Struct rather
+    # than left to read the row itself -- see `account_badge.py`.
+    on_account_badge: Optional[Callable[[Optional["User"], Any], Awaitable[int]]] = None
     # Auth callbacks
     password_auth_callback: Optional[
         Callable[[str, str], Awaitable[Optional["User"]]]

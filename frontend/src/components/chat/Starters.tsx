@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { useChatSession, useConfig } from '@chainlit/react-client';
 
@@ -16,7 +16,6 @@ export default function Starters({ className }: Props) {
   const { chatProfile } = useChatSession();
   const { config } = useConfig();
   const device = useDeviceKey();
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const starters = useMemo(() => {
     if (chatProfile) {
@@ -50,37 +49,22 @@ export default function Starters({ className }: Props) {
     [config, device]
   );
 
+  // Categories are the welcome screen's tiers, top to bottom in the order the
+  // server sent them. Nothing here chooses between them: the server decides
+  // what is offered and in which density, and every section is on screen.
   if (starterCategories?.length) {
-    const selectedCategoryData = starterCategories.find(
-      (cat) => cat.label === selectedCategory
-    );
-
     return (
       <div
         id="starters"
-        className={cn('flex flex-col gap-4 items-center', className)}
+        className={cn('flex w-full flex-col gap-6', className)}
       >
-        <div className="flex gap-2 justify-center flex-wrap">
-          {starterCategories.map((category) => (
-            <StarterCategory
-              key={category.label}
-              category={category}
-              isSelected={selectedCategory === category.label}
-              onClick={() =>
-                setSelectedCategory(
-                  selectedCategory === category.label ? null : category.label
-                )
-              }
-            />
-          ))}
-        </div>
-        {selectedCategoryData?.starters?.length ? (
-          <div className="flex gap-2 justify-center flex-wrap">
-            {selectedCategoryData.starters.map((starter) => (
-              <Starter key={starter.label} starter={starter} />
-            ))}
-          </div>
-        ) : null}
+        {starterCategories.map((category) => (
+          <StarterCategory
+            key={category.label}
+            category={category}
+            device={device}
+          />
+        ))}
       </div>
     );
   }

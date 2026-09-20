@@ -1,3 +1,5 @@
+import type { IJsonSchema } from './account';
+
 /**
  * Who a profile or a starter is offered to. Purely visibility: nothing
  * branches on it, and a hidden profile stays perfectly usable when a thread
@@ -13,12 +15,41 @@ export interface IStarter {
   device?: DeviceKey;
   /** Switches to this chat profile instead of sending `message`. */
   profile?: string;
+  /**
+   * An in-app address, and the highest-priority action: `navigate(href)` and
+   * nothing else — no session teardown, because the page it opens (the
+   * account, say) is a dialog over the chat that is still live behind it.
+   */
+  href?: string;
+  /** The second line: what pressing this will actually do. */
+  description?: string;
+  /** The note in the corner — a price, a duration. The fork never reads it. */
+  caption?: string;
+  /**
+   * Offered but not available. The starter stays on screen, dimmed and
+   * inert: an offer withdrawn silently is indistinguishable from one that
+   * was never made, and the application wants the user to see it coming.
+   */
+  disabled?: boolean;
   highlight?: boolean;
 }
 
+/**
+ * Three densities of one list, not three kinds of starter: `tiles` are the
+ * compact buttons, `plates` the cards carrying a description and a caption,
+ * `rows` the line-per-offer list. A value from a newer backend falls back to
+ * `tiles`, the shape every starter has always had.
+ */
+export type StarterLayout = 'tiles' | 'plates' | 'rows';
+
 export interface IStarterCategory {
   label: string;
+  /** The line under the section heading. */
+  description?: string;
   icon?: string;
+  layout?: StarterLayout;
+  /** Fold the section into one summary line on a phone. */
+  collapsible?: boolean;
   starters: IStarter[];
 }
 
@@ -29,6 +60,15 @@ export interface ChatProfile {
   name: string;
   display_name?: string;
   markdown_description: string;
+  /**
+   * Whether the profile is *offered*. `false` is a door: reachable through a
+   * starter, a hand-off or a resumed thread, but never proposed in the
+   * selector and never the default. Absent means offered — every profile
+   * written before this field existed is one.
+   */
+  listed?: boolean;
+  /** Markdown under the composer on an empty chat. */
+  composer_hint?: string;
   starters?: IStarter[];
 }
 
@@ -124,7 +164,17 @@ export interface IChainlitConfig {
      * the same convention `mobile_notice` follows, so a deployment that never
      * declared the table grows no menu entry it cannot serve.
      */
-    account?: { enabled: boolean; title: string };
+    account?: {
+      enabled: boolean;
+      title: string;
+      /**
+       * The page's JSON Schema, as the settings controller emits it from the
+       * Struct the application registered. The dialog fetches its own copy
+       * with the values; this one is for everything that has to know the
+       * sections *before* the dialog is opened.
+       */
+      schema?: IJsonSchema;
+    };
   };
   features: {
     spontaneous_file_upload?: {

@@ -422,26 +422,63 @@ def account(cls: Type[S]) -> Type[S]:
 
 
 def on_account_load(
-    func: Callable[[Optional[User]], Awaitable[Any]],
-) -> Callable[[Optional[User]], Awaitable[Any]]:
-    """Supply the account values yourself instead of reading the stored ones.
+    func: Callable[[Optional[User], Any], Awaitable[Any]],
+) -> Callable[[Optional[User], Any], Awaitable[Any]]:
+    """Fill in the account page, from the values the engine has just read.
 
-    Return the ``@cl.account`` Struct, a mapping of its values, or ``None`` to
-    let the engine answer from what it stored (or from the defaults).
+    Called ``(user, account)``: ``account`` is an instance of the
+    ``@cl.account`` Struct holding what is stored, read with the request's own
+    session, so a hook never opens a second one -- and never sees the values
+    from before a ``PUT`` the way a separate session would, since the
+    request's session commits after the response is built.
+
+    Return the Struct to show -- an *instance*, not a mapping of its values:
+    what it returns is also what gets *stored*, the engine compares it with
+    what it handed over and writes the difference through the same session, and
+    a mapping would store the default of every key it left out. Change what you
+    were handed (``msgspec.structs.replace(account, plan="pro")``). Marking a
+    feed seen as the page opens is therefore a return value rather than a write
+    of the application's own, and a hook that returns its argument unchanged
+    writes nothing at all. Fields the schema marks ``readOnly`` are never
+    stored -- fill them in freely, they are what the page shows and nothing
+    else.
 
     Stored unwrapped, unlike the session hooks: ``wrap_user_function`` logs an
-    exception and returns ``None``, and here ``None`` means "use the stored
-    values" -- a load hook that crashed would quietly answer with somebody's
-    old data. The route lets the exception reach Litestar instead.
+    exception and returns ``None``, and a load hook that crashed would then
+    look like one that answered with an empty page. The route lets the
+    exception reach Litestar instead.
 
     Args:
-        func (Callable[[Optional[User]], Awaitable[Any]]): The load hook.
+        func (Callable[[Optional[User], Any], Awaitable[Any]]): The load hook.
 
     Returns:
-        Callable[[Optional[User]], Awaitable[Any]]: The decorated hook.
+        Callable[[Optional[User], Any], Awaitable[Any]]: The decorated hook.
     """
+    _assert_takes_user_and_account(func, "@cl.on_account_load")
     config.code.on_account_load = func
     return func
+
+
+def _assert_takes_user_and_account(func: Callable[..., Any], decorator: str) -> None:
+    """Refuse a retired one-argument account hook, at import.
+
+    Both hooks that used to read ``users.account`` themselves are now handed
+    it. The signature is tried rather than counted: ``bind`` already knows
+    what ``*args``, a default, a bound method and a ``functools.partial`` do
+    to an argument list. Checked here because a hook the engine will call
+    with two arguments and an application wrote with one is a 500 on the
+    first page load, and the import is where that is cheapest to see.
+    """
+    try:
+        inspect.signature(func).bind(None, None)
+    except TypeError as error:
+        raise TypeError(
+            f"{decorator} takes (user, account), and {func.__name__} does not: "
+            f"{error}. The engine hands the hook the values it has read for "
+            "this user, so a hook no longer opens a session of its own and no "
+            "longer answers from before a write the request has not committed "
+            "-- the one-argument form is retired."
+        ) from error
 
 
 def on_account_update(
@@ -451,6 +488,9 @@ def on_account_update(
 
     The second argument is an instance of the ``@cl.account`` Struct, so a
     hook never has to check a type or a range that the Struct already states.
+    It is what will be stored, not what was posted: every ``readOnly`` leaf
+    is already back at its default, so a hook does not have to know which of
+    its own fields are derived and clean them out by hand.
     A returned string is shown to the user as a toast.
 
     Stored unwrapped: a save hook that raises must fail the request, not be
@@ -477,6 +517,11 @@ def account_action(
     ``cl.AccountRefresh`` or ``cl.AccountOpenThread``; anything else is a
     bug in the application and is reported as a 500.
 
+    ``cl.AccountRefresh(account=...)`` is how an action changes what is
+    stored: the engine writes it with the request's own session -- minus the
+    ``readOnly`` leaves -- and draws the page from it. A hook that opened a
+    session of its own would be racing the one the request is already in.
+
     Stored unwrapped, like the other account hooks: a button that failed
     must fail the request rather than be logged away while the page
     answers "done".
@@ -501,25 +546,36 @@ def account_action(
 
 
 def on_account_badge(
-    func: Callable[[Optional[User]], Awaitable[int]],
-) -> Callable[[Optional[User]], Awaitable[int]]:
+    func: Callable[[Optional[User], Any], Awaitable[int]],
+) -> Callable[[Optional[User], Any], Awaitable[int]]:
     """Say how many things on the account page the user has not seen.
 
-    Called by the engine, never by the client: the number is pushed on the
-    socket after every hello, after the page is read, and whenever a
-    session asks for it with ``cl.context.emitter.refresh_account_badge()``.
-    An application that does not register this hook sends no badge frame at
-    all, and the client shows nothing -- it never invents a zero.
+    Called ``(user, account)`` by the engine, never by the client: the number
+    is pushed on the socket after every hello, after the page is read, and
+    whenever a session asks for it with
+    ``cl.context.emitter.refresh_account_badge()``. An application that does
+    not register this hook sends no badge frame at all, and the client shows
+    nothing -- it never invents a zero.
+
+    ``account`` is the ``@cl.account`` Struct as the **store** holds it,
+    handed over rather than read by the hook. On the account route that
+    matters: the mark-as-seen ``on_account_load`` returned is a write of the
+    request's own session, which commits after the response is built, so a
+    hook that opened a session to count would answer from before the mark and
+    the pushed number would be one page load behind. The other two call sites
+    read the row through the runner's persistence, so the shape is the same
+    whichever asked. It is ``None`` only when no ``@cl.account`` is declared.
 
     Stored unwrapped: a hook that raises on a request the user made is a
     500, not a silently missing badge.
 
     Args:
-        func (Callable[[Optional[User]], Awaitable[int]]): The count hook.
+        func (Callable[[Optional[User], Any], Awaitable[int]]): The count hook.
 
     Returns:
-        Callable[[Optional[User]], Awaitable[int]]: The decorated hook.
+        Callable[[Optional[User], Any], Awaitable[int]]: The decorated hook.
     """
+    _assert_takes_user_and_account(func, "@cl.on_account_badge")
     config.code.on_account_badge = func
     return func
 

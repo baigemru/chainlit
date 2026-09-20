@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/sidebar';
 
 import NewChatButton from '../header/NewChat';
+import PinnedAccount from './PinnedAccount';
 import SearchChats from './Search';
 import { ThreadHistory } from './ThreadHistory';
 
@@ -53,6 +54,12 @@ export default function LeftSidebar({
           </div>
         </div>
       </SidebarHeader>
+      {/* Outside `ThreadHistory`'s `SidebarContent`, and deliberately: that
+          one is the scrolling region, and a pinned destination that scrolls
+          away with the chat list is not pinned. Renders nothing at all when
+          the application pinned nothing, so a deployment without an account
+          page has the header sitting on the history exactly as before. */}
+      <PinnedAccount />
       <ThreadHistory />
       <SidebarRail />
     </Sidebar>

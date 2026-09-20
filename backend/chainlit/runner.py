@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Mapping, Optional, Sequence
 import msgspec
 
 from chainlit import persist
+from chainlit.account import decode_stored
 from chainlit.account_badge import push_account_badge
 from chainlit.context import init_context
 from chainlit.controllers.project import hide_resume_deleted
@@ -435,12 +436,52 @@ class ApplicationRunner:
         here escapes into ``_serve``'s task group, which cancels the reader
         and the heartbeat with it -- so a badge hook with a bad day would
         close the socket of every user who opened the app. Nobody asked for
-        this number; it is offered, and an offer that fails is logged.
+        this number; it is offered, and an offer that fails is logged. The
+        read below is inside the swallow for the same reason.
+
+        No hook, no read: ``push_account_badge`` would return without sending
+        anything, but the values are gathered to be passed *to* it, so the
+        check has to happen before the argument is evaluated or every hello
+        of an app that has an account page and no badge costs a query for a
+        frame nobody sends.
         """
+        if self.code.on_account_badge is None:
+            return
         try:
-            await push_account_badge(self.registry, session.user)
+            await push_account_badge(
+                self.registry, session.user, await self.stored_account(session.user)
+            )
         except Exception:
             logger.exception("account badge hook failed on hello")
+
+    async def stored_account(self, user: Any) -> Any:
+        """The account values as the row holds them, for a pushed badge.
+
+        ``on_account_badge`` is handed what ``on_account_load`` would be
+        handed, so a hook does not open a session of its own to count what is
+        on the page. The runner is where this lives because the runner is
+        what owns ``persistence`` -- the emitter reaches it through
+        ``session.runner`` rather than growing a database of its own.
+
+        ``isolated`` because both callers are inside the websocket's task
+        group, where a re-delivered cancellation leaves an asyncpg connection
+        out of the pool. ``None`` when the application declared no
+        ``@cl.account``: there is no page, and nothing to hand over. The
+        defaults when there is a page but nowhere to have stored anything,
+        which is the same answer the route builds in that case.
+        """
+        cls = self.code.account
+        if cls is None:
+            return None
+        identifier = _identifier(user)
+        if self.persistence is None or identifier is None:
+            return cls()
+        return decode_stored(await isolated(self._account_row(identifier)), cls)
+
+    async def _account_row(self, identifier: str) -> Any:
+        assert self.persistence is not None
+        async with self.persistence.uow() as unit:
+            return await unit.users.get_account(identifier)
 
     async def _resume_hooks(self, session: Session, thread: Mapping[str, Any]) -> None:
         """``on_chat_resume`` first, then ``on_thread_ready`` in its own slot.

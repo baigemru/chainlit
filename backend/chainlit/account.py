@@ -15,6 +15,23 @@ converted through that and the hook is handed a typed object. An annotation on
 the hook would be a second declaration of the same thing, free to disagree
 with the form the user was looking at.
 
+The same rule puts sections in the navigation: ``x-pinned: true`` in a
+section field's ``Meta(extra_json_schema=...)`` marks it for the pinned block
+of the left panel, next to ``x-icon`` for the glyph and ``x-actions`` for the
+buttons. It is a hint carried in the schema rather than a list kept in
+``config.toml`` because the sections *are* the Struct's fields: a second list
+of their names would go stale the first time one was renamed. The engine only
+carries it -- the form is served with the settings (``ui.account.schema``) as
+well as with the page, and what the client does with a pinned section, and
+how many of them it has room for, is the client's and the application's
+business.
+
+One field of the schema is not the application's to send back: a leaf marked
+``readOnly`` is derived -- a rate, a balance, a quota -- and ``strip_readonly``
+puts every one of them back to its default before anything is stored. The
+engine owns that rule so no application has to keep a list of which of its own
+fields are computed and clean them out of each save by hand.
+
 This module imports no Litestar and no configuration, so the rules below can be
 exercised without a request and without a process-global. The route is
 ``chainlit.controllers.account``.
@@ -46,6 +63,7 @@ __all__ = (
     "element_type_at",
     "register",
     "schema_of",
+    "strip_readonly",
 )
 
 S = TypeVar("S", bound=msgspec.Struct)
@@ -77,15 +95,22 @@ class Toast(msgspec.Struct, tag_field="t", tag="toast"):
 
 
 class Refresh(msgspec.Struct, tag_field="t", tag="refresh"):
-    """Rebuild the page from the app's own values, as a save does.
+    """Rebuild the page, optionally storing what the action decided.
 
-    The values an action changed are the application's to change -- it
-    writes them wherever it keeps them and asks for the page again, rather
-    than describing a patch this engine would have to apply. One way to
-    produce a page, the same one ``PUT`` uses.
+    ``account`` is an instance of the registered Struct. Given one, the
+    engine stores it -- ``strip_readonly`` first -- with the request's own
+    session and then draws the page the way a ``GET`` draws it, load hook
+    and all. That is the whole reason it is here: an action that dismissed
+    a notice used to have to open its own session and commit behind the
+    request, and the page the request went on to build then showed the
+    value from *before* the dismissal.
+
+    ``None`` means the action changed nothing of its own -- the page is
+    still rebuilt, because the load hook may have something new to say.
     """
 
     message: Optional[str] = None
+    account: Any = None
 
 
 class OpenThread(msgspec.Struct, tag_field="t", tag="open_thread"):
@@ -285,17 +310,113 @@ def build_page(
     )
 
 
-def as_account(value: Any, cls: Type[S]) -> S:
-    """What an ``on_account_load`` return means.
+def as_account(value: Any, cls: Type[S], *, hook: str) -> S:
+    """An instance of the registered Struct, and nothing else.
 
-    Strict on purpose. A hook that returns a shape its own Struct refuses is
-    an application bug, and the msgspec message names the field; the lenient
-    path below is for values that were stored under an older version of the
-    Struct, which is a different thing entirely.
+    A mapping used to be converted here, and while the return only fed the
+    page that was harmless. It is not any more: the return is *also* what
+    gets stored, and ``msgspec.convert`` fills every key a mapping leaves out
+    with the field's default -- so a hook that meant to change one thing
+    would write the defaults over everything the user had ever saved. The
+    hook is handed the current values precisely so that it does not have to
+    describe them again: ``msgspec.structs.replace(account, plan="pro")``.
+
+    ``None`` is refused for the same reason it is no longer "use the stored
+    values": the hook is *handed* those, so the fallback has nothing left to
+    mean and a missing ``return`` would blank the page it was to fill.
     """
     if isinstance(value, cls):
         return value
-    return msgspec.convert(value, cls)
+    if value is None:
+        raise TypeError(
+            f"{hook} returned None. It is handed the stored {cls.__name__} and "
+            "must return the one to show -- returning it unchanged is "
+            "`return account`."
+        )
+    raise TypeError(
+        f"{hook} must return a {cls.__name__}, not {type(value).__name__}. What "
+        "it returns is stored as well as shown, and a mapping would store the "
+        "default of every key it leaves out -- change what you were handed with "
+        "msgspec.structs.replace(account, ...) instead."
+    )
+
+
+def strip_readonly(value: S) -> S:
+    """The same values with every ``readOnly`` leaf back at its default.
+
+    A ``readOnly`` field is *derived* -- a rate, a balance, a quota -- and
+    the application recomputes it on every load. Storing it would put a copy
+    of a computed number in the database whose only job is to be stale, and
+    a ``PUT`` would store whatever the browser happened to send for it. So
+    the engine never stores one: this runs before every write, on the way in
+    from a ``PUT``, on the way out of ``on_account_load`` and on a
+    ``Refresh``'s ``account``.
+
+    Reset to the field's default, not carried over from the stored value: a
+    card in a ``list[Struct]`` has no stored twin to carry anything from --
+    the list is rewritten whole, and an element's position is not an identity
+    -- so a per-field rule that needed one would have to be a second, weaker
+    rule for lists. The default is what ``register`` already guarantees every
+    field has, and it is also what a row written under this rule holds, so
+    the two sides of the "has anything changed" comparison agree.
+
+    ``readOnly`` on a nested Struct field resets that whole subtree; the walk
+    goes into plain Struct fields and into the Struct elements of a list, which
+    are the two shapes the page is built from.
+    """
+    node = msgspec_inspect.type_info(type(value))
+    if not isinstance(node, msgspec_inspect.StructType):  # pragma: no cover - defensive
+        return value
+    # One blank instance per Struct rather than reading ``Field.default`` and
+    # ``Field.default_factory``: ``register`` guarantees ``cls()`` works, and
+    # that guarantee is the one thing this needs.
+    blank = type(value)()
+    changes: Dict[str, Any] = {}
+    for field in node.fields:
+        current = getattr(value, field.name)
+        if _is_readonly(field.type):
+            default = getattr(blank, field.name)
+            if current != default:
+                changes[field.name] = default
+            continue
+        rebuilt = _strip_within(current)
+        if rebuilt is not current:
+            changes[field.name] = rebuilt
+    if not changes:
+        return value
+    return structs.replace(value, **changes)
+
+
+def _strip_within(current: Any) -> Any:
+    """``strip_readonly`` through whatever holds a Struct.
+
+    Returns the argument itself when nothing changed, so the caller can tell
+    an untouched field by identity and leave the instance alone.
+    """
+    if isinstance(current, msgspec.Struct):
+        return strip_readonly(current)
+    if isinstance(current, list):
+        stripped = [_strip_within(item) for item in current]
+        if all(new is old for new, old in zip(stripped, current)):
+            return current
+        return stripped
+    return current
+
+
+def _is_readonly(node: msgspec_inspect.Type) -> bool:
+    """Whether ``readOnly`` is what the field's schema would say.
+
+    Read off ``Metadata.extra_json_schema``, which is where
+    ``Meta(extra_json_schema={"readOnly": True})`` lands and the one thing
+    ``msgspec.json.schema`` copies into the document the client renders. The
+    loop only peels ``Metadata``: ``readOnly`` deeper inside -- on a list's
+    item type, say -- describes that type, not this field.
+    """
+    while isinstance(node, msgspec_inspect.Metadata):
+        if (node.extra_json_schema or {}).get("readOnly"):
+            return True
+        node = node.type
+    return False
 
 
 def decode_stored(stored: Any, cls: Type[S]) -> S:

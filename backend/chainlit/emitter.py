@@ -388,13 +388,29 @@ class Emitter:
         The number is not passed in: the hook is the only thing that knows
         it, and an argument here would be a second source for it that could
         disagree with what the page itself reports a moment later.
+
+        The *values* it counts over are read here and handed over, the way
+        the route hands over what it rendered: the hook counts, it does not
+        open a session.
         """
         runner = self.session.runner
         if runner is None:
             # A session built without the application half -- a unit test,
             # never a live socket -- has nobody to fan out to.
             return
-        await push_account_badge(runner.registry, self.session.user)
+        # Imported here, like ``_strict_ask_slot`` does: the module-level
+        # import would be a cycle back through ``chainlit.config``.
+        from chainlit.config import config
+
+        if config.code.on_account_badge is None:
+            # Before the read, not inside the push: the values are gathered
+            # to be handed to a hook that does not exist, and this is a call
+            # an application is free to make without registering one.
+            return
+        user = self.session.user
+        await push_account_badge(
+            runner.registry, user, await runner.stored_account(user)
+        )
 
     def open_thread(self, thread_id: str, *, keep_transcript: bool = True) -> None:
         self.session.send(

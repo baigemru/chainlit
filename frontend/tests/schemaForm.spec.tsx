@@ -486,3 +486,98 @@ describe('SchemaForm', () => {
     await waitFor(() => expect(save).not.toBeDisabled());
   });
 });
+
+/**
+ * The resolver decides the order of an enum's options; these pin that the
+ * three controls drawing one all take it from there and none re-sorts.
+ */
+describe('option order on screen', () => {
+  const PROVINCES: IJsonSchema = {
+    $ref: '#/$defs/Root',
+    $defs: {
+      Root: {
+        title: 'Root',
+        type: 'object',
+        properties: {
+          // As msgspec emits an Enum: sorted, which is how «не выбрана»
+          // ends up between two province names.
+          province: {
+            title: 'Провинция',
+            enum: ['guangdong', 'none', 'shandong', 'zhejiang'],
+            'x-enum-labels': {
+              none: 'не выбрана',
+              shandong: 'Шаньдун',
+              zhejiang: 'Чжэцзян'
+            },
+            default: 'none'
+          },
+          mode: {
+            title: 'Режим',
+            'x-widget': 'radio',
+            enum: ['a', 'b', 'c'],
+            'x-enum-labels': { c: 'Третий', a: 'Первый' },
+            default: 'a'
+          },
+          kinds: {
+            title: 'Виды',
+            type: 'array',
+            items: {
+              enum: ['x', 'y', 'z'],
+              'x-enum-labels': { z: 'Зет', x: 'Икс' }
+            },
+            default: []
+          }
+        },
+        required: []
+      }
+    }
+  };
+
+  const mountProvinces = () =>
+    render(
+      <SchemaForm
+        schema={PROVINCES}
+        values={{ province: 'none', mode: 'a', kinds: [] }}
+        onSubmit={vi.fn()}
+      >
+        <SchemaSection name={LEADING} />
+      </SchemaForm>
+    );
+
+  it('lists a select in the declared order, unnamed values last', async () => {
+    mountProvinces();
+    openSelect(screen.getByLabelText('Провинция'));
+
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'не выбрана',
+      'Шаньдун',
+      'Чжэцзян',
+      'guangdong'
+    ]);
+  });
+
+  it('lists a radio group in the declared order', () => {
+    const { container } = mountProvinces();
+    const group = container.querySelector('[role="radiogroup"]')!;
+
+    expect(
+      Array.from(group.querySelectorAll('label')).map((label) =>
+        label.textContent?.trim()
+      )
+    ).toEqual(['Третий', 'Первый', 'b']);
+  });
+
+  it('lists a multiselect in the declared order', () => {
+    mountProvinces();
+    // The box carries the value only in its `id`; the label beside it is
+    // what a reader actually sees in that order.
+    const boxes = screen.getAllByRole('checkbox');
+
+    expect(boxes.map((box) => box.getAttribute('id'))).toEqual([
+      'kinds.z',
+      'kinds.x',
+      'kinds.y'
+    ]);
+  });
+});

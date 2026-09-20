@@ -27,6 +27,9 @@ vi.mock('@/hooks/use-mobile', () => ({
 vi.mock('@/components/LeftSidebar/ThreadHistory', () => ({
   ThreadHistory: () => null
 }));
+vi.mock('@/components/LeftSidebar/PinnedAccount', () => ({
+  default: () => null
+}));
 vi.mock('@/components/LeftSidebar/Search', () => ({ default: () => null }));
 vi.mock('@/components/header/NewChat', () => ({ default: () => null }));
 vi.mock('@/components/header/SidebarTrigger', () => ({ default: () => null }));

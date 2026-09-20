@@ -116,6 +116,27 @@ class Starter(_AsDict):
     # transition is the client's business, the server only advertises it.
     profile: Optional[str] = None
     highlight: bool = False
+    # The second line: what the click will actually do. ``label`` names the
+    # starter, this one promises the outcome.
+    description: Optional[str] = None
+    # A short note the client sets apart from the prose -- a price, a
+    # duration, a count. What it says is the application's business; nothing
+    # in the fork knows what a starter costs or how long it takes.
+    caption: Optional[str] = None
+    # Shown, and refuses the click. A starter an application cannot honour
+    # yet is better inert than absent: a list that changes shape between two
+    # visits is a list nobody learns.
+    disabled: bool = False
+    # An address inside the application -- ``/account?tab=items``. The client
+    # navigates there and the chat is left alone.
+    #
+    # ``href``, ``profile`` and ``message`` are three different answers to
+    # the same click, and the client takes the first it is given: ``href``,
+    # then ``profile``, then ``message``. The server does not refuse a
+    # starter that sets two, for the reason ``device`` is a bare string --
+    # a rule enforced here makes the *older* side the one that rejects a
+    # newer application's starter.
+    href: Optional[str] = None
 
 
 @dataclass
@@ -125,6 +146,18 @@ class StarterCategory(_AsDict):
     label: str
     icon: Optional[str] = None
     starters: List[Starter] = field(default_factory=list)
+    # A line under the heading, saying what this group is for.
+    description: Optional[str] = None
+    # "tiles" | "plates" | "rows" -- three densities of the same list.
+    # Untyped and unvalidated for the reason ``Starter.device`` is: a layout
+    # added here later has to degrade to ``tiles`` on a frontend that
+    # predates it, and it cannot degrade to anything if this side refuses to
+    # serve it in the first place.
+    layout: str = "tiles"
+    # Lets the client fold the group behind its heading. Whether it *is*
+    # folded is the client's call -- a phone folds, a desktop does not -- so
+    # this is permission, not state.
+    collapsible: bool = False
 
 
 @dataclass
@@ -141,6 +174,18 @@ class ChatProfile(_AsDict):
     # thread already in a hidden profile still resumes and still runs.
     device: str = "all"
     config_overrides: Any = None
+    # False makes a door rather than a room: the profile is not offered in
+    # the switcher and must not be picked as the default, but a starter's
+    # ``profile=``, a server-side handoff and a resumed thread all still
+    # reach it. ``listed=False`` together with ``default=True`` is an
+    # application configuration error -- it names a landing place nobody can
+    # land in -- and the fork does not arbitrate: it advertises both flags
+    # and lets the client's own default-picking skip what is not listed.
+    listed: bool = True
+    # Markdown under the composer on an empty chat, in this profile only.
+    # How to talk to it, as against ``markdown_description``, which says
+    # what it is.
+    composer_hint: Optional[str] = None
 
 
 class CommandDict(TypedDict):

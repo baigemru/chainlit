@@ -293,6 +293,133 @@ describe('resolveForm', () => {
     expect(sections[1].enumLabels).toEqual({ a: 'Первый' });
   });
 
+  it('offers an enum in the order x-enum-labels declares', () => {
+    // msgspec sorts an Enum's members, which is how «не выбрана» ends up
+    // between two province names. The labels object is where the author
+    // wrote the order down, and it is an object: its keys keep it.
+    const { sections } = resolveForm(
+      wrap({
+        province: {
+          title: 'Провинция',
+          enum: ['guangdong', 'none', 'shandong', 'zhejiang'],
+          'x-enum-labels': {
+            none: 'не выбрана',
+            guangdong: 'Гуандун',
+            zhejiang: 'Чжэцзян',
+            shandong: 'Шаньдун'
+          },
+          default: 'none'
+        }
+      })
+    );
+
+    expect(sections[0].enumValues).toEqual([
+      'none',
+      'guangdong',
+      'zhejiang',
+      'shandong'
+    ]);
+  });
+
+  it('keeps the schema order for values the labels do not name, after them', () => {
+    // An unlabelled option is still an option: it must not be dropped, and
+    // it must not jump ahead of the ones the author placed.
+    const { sections } = resolveForm(
+      wrap({
+        province: {
+          title: 'Провинция',
+          enum: ['anhui', 'fujian', 'none', 'shandong'],
+          'x-enum-labels': { none: 'не выбрана', shandong: 'Шаньдун' },
+          default: 'none'
+        }
+      })
+    );
+
+    expect(sections[0].enumValues).toEqual([
+      'none',
+      'shandong',
+      'anhui',
+      'fujian'
+    ]);
+  });
+
+  it('leaves the schema order alone without x-enum-labels', () => {
+    const { sections } = resolveForm(
+      wrap({
+        colour: {
+          title: 'Цвет',
+          enum: ['blue', 'green', 'red'],
+          default: 'blue'
+        }
+      })
+    );
+
+    expect(sections[0].enumValues).toEqual(['blue', 'green', 'red']);
+  });
+
+  it('names a label for an absent value without inventing the option', () => {
+    // A label left behind by a value the application removed is a stale
+    // line in a config file, not an option the form may offer.
+    const { sections } = resolveForm(
+      wrap({
+        currency: {
+          title: 'Валюта',
+          enum: ['CNY', 'USD'],
+          'x-enum-labels': { RUB: 'Рубль', USD: 'Доллар', CNY: 'Юань' },
+          default: 'USD'
+        }
+      })
+    );
+
+    expect(sections[0].enumValues).toEqual(['USD', 'CNY']);
+  });
+
+  it('orders a multiselect the same way', () => {
+    const { sections } = resolveForm(
+      wrap({
+        kinds: {
+          title: 'Виды',
+          type: 'array',
+          items: {
+            enum: ['a', 'b', 'c'],
+            'x-enum-labels': { c: 'Третий', a: 'Первый' }
+          },
+          default: []
+        }
+      })
+    );
+
+    expect(sections[0].kind).toBe('multiselect');
+    expect(sections[0].enumValues).toEqual(['c', 'a', 'b']);
+  });
+
+  it('orders an enum reached through a $ref by the labels beside it', () => {
+    // The Enum class carries the members, the property carries the labels;
+    // the re-layering in `resolveSchema` is what brings the two together,
+    // and the ordering has to survive it.
+    const colour = resolveForm({
+      $ref: '#/$defs/Root',
+      $defs: {
+        Root: {
+          title: 'Root',
+          type: 'object',
+          properties: {
+            c: {
+              title: 'Цвет',
+              $ref: '#/$defs/Color',
+              'x-enum-labels': { red: 'Красный', blue: 'Синий' },
+              default: 'blue'
+            }
+          },
+          required: []
+        },
+        Color: { title: 'Color', enum: ['blue', 'green', 'red'] }
+      }
+    }).sections[0];
+
+    expect(colour.enumValues).toEqual(['red', 'blue', 'green']);
+  });
+
   it('reads x-widget radio and x-widget markdown', () => {
     const { sections } = resolveForm(
       wrap({
@@ -447,6 +574,53 @@ describe('resolveForm', () => {
       }
     }).tabs;
     expect(blank.icon).toBeUndefined();
+  });
+
+  it('reads x-pinned off the section property, and only the boolean true', () => {
+    const [watch, ...rest] = resolveForm(WATCH).tabs;
+    // `WATCH` has one section and it asked for nothing.
+    expect(watch.pinned).toBeUndefined();
+    expect(rest).toHaveLength(0);
+
+    // Cast: the shapes below are what an application can write into
+    // `extra_json_schema`, not what the declared type admits.
+    const pinned = resolveForm({
+      $ref: '#/$defs/Root',
+      $defs: {
+        Root: {
+          title: 'Root',
+          type: 'object',
+          properties: {
+            yes: { title: 'Да', 'x-pinned': true, $ref: '#/$defs/A' },
+            no: { title: 'Нет', 'x-pinned': false, $ref: '#/$defs/A' },
+            // A hand-written schema's string is not a request: a section the
+            // application never pinned must not take the sidebar's room.
+            almost: { title: 'Почти', 'x-pinned': 'true', $ref: '#/$defs/A' },
+            silent: { title: 'Молча', $ref: '#/$defs/A' }
+          },
+          required: []
+        },
+        A: {
+          title: 'A',
+          type: 'object',
+          properties: { b: { type: 'string', default: '' } },
+          required: []
+        }
+      }
+    } as IJsonSchema).tabs;
+
+    expect(pinned.map((tab) => tab.name)).toEqual([
+      'yes',
+      'no',
+      'almost',
+      'silent'
+    ]);
+    expect(pinned.map((tab) => tab.pinned)).toEqual([
+      true,
+      undefined,
+      undefined,
+      undefined
+    ]);
   });
 
   it('drops an x-actions entry that could not be drawn or posted', () => {

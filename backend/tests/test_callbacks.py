@@ -271,6 +271,10 @@ async def test_set_starters(test_config):
         "device": "all",
         "profile": None,
         "highlight": False,
+        "description": None,
+        "caption": None,
+        "disabled": False,
+        "href": None,
     }
 
 
@@ -297,6 +301,10 @@ async def test_set_starter_categories_with_chat_profile(test_config):
             "device": "all",
             "profile": None,
             "highlight": False,
+            "description": None,
+            "caption": None,
+            "disabled": False,
+            "href": None,
         }
     ]
 

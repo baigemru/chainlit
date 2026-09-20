@@ -68,6 +68,7 @@ from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery, JSONBody, QueryParameter
 
 import chainlit.config
+from chainlit.account import schema_of
 from chainlit.controllers.caller import (
     assert_session_owner,
     caller,
@@ -641,8 +642,19 @@ class ProjectController(Controller):
             if selected is not None and getattr(selected, "config_overrides", None):
                 effective_config = config.with_overrides(selected.config_overrides)
 
+        ui = msgspec.to_builtins(effective_config.ui)
+        # The left panel draws the account's own sections before anybody has
+        # opened the dialog, so the form has to be here and not only behind
+        # `GET /project/account`, which is guarded by an identity and runs
+        # `on_account_load`. It is *derived*, never configured: putting it on
+        # `AccountSection` would make it a key a config.toml could set, and a
+        # form a TOML file can describe is a second description of the Struct.
+        account_section = effective_config.ui.account
+        if code.account is not None and account_section and account_section.enabled:
+            ui["account"]["schema"] = schema_of(code.account)
+
         return {
-            "ui": msgspec.to_builtins(effective_config.ui),
+            "ui": ui,
             "features": msgspec.to_builtins(effective_config.features),
             "userEnv": effective_config.project.user_env,
             "maskUserEnv": effective_config.project.mask_user_env,

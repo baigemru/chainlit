@@ -42,3 +42,24 @@ class TestChatProfileDevice:
         )
 
         assert profile.to_dict()["device"] == "pc"
+
+    def test_device_and_listed_are_two_different_axes(self):
+        """`device` says *where* a profile is offered, `listed` says whether
+        it is offered at all. A door profile that only makes sense on a
+        desktop sets both, and neither implies the other — a client that
+        collapsed them would put doors back in the switcher on a phone."""
+        desktop_door = ChatProfile(
+            name="Archive",
+            markdown_description="Reached through a starter",
+            device="pc",
+            listed=False,
+        ).to_dict()
+
+        assert desktop_door["device"] == "pc"
+        assert desktop_door["listed"] is False
+        assert (
+            ChatProfile(
+                name="Entry", markdown_description="d", device="mobile"
+            ).to_dict()["listed"]
+            is True
+        )

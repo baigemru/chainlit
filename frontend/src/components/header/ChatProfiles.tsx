@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 
 import {
+  isListed,
   matchesDevice,
   pickDefaultProfile,
   useDeviceKey
@@ -52,14 +53,27 @@ export default function ChatProfiles({ navigate }: Props) {
 
   const profiles = config?.chatProfiles;
 
-  // Only the offer is filtered. A thread opened from history may well live in
-  // a profile this device is never offered — it has to keep working, and the
-  // trigger has to keep naming it, so the selected one stays in the list.
+  // What this device is actually *offered*: listed, and meant for it. This
+  // list alone decides whether there is a selector at all.
+  const offeredProfiles = useMemo(
+    () =>
+      profiles?.filter(
+        (profile) => isListed(profile) && matchesDevice(profile.device, device)
+      ) ?? [],
+    [profiles, device]
+  );
+
+  // What the open selector lists. A thread opened from history, or a door a
+  // starter walked the user through, may well live in a profile this device
+  // is never offered — it has to keep working, and the trigger has to keep
+  // naming it, so the selected one stays in the list even though it never
+  // counts towards the decision above.
   const visibleProfiles = useMemo(
     () =>
       profiles?.filter(
         (profile) =>
-          matchesDevice(profile.device, device) || profile.name === chatProfile
+          (isListed(profile) && matchesDevice(profile.device, device)) ||
+          profile.name === chatProfile
       ) ?? [],
     [profiles, device, chatProfile]
   );
@@ -73,20 +87,28 @@ export default function ChatProfiles({ navigate }: Props) {
 
   // Handle case when selected profile becomes invalid. Checked against the
   // full list on purpose: a profile hidden on this device has not vanished.
+  // The replacement goes through `pickDefaultProfile` and not through
+  // `profiles[0]`: the first entry may be an unlisted door, and a session
+  // whose profile was renamed away must land where a fresh one would, not
+  // wherever the config happens to begin.
   useEffect(() => {
     if (chatProfile && profiles?.length) {
       const profileExists = profiles.some(
         (profile) => profile.name === chatProfile
       );
       if (!profileExists) {
-        setChatProfile(profiles[0].name);
+        setChatProfile(pickDefaultProfile(profiles, device));
       }
     }
-  }, [chatProfile, profiles, setChatProfile]);
+  }, [chatProfile, profiles, device, setChatProfile]);
 
-  // Nothing to choose between: one door is not a selector. Placed below every
-  // hook — the effects above still have to settle the profile.
-  if (visibleProfiles.length <= 1) {
+  // Nothing to choose between: one door is not a selector. Counted over what
+  // is *offered*, never over what is on screen — a user who walked through a
+  // starter into an unlisted profile would otherwise be shown a two-item
+  // selector conjured out of the one entry point plus where they now are.
+  // Placed below every hook: the effects above still have to settle the
+  // profile.
+  if (offeredProfiles.length <= 1) {
     return null;
   }
 

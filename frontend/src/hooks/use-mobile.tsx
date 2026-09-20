@@ -105,22 +105,35 @@ export function matchesDevice(
   return true;
 }
 
+/** Whether a profile is proposed at all, as opposed to merely reachable. */
+export function isListed(profile: ChatProfile): boolean {
+  return profile.listed !== false;
+}
+
 /**
  * The one rule for which profile a fresh chat opens in, shared by the app's
  * boot effect, the profile selector and the new-chat button.
  *
+ * An unlisted profile is a door someone else opens — a starter, a hand-off, a
+ * resumed thread — so it is never picked here, not even when it is the only
+ * one this device matches and not even when it carries `default`.
+ *
  * The last fallback is deliberate: without a profile `App` never opens the
- * socket (`chatProfileOk`), so an entirely device-less config must still
- * yield a name.
+ * socket (`chatProfileOk`), so a config in which every profile is filtered
+ * out must still yield a name.
  */
 export function pickDefaultProfile(
   profiles: ChatProfile[],
   device: SessionDevice
 ): string | undefined {
-  const visible = profiles.filter((profile) =>
+  const listed = profiles.filter(isListed);
+  const visible = listed.filter((profile) =>
     matchesDevice(profile.device, device)
   );
   const chosen =
-    visible.find((profile) => profile.default) ?? visible[0] ?? profiles[0];
+    visible.find((profile) => profile.default) ??
+    visible[0] ??
+    listed[0] ??
+    profiles[0];
   return chosen?.name;
 }

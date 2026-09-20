@@ -362,6 +362,58 @@ effect toasts once on `superseded`; a third picks the default profile.
 `/login/callback`, `/share/:id`, `/account`, `*` → `/`. `/account` is the chat home:
 its element is `<Home />`, and the account is a dialog over it.
 
+**The welcome screen** (`components/chat/WelcomeScreen.tsx`) is four tiers on an empty
+chat: the profile's logo and `markdown_description`, the composer, the profile's
+`composer_hint`, and the starters. The hint is markdown in the watermark's register —
+small, muted, one paragraph — and it belongs to the profile, not to the app: a profile
+that set none draws nothing, and no profile ever borrows another's.
+
+**Starters are sections, not a filter.** `Starters.tsx` used to draw the categories as
+pills and reveal one category's starters when a pill was pressed; a list of offers the
+user has to click through to read is a list they do not read. Every category is now a
+section of its own, top to bottom in the order the server sent them, and nothing on the
+screen chooses between them. The device filter (`matchesDevice`) still reaches inside
+each one, and a category it empties is dropped rather than offered onto nothing. A flat
+`starters` list with no categories is unchanged.
+
+`StarterCategory.tsx` draws one section — heading (`label`), the line under it
+(`description`), and the starters in the density `layout` names. `collapsible` wraps it
+in native `<details>/<summary>` («‹label› · N ▸», N being the starters this device can
+see): the Radix wrappers were cleaned out on 15.09 and a section that folds is exactly
+what the element is for, keyboard, screen reader and find-in-page included, for no
+dependency at all. It opens on a desktop and is folded on a phone, decided by
+`useDeviceKey()` and not `useIsMobile()` — the latter reports `false` until its effect
+lands, which on a phone is a section painted open and snapped shut a frame later. An
+unrecognised `layout` falls back to `tiles`: a newer backend naming a density this build
+has not heard of must still draw the offers.
+
+`Starter.tsx` is **one** component with a `cva` over `layout` and `highlight`, the way
+`sidebarMenuButtonVariants` is built. `tiles` is the button it always was; `plates` is a
+card — label, `description`, `caption` in the bottom corner, `highlight` on the accent
+colour; `rows` is a line. The overrides against `buttonVariants` are load-bearing: its
+base carries `whitespace-nowrap` and its default size an `h-10`, both of which clip a
+plate as soon as its description wraps.
+
+A press is answered by the first of three things the starter names: `href` →
+`navigate(href)` and **nothing else** (the page it opens — the account — is a dialog over
+a chat that goes on living behind it, so a teardown here would blank the conversation);
+`profile` → the door, unchanged; otherwise `message` is sent. Two different facts wear the
+disabled attribute: `loading || !connected` is the engine saying "not now",
+`starter.disabled` is the application saying "not this one" — which is also announced with
+`aria-disabled`, the only one of the two a screen-reader user is meant to hear about. A
+withdrawn offer stays on screen, dimmed: one removed silently is indistinguishable from
+one that was never made.
+
+**An unlisted profile is a door, not a room.** `ChatProfile.listed: false` is reachable
+through a starter's `profile=`, a server hand-off and a resumed thread, and is offered
+nowhere. `pickDefaultProfile` (`hooks/use-mobile.tsx`) skips it — even when it carries
+`default`, which the backend documents as a configuration error and the client resolves in
+favour of `listed`. `ChatProfiles.tsx` keeps **two** lists for the same reason:
+`offeredProfiles` (listed and matching the device) decides whether there is a selector at
+all, and `visibleProfiles` is that plus the profile the user is currently in, so the
+trigger still names a door they walked through. Counting the second would conjure a
+two-item selector out of one entry point plus wherever a starter had just taken them.
+
 **The account dialog.** `components/AccountDialog` is mounted in `pages/Page.tsx`
 beside the other route-independent pieces and is open exactly when
 `useLocation().pathname === '/account'` — so the chat behind the blurred overlay
@@ -457,6 +509,33 @@ appears only when the config carries `ui.account.enabled`; its text is
 `ui.account.title` when the application set one, else the `navigation.user.menu.account`
 translation. That is the whole user menu now — name, account, logout — in both the
 avatar dropdown and the phone overflow rendering, which are the same `items` fragment.
+
+**Pinned sections in the left sidebar.** A settings page belongs behind the avatar; the
+two or three sections that are where the user's work actually lives do not.
+`components/LeftSidebar/PinnedAccount.tsx` draws one row per section the application
+marked `x-pinned: true` — `Meta(extra_json_schema={"x-pinned": True})` on the section
+field, the same mechanism as `x-icon` — between `SidebarHeader` and `<ThreadHistory/>`,
+so the rows stay put while the history scrolls under them. Each row is a
+`SidebarMenuButton asChild` over a router `Link` to `/account?tab=<name>`, which opens
+the account dialog over whatever chat is behind it; the row is `isActive` when
+`pathname === '/account'` and `?tab=` names it, and on no other address — a `?tab=`
+riding along in the address of a chat opens nothing and must light nothing. Icons are
+`tab.icon || 'settings-2'`, the same fallback as the dialog's own section menu, and the
+order is the schema's, which is the Struct's.
+
+The schema comes from `ui.account.schema` in `/project/settings` — attached by the
+settings controller from the Struct registered with `@cl.account`, not settable from
+`config.toml` — because the sidebar is drawn on every route while `GET /project/account`
+is the occasion on which the application marks things seen. Section names, titles and
+icons are public; the values are not, and none are read here. The block renders `null`,
+leaving the markup exactly as it was, unless all of `ui.account.enabled`, a schema and a
+signed-in user are present and at least one section is pinned — the same three
+conditions as the user menu's row. There is no ceiling on the number of rows and no
+count on them: how many sections deserve the sidebar is the application's judgement
+about its own schema, and a component that enforced a limit would have to decide which
+section to drop. On a phone nothing extra is needed — the sheet closes on the
+`location.key` effect in `LeftSidebar/index.tsx` like every other navigation inside it.
+`frontend/tests/pinnedAccount.spec.tsx` pins all of it against a real router.
 
 `ThreadAddressSync.tsx` (mounted in `pages/Page.tsx`, so on every route) owns **both**
 directions of "the URL asks and `session.ready` answers". They used to be two
@@ -625,7 +704,15 @@ while a 1006 leaves the signed-in user exactly where it was. Other specs cover
 message-tree merging, ask-action
 pruning, transcript freezing, wait messages, compact steps, icons, content rendering,
 `NewChat`, `openThread` and `threadAddressSync` (both directions of the
-address↔session loop). The account has six: `schemaFormResolve.spec.ts` drives
+address↔session loop). The welcome screen has four: `deviceVisibility.spec.tsx` (the
+`matchesDevice`/`pickDefaultProfile` rules and the device filter over starters),
+`starterSections.spec.tsx` (every section drawn, in the server's order, with nothing
+pressed; the three densities and the fallback; `<details>` folded on a phone and open on a
+desktop with the visible count in its summary; and what a press does — message, door,
+`href` and nothing else, a disabled starter doing none of the three),
+`welcomeHint.spec.tsx` (the hint drawn, absent, and never borrowed from another profile)
+and `chatProfilesListed.spec.tsx` (the selector gated on what is _offered_, while the open
+list still names the door the user is in). The account has six: `schemaFormResolve.spec.ts` drives
 the pure `resolveForm` against schemas `msgspec.json.schema` really emits,
 `schemaForm.spec.tsx` renders the controls it resolves, `schemaFormCards.spec.tsx` the
 `cards` grid (0/1/20 elements, the image, the title, the badges, a switch bound to

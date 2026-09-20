@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import { createContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatProfile, IStarter } from '@chainlit/react-client';
@@ -18,6 +19,12 @@ vi.mock('@chainlit/react-client', () => ({
   // layout and the element panel's mobile rule cannot drift apart. A mock
   // of the whole module has to carry it.
   MOBILE_BREAKPOINT: 768,
+  // A section resolves its own icon through the client, the way a starter
+  // does; the filtering under test never draws one, but the context has to
+  // exist for the section to render at all.
+  ChainlitContext: createContext<any>({
+    buildEndpoint: (path: string) => path
+  }),
   useChatSession: () => ({ chatProfile: undefined }),
   useConfig: () => mockUseConfig()
 }));
@@ -125,6 +132,34 @@ describe('pickDefaultProfile', () => {
 
   it('has nothing to name for an empty config', () => {
     expect(pickDefaultProfile([], 'pc')).toBeUndefined();
+  });
+
+  it('never opens a chat in an unlisted door', () => {
+    const profiles = [
+      profile('Buyer', { listed: false }),
+      profile('Entry'),
+      profile('Expand', { listed: false })
+    ];
+    expect(pickDefaultProfile(profiles, 'pc')).toBe('Entry');
+  });
+
+  it("ignores an unlisted profile's own default", () => {
+    // `listed: false` with `default: true` is a configuration error the
+    // backend documents; the client resolves it in favour of `listed`,
+    // because a door nobody is offered must not be where everyone lands.
+    const profiles = [
+      profile('Buyer', { listed: false, default: true }),
+      profile('Entry')
+    ];
+    expect(pickDefaultProfile(profiles, 'pc')).toBe('Entry');
+  });
+
+  it('prefers a listed profile from the other device over a door', () => {
+    const profiles = [
+      profile('Buyer', { listed: false, device: 'mobile' }),
+      profile('Desk', { device: 'pc' })
+    ];
+    expect(pickDefaultProfile(profiles, 'mobile')).toBe('Desk');
   });
 });
 
@@ -247,7 +282,9 @@ describe('Starters visibility', () => {
     expect(screen.queryByText('Desk')).not.toBeInTheDocument();
   });
 
-  it('shows only this device’s starters inside a chosen category', () => {
+  it('shows only this device’s starters inside a category', () => {
+    // A section, not a pill: its starters are on screen with nothing
+    // pressed, and the device filter still reaches inside it.
     pinDevice('mobile');
     mockUseConfig.mockReturnValue({
       config: {
@@ -262,7 +299,6 @@ describe('Starters visibility', () => {
     });
 
     render(<Starters />);
-    fireEvent.click(screen.getByText('Shared'));
 
     expect(screen.getByText('Anywhere')).toBeInTheDocument();
     expect(screen.queryByText('Desk only')).not.toBeInTheDocument();

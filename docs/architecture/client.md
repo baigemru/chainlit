@@ -362,6 +362,20 @@ effect toasts once on `superseded`; a third picks the default profile.
 `/login/callback`, `/share/:id`, `/account`, `*` → `/`. `/account` is the chat home:
 its element is `<Home />`, and the account is a dialog over it.
 
+**The header's wordmark.** `ui.header_wordmark` draws `ui.name` as bold text at the left
+of `components/header/index.tsx`, after the `SidebarTrigger` and before the button that
+starts a chat: it is the name of the place, not one of the things to do in it. Set in the
+header's own type rather than fetched as a picture — a deployment with a logo file already
+has `<Logo>`, and one without must not be told to draw a PNG to put its name on the
+screen. Deliberately **not** in `HEADER_ITEMS`: that list is what `hasOverflow` counts, and
+a wordmark has no menu row to fold into, so counting it would conjure an overflow button
+with an empty menu behind it. It still answers to `staysInHeader`, which is how a narrow
+screen is given the choice between the name and the three buttons it has room for — and
+since `DEFAULT_MOBILE_HEADER` does not list `"wordmark"`, a phone shows it only where the
+config asked. `frontend/tests/mobileScreen.spec.tsx` covers both halves, including the one
+that is easy to break: a phone header with the wordmark on and unnamed grows no overflow
+button for it.
+
 **The welcome screen** (`components/chat/WelcomeScreen.tsx`) is four tiers on an empty
 chat: the profile's logo and `markdown_description`, the composer, the profile's
 `composer_hint`, and the starters. The hint is markdown in the watermark's register —
@@ -369,6 +383,20 @@ small, muted, one paragraph — and it belongs to the profile, not to the app: a
 that set none draws nothing, and no profile ever borrows another's. The description is
 markdown too, and set for two blocks: the heading keeps the size markdown gives it and
 loses its top margin, every paragraph after it is a subtitle — small, muted, centred.
+
+The first tier is optional. `ui.welcome_avatar` (default on, and `undefined` reads as on —
+a client talking to a server that predates the switch must not go bare) drops the picture
+alone: the profile's icon where it has one, the `<Logo>` where it has not, and nothing in
+its place rather than an empty box, because the gap the flex column would keep around one
+is the whole point. The description stays either way — it carries the heading the screen
+opens with, and an app that says who is talking in words does not need the face above
+repeating it. The picture and the words are two independent questions now: everything
+used to live inside `if (currentChatProfile?.icon)`, so a profile that wrote a
+description and named no icon had it dropped on the floor — already wrong, and about to
+become an `icon` an app was forced to set and forbidden to show. The composer below it is pinned to the pill (`layout="pill"`): the empty
+screen is an invitation to type, and the card's toolbar row under an empty textarea reads
+as a form to fill in. That is the one caller that names an arrangement; the chat's own
+footer keeps taking whichever one its width earns.
 
 It is centred by `my-auto` and not by `justify-center`, and compensates for nothing: a
 flex parent that centres an item taller than itself overflows it at both ends, and the
@@ -566,6 +594,26 @@ wherever the application pinned no sections, and this is the only place that kno
 whether there are any. `frontend/tests/pinnedAccount.spec.tsx` pins all of it against a
 real router.
 
+**The way in, at the foot of the panel.** `components/LeftSidebar/AccountFooter.tsx` is a
+`SidebarFooter` holding one `SidebarMenuButton asChild` over a `Link` to `/account` — the
+user's face and the same words the menu row uses (`ui.account.title`, else
+`navigation.user.menu.account`). A page people are meant to live in should not be two
+clicks behind a dropdown that mostly holds the door out. Gated on `ui.account.enabled` and
+a signed-in user and on nothing else: unlike `PinnedAccount` it leads to the page rather
+than to a section of it, so it needs to know nothing about the schema — and for the same
+reason it is `isActive` on `pathname === '/account'` whatever `?tab=` says. It sits under
+`<ThreadHistory/>`, outside that component's scrolling `SidebarContent`: the account is
+where the panel is left, not where it is entered, and a row over a list that scrolls for a
+year would be the first thing read every time.
+
+The avatar itself is `components/UserAvatar.tsx`, shared with `UserNav` — image, initial
+fallback, and the `accountBadgeState` dot positioned against a wrapper of its own rather
+than against a `relative` ancestor it would otherwise demand of every caller. Two places
+draw the same news, and a dot that appeared on one and not the other would teach the user
+that one of them is lying. `frontend/tests/accountFooter.spec.tsx` pins the row against a
+real router — where it leads, when it lights, and the two conditions under which it does
+not exist at all.
+
 `ThreadAddressSync.tsx` (mounted in `pages/Page.tsx`, so on every route) owns **both**
 directions of "the URL asks and `session.ready` answers". They used to be two
 components — `AutoResumeThread` under `/thread/:id` asked, a listener in `Page`
@@ -753,7 +801,11 @@ densities and the fallback — the tiles' grid, a highlighted tile that is neith
 nor full width, the row's three columns in order; `<details>` folded on a phone and open
 on a desktop with the visible count in its summary; and what a press does — message,
 door, `href` and nothing else, a disabled starter doing none of the three),
-`welcomeHint.spec.tsx` (the hint drawn, absent, and never borrowed from another profile)
+`welcomeHint.spec.tsx` (the hint drawn, absent, and never borrowed from another profile),
+`welcomeAvatar.spec.tsx` (`ui.welcome_avatar` over both the profile icon and the `<Logo>`
+fallback, the description surviving either way and with no icon at all, the first tier
+gone rather than standing empty, an absent key reading as on, and the `layout="pill"` the
+screen asks the composer for)
 and `chatProfilesListed.spec.tsx` (the selector gated on what is _offered_, while the open
 list still names the door the user is in). The account has six: `schemaFormResolve.spec.ts` drives
 the pure `resolveForm` against schemas `msgspec.json.schema` really emits,

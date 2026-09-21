@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/sidebar';
 
 import NewChatButton from '../header/NewChat';
+import AccountFooter from './AccountFooter';
 import PinnedAccount from './PinnedAccount';
 import SearchChats from './Search';
 import { ThreadHistory } from './ThreadHistory';
@@ -63,6 +64,14 @@ export default function LeftSidebar({
           page has the header sitting on the history exactly as before. */}
       <PinnedAccount />
       <ThreadHistory />
+      {/* Under the history rather than over it: the account is where the
+          panel is left, not where it is entered, and a row above a list that
+          scrolls for a year would be the first thing read every time. Outside
+          `ThreadHistory`'s `SidebarContent` for the same reason `PinnedAccount`
+          is — that one scrolls, and this row must not go with it. Renders
+          nothing at all without an account page or a user, so a deployment
+          with neither keeps the panel it had. */}
+      <AccountFooter />
       <SidebarRail />
     </Sidebar>
   );

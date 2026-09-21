@@ -74,7 +74,10 @@ vi.mock('react-i18next', () => ({
 
 const noop = () => undefined;
 
-const renderComposer = (attachments: IAttachment[] = []) =>
+const renderComposer = (
+  attachments: IAttachment[] = [],
+  layout?: 'full' | 'pill'
+) =>
   render(
     <RecoilRoot
       initializeState={({ set }) => set(attachmentsState, attachments)}
@@ -84,6 +87,7 @@ const renderComposer = (attachments: IAttachment[] = []) =>
         onFileUpload={noop}
         onFileUploadError={noop}
         autoScrollRef={{ current: true }}
+        layout={layout}
       />
     </RecoilRoot>
   );
@@ -251,5 +255,85 @@ describe('MessageComposer, compact on a phone', () => {
     expect(submit().className).toContain('h-8');
     expect(submit().className).toContain('w-8');
     expect(submit().className).not.toContain('h-10');
+  });
+});
+
+describe('MessageComposer, the layout a caller names', () => {
+  it('draws the pill on a wide screen when asked for one', () => {
+    // The welcome screen's case: a desktop viewport, and one line anyway.
+    mockUseIsMobile.mockReturnValue(false);
+
+    renderComposer([], 'pill');
+
+    expect(composer().className).not.toContain('min-h-24');
+    expect(submit().parentElement!.contains(input())).toBe(true);
+    expect(submit().className).toContain('h-10');
+  });
+
+  it('draws the card on a phone when asked for one', () => {
+    // The other direction, which nothing ships today: what is under test is
+    // that the prop decides and the viewport does not get a vote, because a
+    // prop that only ever agreed with `useIsMobile` would be untested.
+    mockUseIsMobile.mockReturnValue(true);
+
+    renderComposer([], 'full');
+
+    expect(composer().className).toContain('min-h-24');
+    expect(submit().parentElement!.contains(input())).toBe(false);
+    expect(submit().className).toContain('h-8');
+  });
+
+  it('keeps the draft across a width change it was told to ignore', () => {
+    // The re-inject effect used to be keyed on `useIsMobile`. With the
+    // arrangement pinned, a drag across 768px remounts nothing — and an
+    // effect still keyed on the width would push the Recoil draft back into
+    // a textarea the user is in the middle of editing.
+    mockUseIsMobile.mockReturnValue(false);
+
+    const { rerender } = renderComposer([], 'pill');
+    fireEvent.change(input(), { target: { value: 'half a question' } });
+    mockUseIsMobile.mockReturnValue(true);
+    rerender(
+      <RecoilRoot>
+        <MessageComposer
+          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
+          onFileUpload={noop}
+          onFileUploadError={noop}
+          autoScrollRef={{ current: true }}
+          layout="pill"
+        />
+      </RecoilRoot>
+    );
+
+    expect((input() as HTMLTextAreaElement).value).toBe('half a question');
+    expect(composer().className).not.toContain('min-h-24');
+  });
+
+  it('carries the draft when the named layout is the thing that changes', () => {
+    mockUseIsMobile.mockReturnValue(false);
+
+    const { rerender } = renderComposer([], 'full');
+    fireEvent.change(input(), { target: { value: 'draft' } });
+    rerender(
+      <RecoilRoot>
+        <MessageComposer
+          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
+          onFileUpload={noop}
+          onFileUploadError={noop}
+          autoScrollRef={{ current: true }}
+          layout="pill"
+        />
+      </RecoilRoot>
+    );
+
+    expect((input() as HTMLTextAreaElement).value).toBe('draft');
+  });
+
+  it('leaves the viewport in charge when no layout is named', () => {
+    mockUseIsMobile.mockReturnValue(true);
+
+    renderComposer();
+
+    expect(composer().className).not.toContain('min-h-24');
   });
 });

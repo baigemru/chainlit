@@ -42,7 +42,7 @@ const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
 >(({ className, children, closeLabel = 'Close', ...props }, ref) => (
-  <DialogPortal container={window.cl_shadowRootElement}>
+  <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}

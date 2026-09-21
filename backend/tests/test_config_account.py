@@ -62,41 +62,37 @@ class TestTheSchemaIsNotConfigured:
 
         assert "schema" not in fields
 
-    def test_a_toml_table_that_sets_one_is_ignored(self):
-        """`Settings` does not forbid unknown fields, so the table still
-        decodes — it just decodes to a section with nothing extra on it, and
-        the key never reaches the payload the controller then fills in."""
-        ui = msgspec.convert(
-            {
-                "name": "test",
-                "account": {"title": "Кабинет", "schema": {"properties": {"x": {}}}},
-            },
-            type=UISettings,
-        )
-
-        assert ui.account == AccountSection(enabled=True, title="Кабинет")
-        assert not hasattr(ui.account, "schema")
-        assert "schema" not in msgspec.to_builtins(ui)["account"]
+    def test_a_toml_table_that_sets_one_is_refused(self):
+        """A `schema` written into the TOML is a second description of a
+        shape the Struct already describes, free to disagree with it. The
+        decoder says so by name rather than dropping it."""
+        with pytest.raises(msgspec.ValidationError, match="schema"):
+            msgspec.convert(
+                {
+                    "name": "test",
+                    "account": {
+                        "title": "Кабинет",
+                        "schema": {"properties": {"x": {}}},
+                    },
+                },
+                type=UISettings,
+            )
 
 
 class TestRetiredKeys:
     def test_the_chat_settings_keys_are_gone(self):
-        """The widget layer they configured is deleted; a config that still
-        carries them keeps decoding, because `Settings` ignores unknown keys."""
+        """The widget layer they configured is deleted, and a config that
+        still carries them is refused by name rather than half-read."""
         fields = {field.name for field in msgspec.structs.fields(UISettings)}
 
         assert "chat_settings_location" not in fields
         assert "default_chat_settings_open" not in fields
 
-        ui = msgspec.convert(
-            {
-                "name": "test",
-                "chat_settings_location": "sidebar",
-                "default_chat_settings_open": True,
-            },
-            type=UISettings,
-        )
-        assert ui.name == "test"
+        with pytest.raises(msgspec.ValidationError, match="chat_settings_location"):
+            msgspec.convert(
+                {"name": "test", "chat_settings_location": "sidebar"},
+                type=UISettings,
+            )
 
     def test_user_menu_links_is_gone(self):
         """The user menu is name, the account row, logout. A link under the
@@ -106,12 +102,11 @@ class TestRetiredKeys:
         assert "user_menu_links" not in fields
         assert not hasattr(UISettings(name="test"), "user_menu_links")
 
-        # A deployment whose config.toml still lists them keeps starting.
-        ui = msgspec.convert(
-            {"name": "test", "user_menu_links": [{"name": "x", "url": "y"}]},
-            type=UISettings,
-        )
-        assert ui.name == "test"
+        with pytest.raises(msgspec.ValidationError, match="user_menu_links"):
+            msgspec.convert(
+                {"name": "test", "user_menu_links": [{"name": "x", "url": "y"}]},
+                type=UISettings,
+            )
 
     def test_the_config_module_no_longer_exports_the_link_type(self):
         import chainlit.config as config_module

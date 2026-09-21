@@ -341,13 +341,15 @@ export class ChainlitAPI extends APIBase {
     return this.buildEndpoint(`/auth/oauth/${provider}/register`);
   }
 
-  getOAuthVkEndpoint(provider: string) {
-    return this.buildEndpoint(`/auth/oauth/${provider}/vk`);
+  /**
+   * Straight to one identity provider the OAuth provider brokers. Which
+   * shortcuts exist is the deployment's `[[UI.idp_shortcuts]]`; the server
+   * resolves the id to the hint, so none of that reaches the browser.
+   */
+  getOAuthIdpEndpoint(provider: string, shortcutId: string) {
+    return this.buildEndpoint(`/auth/oauth/${provider}/idp/${shortcutId}`);
   }
 
-  getOAuthYandexEndpoint(provider: string) {
-    return this.buildEndpoint(`/auth/oauth/${provider}/yandex`);
-  }
   async shareThread(
     threadId: string,
     isShared: boolean

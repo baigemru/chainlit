@@ -18,6 +18,7 @@ from typing import (
     Literal,
     NotRequired,
     Optional,
+    Sequence,
     TypedDict,
 )
 
@@ -186,6 +187,100 @@ class ChatProfile(_AsDict):
     # How to talk to it, as against ``markdown_description``, which says
     # what it is.
     composer_hint: Optional[str] = None
+
+
+DEVICE_CLASSES: tuple[str, ...] = ("mobile", "pc")
+"""The screen classes a ``device`` label may name. A tablet counts as ``pc``."""
+
+
+def matches_device(label: Optional[str], device: str) -> bool:
+    """Whether an offer labelled ``label`` is meant for this screen class.
+
+    The rule the client applies (``matchesDevice`` in
+    ``frontend/src/hooks/use-mobile.tsx``), stated once so an application
+    reasoning about its own profiles reasons the same way the browser will.
+    A label nobody recognises is shown everywhere -- showing one offer too
+    many beats swallowing the only one there was, and it is what lets a
+    newer application's label reach an older frontend.
+    """
+    if not label or label == "all":
+        return True
+    if label in DEVICE_CLASSES:
+        return label == device
+    return True
+
+
+def is_listed(profile: ChatProfile) -> bool:
+    """Whether the profile is proposed at all, as opposed to merely reachable."""
+    return getattr(profile, "listed", True) is not False
+
+
+def is_offered(profile: ChatProfile, device: str) -> bool:
+    """Whether this screen is offered the profile in the switcher.
+
+    Listed *and* meant for the device -- the pair the client counts
+    (``offeredProfiles`` in ``ChatProfiles.tsx``) to decide whether to draw a
+    switcher at all. Not "visible": a thread resumed into an unlisted profile
+    still names it in the trigger, and that one never counts towards the
+    decision.
+    """
+    return is_listed(profile) and matches_device(
+        getattr(profile, "device", "all"), device
+    )
+
+
+def pick_default_profile(profiles: Sequence[ChatProfile], device: str) -> Optional[str]:
+    """Which profile a fresh chat opens in on this screen, by name.
+
+    ``pickDefaultProfile`` in ``use-mobile.tsx``, fallback for fallback. An
+    unlisted profile is a door somebody else opens -- a starter, a handoff, a
+    resumed thread -- so it is never chosen here even when it carries
+    ``default`` and even when it is the only one this device matches. The
+    last two fallbacks ignore first the device and then ``listed``, because a
+    configuration in which everything is filtered out must still yield a
+    name: without one the client never opens the socket.
+    """
+    listed = [p for p in profiles if is_listed(p)]
+    visible = [p for p in listed if matches_device(getattr(p, "device", "all"), device)]
+    chosen = next(
+        (p for p in visible if p.default),
+        next(iter(visible), next(iter(listed), next(iter(profiles), None))),
+    )
+    return chosen.name if chosen is not None else None
+
+
+def check_one_default_per_device(profiles: Sequence[ChatProfile]) -> None:
+    """Refuse a profile list that lands somebody nowhere. Raises ``ValueError``.
+
+    The client picks the first offered ``default`` and says nothing about the
+    rest, so two defaults for one screen class is a silent coin toss and none
+    is a silent first-in-the-list -- either way a person arrives somewhere
+    they were not sent and cannot tell why. This is the rule read off the
+    client's own default-picking, so a list that passes here opens where the
+    application said it would.
+
+    ``default=True`` with ``listed=False`` is rejected first and separately:
+    it names a landing place the picker skips by design, which is a mistake
+    about what ``listed`` means rather than a miscount.
+
+    Call it where the list is built -- at import, next to the literal -- so
+    the failure is a start-up error rather than a blank page.
+    """
+    doors = [p.name for p in profiles if p.default and not is_listed(p)]
+    if doors:
+        raise ValueError(
+            f"Chat profiles with default=True and listed=False: {', '.join(doors)}. "
+            "A door is not a landing place: an unlisted profile is skipped when "
+            "the default is picked, so nothing would ever open in it."
+        )
+    for device in DEVICE_CLASSES:
+        defaults = [p.name for p in profiles if p.default and is_offered(p, device)]
+        if len(defaults) != 1:
+            raise ValueError(
+                f"Chat profiles with default=True offered on {device!r}: "
+                f"{len(defaults)} ({', '.join(defaults) or 'none'}); exactly one "
+                "is needed, or the client picks for you and says nothing."
+            )
 
 
 class CommandDict(TypedDict):

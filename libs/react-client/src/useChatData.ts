@@ -3,6 +3,7 @@ import { useRecoilValue } from 'recoil';
 
 import { useChatTransport } from './context';
 import {
+  acceptingState,
   actionState,
   askUserState,
   elementState,
@@ -19,6 +20,7 @@ export interface IToken {
 
 const useChatData = () => {
   const loading = useRecoilValue(loadingState);
+  const accepting = useRecoilValue(acceptingState);
   const elements = useRecoilValue(elementState);
   const tasklists = useRecoilValue(tasklistState);
   const actions = useRecoilValue(actionState);
@@ -36,7 +38,10 @@ const useChatData = () => {
 
   const disabled =
     !connected ||
-    loading ||
+    // Not `loading`: the two came apart when an application gained a way to
+    // declare a run background. Something running no longer means it is not
+    // the user's turn, and the composer follows the turn.
+    !accepting ||
     askUser?.spec.type === 'file' ||
     askUser?.spec.type === 'action' ||
     askUser?.spec.type === 'element' ||
@@ -45,6 +50,7 @@ const useChatData = () => {
     !!askUser?.awaitingReply;
 
   return {
+    accepting,
     actions,
     askUser,
     connected,

@@ -26,8 +26,11 @@ interface Props {
   ) => Promise<any>;
   onOAuthSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
   onOAuthSignUp?: (provider: string, callbackUrl: string) => Promise<any>;
-  onOAuthVkSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
-  onOAuthYandexSignIn?: (provider: string, callbackUrl: string) => Promise<any>;
+  onOAuthIdpSignIn?: (
+    provider: string,
+    shortcutId: string,
+    callbackUrl: string
+  ) => Promise<any>;
 }
 
 interface FormValues {
@@ -41,8 +44,7 @@ export function LoginForm({
   onPasswordSignIn,
   onOAuthSignIn,
   onOAuthSignUp,
-  onOAuthVkSignIn,
-  onOAuthYandexSignIn,
+  onOAuthIdpSignIn,
   callbackUrl,
   forgotPasswordUrl,
   error
@@ -99,8 +101,7 @@ export function LoginForm({
       (provider) =>
         provider.loginEnabled ||
         provider.registrationEnabled ||
-        provider.vkEnabled ||
-        provider.yandexEnabled
+        provider.idpShortcuts?.length
     );
 
   return (
@@ -232,24 +233,17 @@ export function LoginForm({
                     onClick={() => onOAuthSignUp?.(provider.id, callbackUrl)}
                   />
                 ) : null}
-                {provider.vkEnabled ? (
+                {provider.idpShortcuts?.map((shortcut) => (
                   <ProviderButton
+                    key={`idp-${provider.id}-${shortcut.id}`}
                     provider={provider.id}
-                    mode="vk"
-                    icon={provider}
-                    onClick={() => onOAuthVkSignIn?.(provider.id, callbackUrl)}
-                  />
-                ) : null}
-                {provider.yandexEnabled ? (
-                  <ProviderButton
-                    provider={provider.id}
-                    mode="yandex"
-                    icon={provider}
+                    icon={shortcut}
+                    label={shortcut.label}
                     onClick={() =>
-                      onOAuthYandexSignIn?.(provider.id, callbackUrl)
+                      onOAuthIdpSignIn?.(provider.id, shortcut.id, callbackUrl)
                     }
                   />
-                ) : null}
+                ))}
               </Fragment>
             ))}
           </div>

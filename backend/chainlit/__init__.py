@@ -20,8 +20,14 @@ from chainlit.account import (
     Toast as AccountToast,
 )
 from chainlit.action import Action
+from chainlit.background import run_in_background
 from chainlit.chat_context import chat_context
 from chainlit.context import context
+
+# Renamed on the way out: inside the controller it is one of two spellings of
+# the same blob (the other is the share route's), and the application only ever
+# wants the one its own reader is allowed on.
+from chainlit.controllers.project import author_file_url as element_file_url
 from chainlit.element import (
     Audio,
     CustomElement,
@@ -37,6 +43,12 @@ from chainlit.element import (
     Text,
     Video,
 )
+from chainlit.host import (
+    deliver_to_thread,
+    persistence,
+    refresh_account_badge,
+    uow,
+)
 from chainlit.message import (
     AskActionMessage,
     AskElementMessage,
@@ -45,7 +57,6 @@ from chainlit.message import (
     ErrorMessage,
     Message,
 )
-from chainlit.mode import Mode, ModeOption
 from chainlit.sidebar import Sidebar
 from chainlit.step import Step, step
 from chainlit.types import (
@@ -53,6 +64,10 @@ from chainlit.types import (
     ChatProfile,
     Starter,
     StarterCategory,
+    check_one_default_per_device,
+    is_offered,
+    matches_device,
+    pick_default_profile,
 )
 from chainlit.user import PersistedUser, User
 from chainlit.user_session import user_session
@@ -72,9 +87,7 @@ from .callbacks import (
     on_chat_end,
     on_chat_resume,
     on_chat_start,
-    on_feedback,
     on_message,
-    on_shared_thread_view,
     on_stop,
     on_thread_ready,
     password_auth_callback,
@@ -111,8 +124,6 @@ __all__ = [
     "File",
     "Image",
     "Message",
-    "Mode",
-    "ModeOption",
     "Pdf",
     "PersistedUser",
     "Plotly",
@@ -133,8 +144,13 @@ __all__ = [
     "action_callback",
     "author_rename",
     "chat_context",
+    "check_one_default_per_device",
     "context",
+    "deliver_to_thread",
+    "element_file_url",
+    "is_offered",
     "logger",
+    "matches_device",
     "oauth_callback",
     "on_account_badge",
     "on_account_load",
@@ -144,17 +160,20 @@ __all__ = [
     "on_chat_end",
     "on_chat_resume",
     "on_chat_start",
-    "on_feedback",
     "on_message",
-    "on_shared_thread_view",
     "on_stop",
     "on_thread_ready",
     "password_auth_callback",
+    "persistence",
+    "pick_default_profile",
+    "refresh_account_badge",
+    "run_in_background",
     "set_chat_profiles",
     "set_starter_categories",
     "set_starters",
     "sleep",
     "step",
+    "uow",
     "user_session",
 ]
 

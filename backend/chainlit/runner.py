@@ -93,7 +93,6 @@ def _is_text_answer(step: Step) -> bool:
     return (
         step.type == "user_message"
         and step.command is None
-        and step.modes is None
         and isinstance(step.output, str)
     )
 
@@ -117,6 +116,14 @@ class ApplicationRunner:
         self.session_timeout = session_timeout
         self.writers = WriterRegistry()
         self._background: set["asyncio.Task[Any]"] = set()
+        # The process runs one application, so the functions an application
+        # calls from outside a session -- an HTTP route of its own, a webhook
+        # -- have somewhere to find it. Set here rather than by the plugin so
+        # that constructing a runner is the whole of the wiring; a test that
+        # builds a second one is the process's runner from then on, which is
+        # what "the process's runner" has to mean.
+        global _current
+        _current = self
 
     # --------------------------------------------------------------- helpers
 
@@ -155,6 +162,43 @@ class ApplicationRunner:
         # task ending has to put it out, or the composer stays locked for
         # as long as the session lives -- which is exactly what happened.
         task.add_done_callback(lambda _: self._resync_after(session))
+        return task
+
+    def launch_background(
+        self, session: Session, coro: Awaitable[Any]
+    ) -> "asyncio.Task[Any]":
+        """Run application code as work that does not hold the composer shut.
+
+        Same task, same bound context, same spinner as ``_launch`` -- the one
+        difference is where the handle is kept. A foreground turn lives in a
+        slot, so the next one replaces it, which is right: there is one
+        current turn. Background work lives in a set, because the whole point
+        is that a message arriving next starts its own ``on_message`` beside
+        it. A slot here would silently drop the running task's handle, and a
+        task nothing holds is one ``stop`` cannot cancel and teardown cannot
+        reap -- it would keep running in a conversation nobody is in.
+
+        Not detached from the session: a stop stops it, a release cancels it.
+        Background means "the person may keep typing", not "outlives the
+        chat". Work that has to outlive the chat belongs to the application,
+        and comes back in through ``cl.deliver_to_thread``.
+        """
+
+        async def run() -> Any:
+            self._bind(session)
+            try:
+                return await coro
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Background task failed in session %s", session.id)
+                return None
+
+        task = asyncio.create_task(run())
+        session.background_tasks.add(task)
+        task.add_done_callback(session.background_tasks.discard)
+        task.add_done_callback(lambda _: self._resync_after(session))
+        self._bind(session).resync_task_indicator()
         return task
 
     def _resync_after(self, session: Session) -> None:
@@ -851,6 +895,11 @@ class ApplicationRunner:
         for task in (session.current_task, session.thread_ready_task):
             if task is not None and not task.done():
                 task.cancel()
+        # "Stop" means stop. A background run is still this conversation's
+        # work, and the button that says it is running is the same button.
+        for task in list(session.background_tasks):
+            if not task.done():
+                task.cancel()
 
     async def _after_stop(self, session: Session) -> None:
         from chainlit.message import Message
@@ -872,6 +921,133 @@ class ApplicationRunner:
             raise LookupError(action.get("name", ""))
         self._bind(session)
         return await callback(Action(**dict(action)))
+
+    # ------------------------------------------------- delivery from outside
+
+    async def deliver_to_thread(
+        self,
+        thread_id: str,
+        content: str,
+        *,
+        author: Optional[str] = None,
+        id: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        user_identifier: Optional[str] = None,
+    ) -> str:
+        """Put a message in a conversation from outside any session.
+
+        For work that finishes somewhere the chat is not: a webhook, a job,
+        a route of the application's own. The two cases a caller would
+        otherwise have to tell apart are told apart here, because which one
+        it is depends on transport state the application has no business
+        reading.
+
+        Live -- the registry holds a session on this thread -- means the
+        message goes out the way every other message does: bound context,
+        ``Message.send()``, so it lands on screen, in the transcript the
+        reconnect replays and in the session's ordered writer. *Live* is not
+        *connected*: a session inside its disconnect grace still owns the
+        conversation, and the frame queued now is what the reload gets back.
+
+        Otherwise there is nobody to tell and the row is all there is. It is
+        written in one unit of work, owner first: ``steps.save`` creates the
+        thread row behind a step whose thread does not exist yet, and a row
+        created that way has no user, so the thread would never appear in
+        anybody's history. ``user_identifier`` is what a caller that knows
+        the owner passes; without it the existing row is left as it is.
+
+        Returns ``"live"`` or ``"stored"``. Raises ``RuntimeError`` with no
+        session and no persistence -- there would be nowhere at all for the
+        message to go, and answering "delivered" to that is how a person ends
+        up waiting for a result that was dropped.
+
+        What it does not do is decide whether the message should be sent
+        twice. A caller retrying a webhook owns that question and the answer
+        is its own: pass a deterministic ``id`` and the row is upserted
+        rather than doubled.
+        """
+        from chainlit.message import Message
+
+        session = self.registry.find_thread(thread_id)
+        if session is not None:
+            self._bind(session)
+            await Message(
+                content=content,
+                author=author or self.config.ui.name,
+                id=id,
+                metadata=dict(metadata) if metadata is not None else None,
+            ).send()
+            return "live"
+
+        if self.persistence is None:
+            raise RuntimeError(
+                f"Nothing to deliver into: thread {thread_id} has no live "
+                "session and this application has no persistence, so the "
+                "message would be dropped."
+            )
+
+        moment = utc_now()
+        record = StepRecord(
+            id=id or str(uuid.uuid4()),
+            type="assistant_message",
+            thread_id=thread_id,
+            name=author or self.config.ui.name,
+            output=content,
+            created_at=moment,
+            start=moment,
+            end=moment,
+            metadata=dict(metadata) if metadata is not None else {},
+        )
+        await isolated(self._store_delivery(thread_id, record, user_identifier))
+        return "stored"
+
+    async def _store_delivery(
+        self,
+        thread_id: str,
+        record: StepRecord,
+        user_identifier: Optional[str],
+    ) -> None:
+        assert self.persistence is not None
+        async with self.persistence.uow() as unit:
+            if user_identifier:
+                await unit.threads.patch(
+                    thread_id, ThreadPatch(user_identifier=user_identifier)
+                )
+            await unit.steps.save(record)
+            # After the step, not instead of it: the owner patch above already
+            # bumped ``updatedAt``, and the history is sorted by it, so a
+            # thread whose last write is this message has to sort as of now.
+            await unit.threads.touch(thread_id)
+
+    async def refresh_account_badge(self, user: Any) -> None:
+        """Recount the account badge for ``user`` and push it to their sessions.
+
+        The context-free half of ``Emitter.refresh_account_badge``: what an
+        application calls when something outside a session changed the number
+        -- a finished job, a payment, a webhook. Reads the stored account
+        through this runner's persistence, because the hook is handed values
+        rather than left to read them; see ``chainlit.account_badge``.
+        """
+        await push_account_badge(self.registry, user, await self.stored_account(user))
+
+
+_current: Optional[ApplicationRunner] = None
+
+
+def current_runner() -> ApplicationRunner:
+    """The runner this process is running, for code outside a session.
+
+    Raises rather than returning ``None``: every caller is an application
+    asking the engine to do something, and "there is no engine" is a
+    programming error at import order, not a state to branch on.
+    """
+    if _current is None:
+        raise RuntimeError(
+            "No Chainlit application is running in this process. The runner is "
+            "built when ChainlitPlugin is constructed; a call from before that "
+            "has nothing to reach."
+        )
+    return _current
 
 
 # ---------------------------------------------------------------- adapters

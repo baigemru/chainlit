@@ -33,6 +33,19 @@ import chainlit
 #     returns. Prefixed because `Toast` and `Refresh` are ordinary words an
 #     application already uses, and `cl.Toast` would read as the chat toast
 #     that `cl.context.emitter.send_toast` sends.
+# Changed 2026-09-22, the mechanics that were stuck in the application:
+#   Mode, ModeOption -- removed; the modes system was dead from the column to
+#     the TypeScript type and is deleted outright, not deprecated;
+#   deliver_to_thread, refresh_account_badge, persistence, uow -- the way in
+#     from code the engine never launched, which the one consumer was
+#     reaching by importing five private modules and building a step by hand;
+#   element_file_url -- the blob route an application has to link to, which
+#     was reachable only as a controller internal;
+#   run_in_background -- a run the application declares background, so the
+#     composer stays open while it goes;
+#   matches_device, is_offered, pick_default_profile,
+#     check_one_default_per_device -- the client's own profile rules, stated
+#     once in the engine rather than copied into the application.
 EXPECTED_EXPORTS = {
     "AccountOpenThread",
     "AccountRefresh",
@@ -51,8 +64,6 @@ EXPECTED_EXPORTS = {
     "File",
     "Image",
     "Message",
-    "Mode",
-    "ModeOption",
     "Pdf",
     "PersistedUser",
     "Plotly",
@@ -73,8 +84,13 @@ EXPECTED_EXPORTS = {
     "action_callback",
     "author_rename",
     "chat_context",
+    "check_one_default_per_device",
     "context",
+    "deliver_to_thread",
+    "element_file_url",
+    "is_offered",
     "logger",
+    "matches_device",
     "oauth_callback",
     "on_account_badge",
     "on_account_load",
@@ -84,51 +100,21 @@ EXPECTED_EXPORTS = {
     "on_chat_end",
     "on_chat_resume",
     "on_chat_start",
-    "on_feedback",
     "on_message",
-    "on_shared_thread_view",
     "on_stop",
     "on_thread_ready",
     "password_auth_callback",
+    "persistence",
+    "pick_default_profile",
+    "refresh_account_badge",
+    "run_in_background",
     "set_chat_profiles",
     "set_starter_categories",
     "set_starters",
     "sleep",
     "step",
+    "uow",
     "user_session",
-}
-
-# What chainlit-panda calls, measured in its source. Every name here must
-# stay exported; the snapshot above may shrink around it, never through it.
-CONSUMER_SURFACE = {
-    "Message",
-    "user_session",
-    "Action",
-    "context",
-    "CustomElement",
-    "AskActionMessage",
-    "AskUserMessage",
-    "AskFileMessage",
-    "AskElementMessage",
-    "Step",
-    "Starter",
-    "Image",
-    "Sidebar",
-    "chat_context",
-    "User",
-    "ChatProfile",
-    "logger",
-    "on_chat_start",
-    "on_message",
-    "on_chat_resume",
-    "on_chat_end",
-    "on_stop",
-    "on_thread_ready",
-    "set_chat_profiles",
-    "set_starters",
-    "oauth_callback",
-    "password_auth_callback",
-    "action_callback",
 }
 
 
@@ -142,10 +128,6 @@ def test_exports_match_the_snapshot():
         f"exports removed without updating the snapshot: {sorted(missing)}"
     )
     assert not added, f"exports added without updating the snapshot: {sorted(added)}"
-
-
-def test_the_consumer_surface_is_exported():
-    assert CONSUMER_SURFACE <= set(chainlit.__all__)
 
 
 def test_the_old_sidebar_helper_is_gone_rather_than_shimmed():

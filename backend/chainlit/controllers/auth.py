@@ -77,6 +77,7 @@ from chainlit.config import config
 from chainlit.controllers.caller import caller
 from chainlit.logger import logger
 from chainlit.oauth_providers import (
+    find_idp_shortcut,
     get_configured_oauth_providers,
     get_direct_grant_provider,
     get_forgot_password_url,
@@ -637,38 +638,33 @@ class AuthController(Controller):
             self._sibling_callback_uri(request, "/register"),
         )
 
-    @get("/auth/oauth/{provider_id:str}/vk", opt=PUBLIC)
-    async def oauth_vk_login(
-        self, request: AuthedRequest, provider_id: FromPath[str]
+    @get("/auth/oauth/{provider_id:str}/idp/{shortcut_id:str}", opt=PUBLIC)
+    async def oauth_idp_login(
+        self,
+        request: AuthedRequest,
+        provider_id: FromPath[str],
+        shortcut_id: FromPath[str],
     ) -> Redirect:
-        """Straight to VK, skipping the provider's own login page."""
-        provider = self._provider_or_raise(provider_id)
-        if not provider.is_vk_button_enabled():
-            raise NotFoundException(
-                detail=f"VK login is not enabled for provider {provider_id}"
-            )
-        return self._authorize_redirect(
-            provider,
-            provider.authorize_url,
-            self._sibling_callback_uri(request, "/vk"),
-            extra_params={"kc_idp_hint": provider.get_vk_idp_hint()},
-        )
+        """Straight to one identity provider the provider brokers.
 
-    @get("/auth/oauth/{provider_id:str}/yandex", opt=PUBLIC)
-    async def oauth_yandex_login(
-        self, request: AuthedRequest, provider_id: FromPath[str]
-    ) -> Redirect:
-        """Straight to Yandex, skipping the provider's own login page."""
+        One route for every shortcut a deployment declares, because the only
+        thing that differs between them is the alias in the hint. A shortcut
+        the config does not declare is a 404 rather than a redirect carrying
+        whatever the URL said: the hint reaches the broker, and the set of
+        aliases it may name belongs to the deployment, not to the caller.
+        """
         provider = self._provider_or_raise(provider_id)
-        if not provider.is_yandex_button_enabled():
+        shortcut = find_idp_shortcut(provider, shortcut_id)
+        if shortcut is None or provider.idp_hint_param is None:
             raise NotFoundException(
-                detail=f"Yandex login is not enabled for provider {provider_id}"
+                detail=f"No identity-provider shortcut {shortcut_id!r} for "
+                f"provider {provider_id}"
             )
         return self._authorize_redirect(
             provider,
             provider.authorize_url,
-            self._sibling_callback_uri(request, "/yandex"),
-            extra_params={"kc_idp_hint": provider.get_yandex_idp_hint()},
+            self._sibling_callback_uri(request, f"/idp/{shortcut_id}"),
+            extra_params={provider.idp_hint_param: shortcut.hint},
         )
 
     @get("/auth/oauth/{provider_id:str}/callback", opt=PUBLIC)

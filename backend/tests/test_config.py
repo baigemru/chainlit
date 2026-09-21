@@ -227,47 +227,59 @@ class TestLoadSettings:
         assert settings["project"].session_timeout == 3600
         assert settings["features"].spontaneous_file_upload.max_size_mb == 500
 
-    def test_retired_tables_still_load(self, tmp_path: Path, monkeypatch):
-        """A ``config.toml`` from an older release keeps loading.
+    def test_a_retired_key_is_refused_by_name(self):
+        """A key no section declares stops the app, and says which key.
 
-        ``[features.mcp]``, ``[features.slack]`` and ``hot_swap_chat_profile``
-        were written by previous releases and are still on disk in every
-        deployment; a strict decoder would refuse to start on them.
+        ``hot_swap_chat_profile`` configured a feature this fork deleted. A
+        decoder that walked past it would leave the deployment believing the
+        line does something.
         """
-        toml = tmp_path / "config.toml"
-        toml.write_text(
-            chainlit_config.DEFAULT_CONFIG_STR.replace(
-                "[features]\n", "[features]\nhot_swap_chat_profile = true\n", 1
-            )
-            + "\n[features.mcp]\nenabled = true\n"
-            "[features.mcp.sse]\nenabled = true\n"
-            "[features.slack]\nenabled = false\n"
-            "[UI.unknown_table]\nx = 1\n",
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(chainlit_config, "config_file", str(toml))
-        settings = chainlit_config.load_settings()
-        assert settings["ui"].name == "Assistant"
-        assert not hasattr(settings["features"], "hot_swap_chat_profile")
-        assert not hasattr(settings["features"], "mcp")
+        toml = {
+            "features": {"hot_swap_chat_profile": True},
+            "UI": {"name": "x"},
+            "meta": {"generated_by": "9.9.9"},
+        }
+        with pytest.raises(msgspec.ValidationError, match="hot_swap_chat_profile"):
+            chainlit_config.decode_settings(toml)
+
+    def test_a_retired_table_is_refused_by_name(self):
+        """Same for a whole retired table, ``[features.mcp]``."""
+        toml = {
+            "features": {"mcp": {"enabled": True}},
+            "UI": {"name": "x"},
+            "meta": {"generated_by": "9.9.9"},
+        }
+        with pytest.raises(msgspec.ValidationError, match="mcp"):
+            chainlit_config.decode_settings(toml)
+
+    def test_a_retired_project_key_is_refused(self):
+        """``allow_origins`` promised CORS this fork never had."""
+        toml = {
+            "project": {"allow_origins": ["*"]},
+            "UI": {"name": "x"},
+            "meta": {"generated_by": "9.9.9"},
+        }
+        with pytest.raises(msgspec.ValidationError, match="allow_origins"):
+            chainlit_config.decode_settings(toml)
+
+    def test_an_unknown_top_level_table_is_refused(self):
+        """No Struct sees a fifth table, so ``decode_settings`` checks itself."""
+        toml = {
+            "telemetry": {"enabled": True},
+            "UI": {"name": "x"},
+            "meta": {"generated_by": "9.9.9"},
+        }
+        with pytest.raises(ValueError, match="telemetry"):
+            chainlit_config.decode_settings(toml)
 
     def test_a_wrong_type_is_refused_by_key(self):
         """Validation names the offending key, so the fix is findable."""
-        import msgspec
-
         toml = {
             "UI": {"name": "x", "cot": "loud"},
             "meta": {"generated_by": "9.9.9"},
         }
         with pytest.raises(msgspec.ValidationError, match=r"\$\.cot"):
             chainlit_config.decode_settings(toml)
-
-    def test_lc_cache_path_is_derived_from_the_config_dir(self):
-        toml = {"UI": {"name": "x"}, "meta": {"generated_by": "9.9.9"}}
-        settings = chainlit_config.decode_settings(toml)
-        assert settings["project"].lc_cache_path == str(
-            Path(chainlit_config.config_dir) / ".langchain.db"
-        )
 
 
 def test_app_root_comes_from_the_environment(tmp_path: Path):

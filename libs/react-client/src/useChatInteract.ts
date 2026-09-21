@@ -1,6 +1,7 @@
 import { useCallback, useContext } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
 import {
+  acceptingState,
   actionState,
   askUserState,
   currentThreadIdState,
@@ -36,6 +37,7 @@ const useChatInteract = () => {
 
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
+  const setAccepting = useSetRecoilState(acceptingState);
   const setMessages = useSetRecoilState(messagesState);
   const setElements = useSetRecoilState(elementState);
   const setTasklists = useSetRecoilState(tasklistState);
@@ -150,9 +152,13 @@ const useChatInteract = () => {
     );
 
     setLoading(false);
+    // Stop cancels background work too, so the composer is open either way:
+    // set it here rather than wait for the server's own resync, for the same
+    // optimism the line above is written in.
+    setAccepting(true);
 
     transport.send({ t: 'stop' });
-  }, [transport, setLoading, setMessages]);
+  }, [transport, setLoading, setAccepting, setMessages]);
 
   const uploadFile = useCallback(
     (file: File, onProgress: (progress: number) => void, parentId?: string) => {

@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   ChainlitContext,
   IStep,
+  acceptingState,
   askUserState,
   currentThreadIdState,
   loadingState,
@@ -57,6 +58,7 @@ export const useOpenThread = () => {
 
   const setAskUser = useSetRecoilState(askUserState);
   const setLoading = useSetRecoilState(loadingState);
+  const setAccepting = useSetRecoilState(acceptingState);
   const setMessages = useSetRecoilState(messagesState);
   const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
@@ -112,6 +114,8 @@ export const useOpenThread = () => {
           // asked it, exactly as on a profile switch.
           setAskUser(undefined);
           setLoading(false);
+          // The composer belongs to the conversation being left behind.
+          setAccepting(true);
           setAttachments([]);
 
           // Read through updaters so these are the values at this moment,
@@ -160,6 +164,7 @@ export const useOpenThread = () => {
       transition,
       threadResumable,
       setAskUser,
+      setAccepting,
       setLoading,
       setMessages,
       setAttachments,

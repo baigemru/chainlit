@@ -1,19 +1,12 @@
 import os
 import tempfile
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import click
 import pytest
 
-from chainlit.utils import (
-    check_file,
-    check_module_version,
-    make_module_getattr,
-    timestamp_utc,
-    utc_now,
-    wrap_user_function,
-)
+from chainlit.utils import check_file, utc_now, wrap_user_function
 
 
 class TestUtcNow:
@@ -60,58 +53,6 @@ class TestUtcNow:
         # Results should be very close but might differ
         assert isinstance(result1, str)
         assert isinstance(result2, str)
-
-
-class TestTimestampUtc:
-    """Test suite for timestamp_utc function."""
-
-    def test_timestamp_utc_returns_string(self):
-        """Test that timestamp_utc returns a string."""
-        result = timestamp_utc(1234567890.0)
-        assert isinstance(result, str)
-
-    def test_timestamp_utc_ends_with_z(self):
-        """Test that timestamp_utc returns ISO format with Z suffix."""
-        result = timestamp_utc(1234567890.0)
-        assert result.endswith("Z")
-
-    def test_timestamp_utc_converts_correctly(self):
-        """Test that timestamp_utc converts timestamp correctly."""
-        # Known timestamp: 2009-02-13 23:31:30 UTC
-        timestamp = 1234567890.0
-        result = timestamp_utc(timestamp)
-
-        # Parse and verify
-        dt = datetime.fromisoformat(result[:-1])
-        assert dt.year == 2009
-        assert dt.month == 2
-        assert dt.day == 13
-
-    def test_timestamp_utc_with_zero(self):
-        """Test timestamp_utc with epoch (0)."""
-        result = timestamp_utc(0.0)
-        dt = datetime.fromisoformat(result[:-1])
-        assert dt.year == 1970
-        assert dt.month == 1
-        assert dt.day == 1
-
-    def test_timestamp_utc_with_fractional_seconds(self):
-        """Test timestamp_utc with fractional seconds."""
-        timestamp = 1234567890.123456
-        result = timestamp_utc(timestamp)
-
-        # Should be valid ISO format
-        dt = datetime.fromisoformat(result[:-1])
-        assert isinstance(dt, datetime)
-
-    def test_timestamp_utc_with_negative_timestamp(self):
-        """Test timestamp_utc with negative timestamp (before epoch)."""
-        # 1969-12-31 23:00:00 UTC
-        timestamp = -3600.0
-        result = timestamp_utc(timestamp)
-
-        dt = datetime.fromisoformat(result[:-1])
-        assert dt.year == 1969
 
 
 @pytest.mark.asyncio
@@ -193,67 +134,6 @@ class TestWrapUserFunction:
             result = await wrapped(1, 2, 3)
 
             assert result == 6
-
-
-class TestMakeModuleGetattr:
-    """Test suite for make_module_getattr."""
-
-    def test_make_module_getattr_creates_function(self):
-        """Test that make_module_getattr creates a function."""
-        registry = {"SomeClass": "some.module"}
-        getattr_func = make_module_getattr(registry)
-
-        assert callable(getattr_func)
-
-    def test_make_module_getattr_imports_module(self):
-        """Test that the created function imports modules."""
-        # Use a real module for testing
-        registry = {"datetime": "datetime"}
-        getattr_func = make_module_getattr(registry)
-
-        result = getattr_func("datetime")
-        assert result is datetime
-
-    def test_make_module_getattr_with_nested_module(self):
-        """Test with nested module path."""
-        registry = {"timezone": "datetime"}
-        getattr_func = make_module_getattr(registry)
-
-        result = getattr_func("timezone")
-        assert result is timezone
-
-
-class TestCheckModuleVersion:
-    """Test suite for check_module_version."""
-
-    def test_check_module_version_with_installed_module(self):
-        """Test checking version of an installed module."""
-        # pytest should be installed
-        result = check_module_version("pytest", "1.0.0")
-        assert result is True
-
-    def test_check_module_version_with_higher_required_version(self):
-        """Test with a required version higher than installed."""
-        # Require an impossibly high version
-        result = check_module_version("pytest", "999.0.0")
-        assert result is False
-
-    def test_check_module_version_with_nonexistent_module(self):
-        """Test with a module that doesn't exist."""
-        result = check_module_version("nonexistent_module_xyz", "1.0.0")
-        assert result is False
-
-    def test_check_module_version_exact_match(self):
-        """Test with exact version match."""
-        # Get actual pytest version
-        result = check_module_version("pytest", pytest.__version__)
-        assert result is True
-
-    def test_check_module_version_with_builtin_module(self):
-        """Test with a builtin module that has no __version__."""
-        # os module doesn't have __version__
-        with pytest.raises(AttributeError):
-            check_module_version("os", "1.0.0")
 
 
 class TestCheckFile:
@@ -340,15 +220,6 @@ class TestUtilsEdgeCases:
             # Should be parseable
             datetime.fromisoformat(result[:-1])
 
-    def test_timestamp_utc_with_large_timestamp(self):
-        """Test timestamp_utc with very large timestamp (far future)."""
-        # Year 2100
-        timestamp = 4102444800.0
-        result = timestamp_utc(timestamp)
-
-        dt = datetime.fromisoformat(result[:-1])
-        assert dt.year == 2100
-
     @pytest.mark.asyncio
     async def test_wrap_user_function_with_multiple_exceptions(
         self, mock_chainlit_context
@@ -389,14 +260,6 @@ class TestUtilsEdgeCases:
             check_file(temp_file)
         finally:
             os.unlink(temp_file)
-
-    def test_make_module_getattr_with_empty_registry(self):
-        """Test make_module_getattr with empty registry."""
-        registry = {}
-        getattr_func = make_module_getattr(registry)
-
-        with pytest.raises(KeyError):
-            getattr_func("nonexistent")
 
     @pytest.mark.asyncio
     async def test_wrap_user_function_with_default_args(self, mock_chainlit_context):

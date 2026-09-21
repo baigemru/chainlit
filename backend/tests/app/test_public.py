@@ -69,3 +69,37 @@ def test_a_path_that_climbs_out_of_public_is_refused(
         response = client.get("/public/../secret.txt")
 
     assert response.status_code == 404
+
+
+def test_an_element_source_carries_a_short_cache_control(
+    frontend_dir: Path, public_dir: Path
+):
+    """``/public/elements`` has its own router, and it is the header.
+
+    An element's ``.jsx`` is compiled in the browser, so an edit to it is a
+    deploy; without a ``Cache-Control`` the browser applies heuristic
+    freshness and can serve yesterday's form for days. ``max-age`` rather
+    than a revalidation directive because Litestar 2.24 never reads
+    ``If-None-Match`` -- a revalidation could only ever be a full download.
+    """
+    with _client(frontend_dir, public_dir) as client:
+        element = client.get("/public/elements/Widget.jsx")
+        avatar = client.get("/public/avatar.png")
+
+    assert element.status_code == 200
+    assert element.headers["cache-control"] == "max-age=60"
+    # The rest of ``/public`` is untouched: a logo is not redeployed by
+    # editing a file the browser already has.
+    assert "cache-control" not in avatar.headers
+
+
+def test_a_missing_element_is_a_404_from_the_element_router(
+    frontend_dir: Path, public_dir: Path
+):
+    """The more specific router answers, rather than falling through."""
+    with _client(frontend_dir, public_dir) as client:
+        response = client.get(
+            "/public/elements/Nope.jsx", headers={"accept": "text/html"}
+        )
+
+    assert response.status_code == 404

@@ -5,6 +5,7 @@ import { useSetRecoilState } from 'recoil';
 import type { SessionHandoff } from '@chainlit/react-client';
 import {
   IStep,
+  acceptingState,
   askUserState,
   loadingState,
   messagesState,
@@ -42,6 +43,7 @@ export const useSessionHandoff = (): ((payload: SessionHandoff) => void) => {
   const { clear } = useChatInteract();
   const setAskUser = useSetRecoilState(askUserState);
   const setLoading = useSetRecoilState(loadingState);
+  const setAccepting = useSetRecoilState(acceptingState);
   const setMessages = useSetRecoilState(messagesState);
   const setBoundaries = useSetRecoilState(chatBoundariesState);
   const setKeptExcursions = useSetRecoilState(keptExcursionsState);
@@ -84,6 +86,8 @@ export const useSessionHandoff = (): ((payload: SessionHandoff) => void) => {
     flushSync(() => {
       setAskUser(undefined);
       setLoading(false);
+      // The composer belongs to the conversation being left behind.
+      setAccepting(true);
       setAttachments([]);
 
       // Read through updaters so these are the values before clear() wipes

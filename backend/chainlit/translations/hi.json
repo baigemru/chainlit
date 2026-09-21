@@ -64,9 +64,7 @@
     "provider": {
       "continue": "{{provider}} के साथ जारी रखें",
       "signin": "{{provider}} से साइन इन करें",
-      "register": "{{provider}} से पंजीकरण करें",
-      "vk": "Sign in with VK",
-      "yandex": "Sign in with Yandex"
+      "register": "{{provider}} से पंजीकरण करें"
     }
   },
   "chat": {

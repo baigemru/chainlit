@@ -101,7 +101,6 @@ class StepRecord(Struct, rename="camel", omit_defaults=True, kw_only=True, froze
     name: Union[str, UnsetType, None] = UNSET
     parent_id: Union[str, UnsetType, None] = UNSET
     command: Union[str, UnsetType, None] = UNSET
-    modes: Union[Dict[str, str], UnsetType, None] = UNSET
     streaming: Union[bool, UnsetType] = UNSET
     wait_for_answer: Union[bool, UnsetType, None] = UNSET
     is_error: Union[bool, UnsetType, None] = UNSET

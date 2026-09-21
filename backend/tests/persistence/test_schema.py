@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from chainlit.persistence.models import SCHEMA_NAME, Base
 
 # Taken from the production database (PostgreSQL, schema `chainlit`), plus the
-# three columns migration 0002 adds and the one migration 0004 adds. If a model column is not in this map, it
-# does not exist in production and every query using it would fail there.
+# three columns migration 0002 adds and the one migration 0004 adds, minus the
+# one migration 0005 drops. If a model column is not in this map, it does not
+# exist in production and every query using it would fail there.
 PRODUCTION_COLUMNS: Dict[str, Set[str]] = {
     "users": {
         "id",
@@ -53,7 +54,6 @@ PRODUCTION_COLUMNS: Dict[str, Set[str]] = {
         "language",
         "indent",
         "defaultOpen",
-        "modes",
         "autoCollapse",
     },
     "elements": {
@@ -84,6 +84,10 @@ PRODUCTION_COLUMNS: Dict[str, Set[str]] = {
 ABSENT_COLUMNS = {
     ("steps", "disableFeedback"),
     ("threads", "deletedAt"),
+    # Dropped by 0005 with the rest of the modes system. Listed here rather
+    # than merely deleted above so that re-declaring it on the model is a red
+    # test instead of a migration autogenerate proposes against a live table.
+    ("steps", "modes"),
 }
 
 

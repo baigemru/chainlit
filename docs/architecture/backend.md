@@ -15,47 +15,49 @@ usually a bug that was fixed — treat it as normative.
 Public API means: exported from `backend/chainlit/__init__.py` `__all__` and meant to be
 called as `cl.*` by an application author. Everything else is internal.
 
-| Path                                                                                              | Purpose                                                                                                                                                                                                                                       | Surface                |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `__init__.py`                                                                                     | Re-exports the `cl.*` API; loads `.env` before any other import.                                                                                                                                                                              | public                 |
-| `plugin.py`                                                                                       | `ChainlitPlugin(InitPlugin)` — the entire integration surface with a host `Litestar`.                                                                                                                                                         | public (embedding)     |
-| `runner.py`                                                                                       | `ApplicationRunner`: runs `config.code` on behalf of sessions; the only place that sets the context var.                                                                                                                                      | internal               |
-| `ws/session.py`                                                                                   | `Session` — a conversation, independent of the socket carrying it. Imports nothing from the `cl.*` layer.                                                                                                                                     | internal               |
-| `ws/connection.py`                                                                                | The `@websocket("/ws")` route, `Connection`, the reader and heartbeat loops.                                                                                                                                                                  | internal               |
-| `ws/outbound.py`                                                                                  | `Outbound` — one bounded queue, one writer task, one owner of the close.                                                                                                                                                                      | internal               |
-| `ws/registry.py`                                                                                  | `SessionRegistry` — one session per thread, keyed by thread and indexed by handle. Imports nothing from `chainlit` or the transport.                                                                                                          | internal               |
-| `ws/handshake.py`                                                                                 | `arrive` / `ready_frame` / `restore` — what a `hello` is allowed to mean.                                                                                                                                                                     | internal               |
-| `ws/sidebar.py`                                                                                   | `SidebarState` — the element panel as session state, its invariants, what one `sidebar.user` frame does to it, and its projection to and from thread metadata (`__sidebar`).                                                                  | internal               |
-| `protocol/{server,client,payloads,codec}.py`                                                      | msgspec tagged unions on `t`, plus `CloseCode`/`ErrorCode`. Imports no other `chainlit` module.                                                                                                                                               | internal (stable wire) |
-| `protocol/README.md`                                                                              | Old-event → tag map, renames, shape changes, close codes.                                                                                                                                                                                     | docs                   |
-| `controllers/auth.py`                                                                             | `/auth/*`, `/login`, `/logout`, `/user`.                                                                                                                                                                                                      | internal               |
-| `controllers/project.py`                                                                          | Threads, elements, feedback, actions, `/project/settings`, `/health`.                                                                                                                                                                         | internal               |
-| `controllers/files.py`                                                                            | Upload/download, `/favicon`, `/logo`, `/avatars/*`.                                                                                                                                                                                           | internal               |
-| `controllers/index.py`                                                                            | `render_index` — fills the built SPA shell with title, favicon, OG tags, theme.                                                                                                                                                               | internal               |
-| `controllers/sessions.py`                                                                         | `LiveSession` / `SessionRegistry` protocols the routes are allowed to see.                                                                                                                                                                    | internal               |
-| `controllers/account.py`                                                                          | `AccountController` (`/project/account`, its `/actions/{name}`) and the `require_identity` guard.                                                                                                                                             | internal               |
-| `controllers/caller.py`                                                                           | `caller`, `caller_identifier`, `assert_session_owner` — reading the scope safely.                                                                                                                                                             | internal               |
-| `persistence/`                                                                                    | `records` → `models` → `statements` → `repositories`/`services` → `config` → `writer`.                                                                                                                                                        | internal               |
-| `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`; the panel's `drop_elements`, `patch_sidebar`; `split_engine_metadata`.                                                                        | internal               |
-| `security.py`                                                                                     | `ChainlitAuth(JWTCookieAuth)`, `Identity`, `identity_from_token`, `chainlit_auth()`.                                                                                                                                                          | internal               |
-| `oauth_providers.py`                                                                              | The configured OAuth providers and their token exchanges.                                                                                                                                                                                     | internal               |
-| `transit_store.py`                                                                                | `TransitStore` — the TTL'd one-shot profile-switch handover on a `litestar.stores` store.                                                                                                                                                     | internal               |
-| `config.py`                                                                                       | `.chainlit/config.toml` decoded with msgspec, plus `config.code` (the registered callbacks).                                                                                                                                                  | internal               |
-| `account.py`                                                                                      | `@cl.account`'s rules, the JSON Schema, the lenient decode of a stored object, the action outcomes and `element_type_at`.                                                                                                                     | public (`cl.account`)  |
-| `account_badge.py`                                                                                | The one recompute-and-push of the `account.badge` frame, called from the handshake, the route and the emitter.                                                                                                                                | internal               |
-| `callbacks.py`                                                                                    | The `@cl.on_*` decorators; each stores a wrapped function on `config.code`.                                                                                                                                                                   | public                 |
-| `context.py`                                                                                      | `ChainlitContext`, `context_var`, `init_context`, and the `cl.context` proxy.                                                                                                                                                                 | public (`cl.context`)  |
-| `emitter.py`                                                                                      | `Emitter` — one method per thing the app can put on screen; produces frames, never rows.                                                                                                                                                      | internal               |
-| `message.py`                                                                                      | `Message`, `ErrorMessage`, `AskUserMessage`, `AskActionMessage`, `AskFileMessage`, `AskElementMessage`.                                                                                                                                       | public                 |
-| `step.py`                                                                                         | `Step` and the `@cl.step` decorator.                                                                                                                                                                                                          | public                 |
-| `element.py`                                                                                      | `Image`, `Pdf`, `Text`, `File`, `Video`, `Audio`, `Plotly`, `Pyplot`, `Dataframe`, `CustomElement`, `TaskList`.                                                                                                                               | public                 |
-| `action.py`                                                                                       | `Action` — a button attached to a message.                                                                                                                                                                                                    | public                 |
-| `user_session.py`                                                                                 | `cl.user_session` — a thin view over `Session.state`.                                                                                                                                                                                         | public                 |
-| `chat_context.py`                                                                                 | `cl.chat_context` — the conversation's messages, kept on the session's state.                                                                                                                                                                 | public                 |
-| `sidebar.py`, `mode.py`, `types.py`, `user.py`                                                    | `Sidebar` (the element panel's application half; the model itself is `ws/sidebar.py`), `Mode`/`ModeOption`, `ThreadDict`/`ChatProfile`/`Starter`, `User`/`PersistedUser`.                                                                     | public                 |
-| `cli/__init__.py`                                                                                 | The `chainlit` command: `run`, `hello`, `init`, `create-secret`, `lint-translations`.                                                                                                                                                         | public (CLI)           |
-| `utils.py`, `_utils.py`, `secret.py`, `markdown.py`, `logger.py`, `translations.py`, `version.py` | Helpers, secret generation, `chainlit.md` bootstrap, the `chainlit` logger, translation linting, `__version__`.                                                                                                                               | internal               |
-| `frontend/dist`, `translations/*.json`, `sample/`                                                 | Built JS artefacts (not in git), shipped UI translations (the base `load_translation` lays the app's `.chainlit/translations/` copy over, so a key a release adds arrives without the app touching its copy), the `chainlit hello` demo apps. | assets                 |
+| Path                                                                                              | Purpose                                                                                                                                                                                                                                                              | Surface                |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `__init__.py`                                                                                     | Re-exports the `cl.*` API; loads `.env` before any other import.                                                                                                                                                                                                     | public                 |
+| `plugin.py`                                                                                       | `ChainlitPlugin(InitPlugin)` — the entire integration surface with a host `Litestar`.                                                                                                                                                                                | public (embedding)     |
+| `runner.py`                                                                                       | `ApplicationRunner`: runs `config.code` on behalf of sessions; the only place that sets the context var.                                                                                                                                                             | internal               |
+| `ws/session.py`                                                                                   | `Session` — a conversation, independent of the socket carrying it. Imports nothing from the `cl.*` layer.                                                                                                                                                            | internal               |
+| `ws/connection.py`                                                                                | The `@websocket("/ws")` route, `Connection`, the reader and heartbeat loops.                                                                                                                                                                                         | internal               |
+| `ws/outbound.py`                                                                                  | `Outbound` — one bounded queue, one writer task, one owner of the close.                                                                                                                                                                                             | internal               |
+| `ws/registry.py`                                                                                  | `SessionRegistry` — one session per thread, keyed by thread and indexed by handle. Imports nothing from `chainlit` or the transport.                                                                                                                                 | internal               |
+| `ws/handshake.py`                                                                                 | `arrive` / `ready_frame` / `restore` — what a `hello` is allowed to mean.                                                                                                                                                                                            | internal               |
+| `ws/sidebar.py`                                                                                   | `SidebarState` — the element panel as session state, its invariants, what one `sidebar.user` frame does to it, and its projection to and from thread metadata (`__sidebar`).                                                                                         | internal               |
+| `protocol/{server,client,payloads,codec}.py`                                                      | msgspec tagged unions on `t`, plus `CloseCode`/`ErrorCode`. Imports no other `chainlit` module.                                                                                                                                                                      | internal (stable wire) |
+| `protocol/README.md`                                                                              | Old-event → tag map, renames, shape changes, close codes.                                                                                                                                                                                                            | docs                   |
+| `controllers/auth.py`                                                                             | `/auth/*`, `/login`, `/logout`, `/user`.                                                                                                                                                                                                                             | internal               |
+| `controllers/project.py`                                                                          | Threads, elements, feedback, actions, `/project/settings`, `/health`.                                                                                                                                                                                                | internal               |
+| `controllers/files.py`                                                                            | Upload/download, `/favicon`, `/logo`, `/avatars/*`.                                                                                                                                                                                                                  | internal               |
+| `controllers/index.py`                                                                            | `render_index` — fills the built SPA shell with title, favicon, OG tags, theme.                                                                                                                                                                                      | internal               |
+| `controllers/sessions.py`                                                                         | `LiveSession` / `SessionRegistry` protocols the routes are allowed to see.                                                                                                                                                                                           | internal               |
+| `controllers/account.py`                                                                          | `AccountController` (`/project/account`, its `/actions/{name}`) and the `require_identity` guard.                                                                                                                                                                    | internal               |
+| `controllers/caller.py`                                                                           | `caller`, `caller_identifier`, `assert_session_owner` — reading the scope safely.                                                                                                                                                                                    | internal               |
+| `persistence/`                                                                                    | `records` → `models` → `statements` → `repositories`/`services` → `config` → `writer`.                                                                                                                                                                               | internal               |
+| `persist.py`                                                                                      | The `cl.*` → rows seam: `save_step`, `save_element`, `delete_*`, `open_thread`, `thread_state`; the panel's `drop_elements`, `patch_sidebar`; `split_engine_metadata`.                                                                                               | internal               |
+| `security.py`                                                                                     | `ChainlitAuth(JWTCookieAuth)`, `Identity`, `identity_from_token`, `chainlit_auth()`.                                                                                                                                                                                 | internal               |
+| `oauth_providers.py`                                                                              | The configured OAuth providers and their token exchanges.                                                                                                                                                                                                            | internal               |
+| `transit_store.py`                                                                                | `TransitStore` — the TTL'd one-shot profile-switch handover on a `litestar.stores` store.                                                                                                                                                                            | internal               |
+| `config.py`                                                                                       | `.chainlit/config.toml` decoded with msgspec, plus `config.code` (the registered callbacks).                                                                                                                                                                         | internal               |
+| `account.py`                                                                                      | `@cl.account`'s rules, the JSON Schema, the lenient decode of a stored object, the action outcomes and `element_type_at`.                                                                                                                                            | public (`cl.account`)  |
+| `account_badge.py`                                                                                | The one recompute-and-push of the `account.badge` frame, called from the handshake, the route and the emitter.                                                                                                                                                       | internal               |
+| `callbacks.py`                                                                                    | The `@cl.on_*` decorators; each stores a wrapped function on `config.code`.                                                                                                                                                                                          | public                 |
+| `context.py`                                                                                      | `ChainlitContext`, `context_var`, `init_context`, and the `cl.context` proxy.                                                                                                                                                                                        | public (`cl.context`)  |
+| `emitter.py`                                                                                      | `Emitter` — one method per thing the app can put on screen; produces frames, never rows.                                                                                                                                                                             | internal               |
+| `message.py`                                                                                      | `Message`, `ErrorMessage`, `AskUserMessage`, `AskActionMessage`, `AskFileMessage`, `AskElementMessage`.                                                                                                                                                              | public                 |
+| `step.py`                                                                                         | `Step` and the `@cl.step` decorator.                                                                                                                                                                                                                                 | public                 |
+| `element.py`                                                                                      | `Image`, `Pdf`, `Text`, `File`, `Video`, `Audio`, `Plotly`, `Pyplot`, `Dataframe`, `CustomElement`, `TaskList`.                                                                                                                                                      | public                 |
+| `action.py`                                                                                       | `Action` — a button attached to a message.                                                                                                                                                                                                                           | public                 |
+| `user_session.py`                                                                                 | `cl.user_session` — a thin view over `Session.state`.                                                                                                                                                                                                                | public                 |
+| `chat_context.py`                                                                                 | `cl.chat_context` — the conversation's messages, kept on the session's state.                                                                                                                                                                                        | public                 |
+| `sidebar.py`, `types.py`, `user.py`                                                               | `Sidebar` (the element panel's application half; the model itself is `ws/sidebar.py`), `ThreadDict`/`ChatProfile`/`Starter` plus the profile rules (`matches_device`, `is_offered`, `pick_default_profile`, `check_one_default_per_device`), `User`/`PersistedUser`. | public                 |
+| `host.py`                                                                                         | The way in from code the engine never launched — a route of the application's, a webhook, a job: `deliver_to_thread`, `refresh_account_badge`, `persistence`, `uow`.                                                                                                 | public                 |
+| `background.py`                                                                                   | `cl.run_in_background` — work that runs in the session without holding the composer shut.                                                                                                                                                                            | public                 |
+| `cli/__init__.py`                                                                                 | The `chainlit` command: `run`, `hello`, `init`, `create-secret`, `lint-translations`.                                                                                                                                                                                | public (CLI)           |
+| `utils.py`, `_utils.py`, `secret.py`, `markdown.py`, `logger.py`, `translations.py`, `version.py` | Helpers, secret generation, `chainlit.md` bootstrap, the `chainlit` logger, translation linting, `__version__`.                                                                                                                                                      | internal               |
+| `frontend/dist`, `translations/*.json`, `sample/`                                                 | Built JS artefacts (not in git), shipped UI translations (the base `load_translation` lays the app's `.chainlit/translations/` copy over, so a key a release adds arrives without the app touching its copy), the `chainlit hello` demo apps.                        | assets                 |
 
 ---
 
@@ -67,14 +69,20 @@ Chainlit needs into the host's own `AppConfig` (`plugin.py`):
 - **Routes** — `AuthController`, `ProjectController`, `FilesController` and the `/ws` handler,
   gathered under one `Router(path="/")` that owns Chainlit's `request_max_body_size` and a
   `NotFoundException` handler that refuses to fall back to the SPA. Plus static routers for
-  `/public` (the app's `public/`) and `/assets` (the bundle), both `exclude_from_auth`.
+  `/public/elements`, `/public` (the app's `public/`) and `/assets` (the bundle), all
+  `exclude_from_auth`. The first two overlap on purpose and the more specific one wins:
+  `/public/elements` is the same directory with `cache_control=CacheControlHeader(max_age=60)`,
+  because an element's `.jsx` is compiled in the browser and an edit to it is a deploy, and
+  without a `Cache-Control` a browser applies heuristic freshness. `max_age` and not
+  `no-cache, must-revalidate`: Litestar 2.24 never reads `If-None-Match`, so a revalidation
+  could only ever be a full download. A host needs no ASGI middleware of its own for this.
 - **SPA fallback** — `make_spa_fallback`, registered with `setdefault` on both
   `NotFoundException` **and** `MethodNotAllowedException` (`/login` is a POST route _and_ a
   page). It answers only when `Accept` contains `text/html`; an API miss stays a JSON 404.
 - **Auth middleware** — when auth is on, `self._auth.on_app_init(app_config)` inserts
   `JWTCookieAuth`'s middleware at position 0. Its scopes are `{http, websocket}`, which is how
   the upgrade request is authenticated.
-- **Dependencies** — `sessions`, `transit`, `persistence_enabled`, `security`, `user_service`, all with
+- **Dependencies** — `sessions`, `transit`, `runner`, `persistence_enabled`, `security`, `user_service`, all with
   `setdefault` so a host keeps its own bindings. With no persistence, `_bind_absent_services`
   binds `users`/`threads`/`steps`/`elements`/`feedbacks` to providers that raise
   `ServiceUnavailableException`, so routes that do not need a database still mount.
@@ -290,10 +298,23 @@ and by resuming a thread.
 `layout` is a bare string for the reason `device` is: a value this side refuses is a value a
 newer application cannot ship to an older client, which would otherwise have degraded it to
 `tiles` itself. By the same rule nothing here rejects a starter that sets both `href` and
-`profile`, and nothing rejects `listed=False` with `default=True` — that last one is an
-application configuration error (a landing place nobody can land in) and it is the client's
-default-picking that skips what is not listed. `sample/starters_demo.py` is the smoke app that
-exercises the whole set in one screen.
+`profile`. `sample/starters_demo.py` is the smoke app that exercises the whole set in one
+screen.
+
+**The profile rules are stated once, in `types.py`.** `matches_device(label, device)`,
+`is_offered(profile, device)` and `pick_default_profile(profiles, device)` are the client's own
+`matchesDevice`, `offeredProfiles` and `pickDefaultProfile` — same fail-open on a label nobody
+recognises, same refusal to pick an unlisted profile as the default, same last-resort fallbacks
+so a list where everything is filtered out still yields a name. They are exported so an
+application reasons about its own list the way the browser will, instead of keeping a Python
+copy of a TypeScript rule that is one release from disagreeing.
+
+Nothing is _enforced_ at the wire: `listed=False` with `default=True` is still advertised, for
+the reason `layout` is a bare string. `check_one_default_per_device(profiles)` is the opt-in
+gate, and it is meant to be called where the list is built — next to the literal, at import, so
+a configuration that would land somebody nowhere is a start-up error rather than a blank page.
+It raises on an unlisted default separately from a miscount, because that is a mistake about
+what `listed` means rather than a wrong number.
 
 **Two entry points, one wiring.** `chainlit run app.py` (`cli/__init__.py:build_app`) loads the
 user's module, then builds `Litestar(plugins=[ChainlitPlugin(config, persistence=..., configure_logging=True)])`
@@ -303,9 +324,12 @@ host's own `Litestar(...)`; the host must set `request_max_body_size` itself if 
 Chainlit's limit on its own routes.
 
 **Configuration.** `.chainlit/config.toml` under `APP_ROOT` (`CHAINLIT_APP_ROOT`, default cwd)
-is decoded into `msgspec.Struct` sections — a wrong type or an out-of-range literal is refused
-at startup, unknown keys are ignored so an older file still loads. `ChainlitConfig` itself is a
-plain class; `config.code` (a `CodeSettings` dataclass) holds what the `@cl.*` decorators
+is decoded into `msgspec.Struct` sections — a wrong type, an out-of-range literal **and a key
+no section declares** are all refused at startup, by name (`Settings` sets
+`forbid_unknown_fields`, and `decode_settings` checks the top-level tables itself, since no
+Struct ever sees a fifth one). A retired key configures nothing, and a file that half-loads is
+a file whose deployment believes it turned something on. `ChainlitConfig` itself is a plain
+class; `config.code` (a `CodeSettings` dataclass) holds what the `@cl.*` decorators
 registered.
 
 Two `[UI]` switches decide what the entry screen and the header show, and both ride the wire
@@ -320,6 +344,41 @@ undone from a profile once the base section has moved it. The wordmark is also t
 `mobile_header` may name that has nothing behind the overflow button — a phone draws it only
 when that list says `"wordmark"`.
 
+### Reaching the engine from outside a session
+
+Everything else in the `cl.*` API is written for code the engine launched: it reads the context
+var, and that is how it knows which conversation it is in. An application also has code the
+engine never launched — a route of its own, a webhook a background service calls back on, a
+scheduled job — and `host.py` is the whole of what that code may reach.
+
+| call                                                                                                           | what it answers                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `await cl.deliver_to_thread(thread_id, content, *, author=None, id=None, metadata=None, user_identifier=None)` | Where a message goes when the chat may or may not be open. Returns `"live"` or `"stored"`.                                                                                                                                       |
+| `await cl.refresh_account_badge(user)`                                                                         | The context-free half of `emitter.refresh_account_badge()`: recount and push to every session of that user.                                                                                                                      |
+| `cl.persistence()` / `cl.uow()`                                                                                | The engine's database wiring, and one unit of work over it (`unit.threads`, `unit.steps`, `unit.elements`, `unit.users`, `unit.feedbacks`), so an application writes beside the engine's rows rather than through a second pool. |
+| `cl.element_file_url(thread_id, element_id)`                                                                   | The blob route an application has to link to. It is a route, so it is the engine's to name.                                                                                                                                      |
+
+`deliver_to_thread` is the one with a decision in it, and the decision is transport state the
+application has no business reading. The registry holds a session on this thread → the message
+goes out the way every other message does: bound context, `Message.send()`, so it lands on
+screen, in the transcript the reconnect replays, and in that session's ordered writer. _Live_ is
+not _connected_: a session inside its disconnect grace still owns the conversation, and the
+frame queued now is what the reload gets back. Nobody holds the thread → one unit of work,
+**owner first**: `steps.save` creates the thread row behind a step whose thread does not exist
+yet, and a row created that way has no user, so the conversation would never appear in anybody's
+history; then the step, then `threads.touch` so it sorts as of now. Neither a session nor
+persistence is a `RuntimeError`, not a silent drop — the caller has somebody waiting for that
+result. Whether a repeat is the same message is the caller's question and `id` is the answer: the
+step is upserted, so a webhook that mints a deterministic id is delivered once however many times
+it arrives.
+
+The runner is reached through a module-level handle set in `ApplicationRunner.__init__`
+(`chainlit.runner.current_runner`), which is **not** exported: an application holding the runner
+holds the transport, and every method on it is a promise this fork has not made.
+
+`cl.run_in_background(coro)` is the other direction — application code the engine runs, from
+_inside_ a session, as work that does not hold the composer shut. See §3.
+
 ---
 
 ## 3. The websocket
@@ -333,6 +392,25 @@ accepted socket and holds what a second socket must not share: `generation` (nev
 `seq`/`last_ack` (this socket's heartbeat state), and `current` — the only question any loop
 asks. `session.current` is the single owner; a connection that has lost it does nothing further
 to the session.
+
+**Whose turn it is.** `task.indicator` carries two booleans read off the session's tasks at the
+same instant, never a counter. `running` (`session.is_busy`) is the spinner: any task alive and
+no question open — a task parked on an ask is alive, but the one who has to act is the user, and
+a lit spinner over a question lies about that. `accepting` (`session.accepting`) is the composer:
+no **foreground** task, or a question open.
+
+The two came apart when an application gained a way to say which kind of work it started.
+`cl.run_in_background(coro)` runs a coroutine under the same bound context as `on_message` and
+with the same spinner, and the one difference is where the handle is kept: a foreground turn
+lives in a slot (`session.current_task`) so the next turn replaces it, and background work lives
+in a **set** (`session.background_tasks`) because the whole point is that the next message starts
+its own `on_message` beside it. A slot here would silently drop the running task's handle — and a
+task nothing holds is one `stop` cannot cancel and teardown cannot reap.
+
+Background is about the composer, not about outliving the chat: `_stop_work` cancels the set and
+so does `cancel_work`, and `has_live_task` counts it, so the session is kept, its steps are
+protected and its thread is not pruned underneath it. Work that must outlive the conversation
+belongs to the application and comes back in through `cl.deliver_to_thread`.
 
 **Identity.** The client names a **thread** and nothing else — `hello` carries no session id.
 The server mints the session handle and announces it in `session.ready`; the client keeps it in
@@ -533,6 +611,14 @@ Invariants:
   like, and reconnect forever. The route handler never runs for a refused credential, so nothing
   in `ws/` has to answer for one. Only `NotAuthorizedException` is answered this way; any other
   failure still propagates and closes 4500.
+- **`task.indicator` carries two booleans, not one inverted.** `running` is the spinner,
+  `accepting` the composer, and they disagree exactly while a `cl.run_in_background` run is
+  going. `accepting` is `omit_defaults`-absent when true, so a client that never hears about it
+  keeps its composer open — the permissive answer is the missing one.
+- **`sidebar.state.force` is the only field that is not a projection of the model.** It
+  describes the instruction: "raise the panel even where the screen would rather it stayed
+  put". A replay is built from the model, so it never forces, which is what keeps an F5 on a
+  phone from putting the sheet back over the question the reload was for.
 - **`account.badge{count}` is pushed, never polled.** The only frame with no request behind it
   at all: it is offered after every `session.ready`, after `GET /project/account`, and on
   `emitter.refresh_account_badge()`, each time to every live session of the user. No
@@ -652,7 +738,12 @@ browser cannot set an `Authorization` header on an upgrade, so the cookie is the
 
 `AuthController` (`controllers/auth.py`) serves `/auth/config`, `POST /login` (password and
 direct-grant), `POST /auth/jwt`, `POST /logout`, `GET /auth/oauth/{provider}` plus
-`/register`, `/vk`, `/yandex` and `/callback`, and `GET /user`. `POST /set-session-cookie` is
+`/register`, `/idp/{shortcut_id}` and `/callback`, and `GET /user`. `/idp/{shortcut_id}` is the
+one route behind every "skip the broker's own form" button: a provider that brokers others
+names the parameter it takes (`OAuthProvider.idp_hint_param`, Keycloak's `kc_idp_hint`), and
+the deployment lists the aliases in `[[UI.idp_shortcuts]]` (`id`, `hint`, `label`, `icon_url*`).
+The id is the path segment and the hint never leaves the server; an id the config does not
+declare is a 404, so the URL cannot name an alias of its own. `POST /set-session-cookie` is
 gone: it pinned a session id for load-balancer affinity, and the client has no id to pin — the
 server mints it and names it only after the socket is open. A multi-worker deployment needs
 affinity from the balancer.
@@ -757,3 +848,10 @@ profile change. **Rule: any transport change needs at least one live-server test
 - **One session per thread, enforced by the key.** `register` raises `ThreadHeld` rather than
   overwriting, and nothing may `await` between `claim` and the `register` that acts on it.
 - **There is no fan-out.** Both protection queries are a single lookup by thread.
+- **The server never branches on `device`.** `Session.device` and `hello.device` are carried for
+  the funnel and nothing else: `?device=pc` pins that label against the viewport the layout
+  actually uses, so a server that read it would cover a phone's feed with the panel sheet this
+  rule exists to keep off it — and the same conversation would behave differently depending on
+  what a hello claimed. Where the screen has to decide something, the server says what it wants
+  and how badly (`sidebar.state` `visible` + `force`) and the browser weighs it against its own
+  viewport.

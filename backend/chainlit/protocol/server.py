@@ -203,14 +203,23 @@ class AskEnd(_Msg, tag="ask.end"):
 
 
 class TaskIndicator(_Msg, tag="task.indicator"):
-    """The single loading boolean.
+    """Two level-triggered booleans about the session's work.
 
-    Collapses ``task_start``/``task_end``: they were one level-triggered
-    signal split across two event names, and every level-triggered resync
-    in the old code had to pick which of the two to emit.
+    ``running`` collapses ``task_start``/``task_end``: they were one
+    level-triggered signal split across two event names, and every resync in
+    the old code had to pick which of the two to emit.
+
+    ``accepting`` is whose turn it is to speak, which used to be the same
+    boolean upside down and is not any more. An application may declare a run
+    background (``cl.run_in_background``), and then the work is shown as
+    running while the composer stays open and the next message starts its own
+    turn beside it. Two fields rather than a tri-state because the client asks
+    the two questions in two different places -- the spinner reads one, the
+    send button reads the other.
     """
 
     running: bool
+    accepting: bool = True
 
 
 # --------------------------------------------------------------------------
@@ -281,6 +290,18 @@ class SidebarState(_Msg, tag="sidebar.state"):
     everything" is the one reducer with no edge cases.
     """
 
+    #: Raise the panel even where the screen would rather it stayed put.
+    #: ``visible`` says where the panel belongs; this says how hard. On a
+    #: phone the panel is a full-screen sheet over the feed, and the feed is
+    #: where everything that wants an answer lives -- a question, a counter,
+    #: a plan notice -- so a frame that merely *raises* the panel there is
+    #: applied without the raise and echoed back as ``sidebar.user hide``.
+    #: The screen is the client's to judge and it judges by the viewport, not
+    #: by the ``device`` a hello carried: ``?device=pc`` pins that label
+    #: against the layout, and a server branching on it would cover a phone's
+    #: feed with the sheet this rule exists to keep off it. So the server says
+    #: what it wants and how badly, and never where it is being read.
+    force: bool = False
     slots: list[SidebarSlotRef] = []
     #: The tab on screen. ``None`` only while there are no slots.
     active: str | None = None

@@ -4,9 +4,10 @@ and the ``@cl.*`` decorators register at runtime.
 The TOML sections are ``msgspec.Struct`` types, decoded with
 ``msgspec.convert`` so a value of the wrong type or a literal outside its
 choices is refused at startup, where a misspelled config is cheapest to fix.
-Unknown keys are ignored on purpose: a ``config.toml`` written by an older
-release still carries retired tables (``[features.mcp]``, ``[features.slack]``,
-``hot_swap_chat_profile``) and must keep loading.
+A key no section declares is refused the same way, by name: a retired table
+left behind by an older release (``[features.mcp]``, ``hot_swap_chat_profile``)
+configures nothing, and silently ignoring it is how a deployment ends up
+believing it turned something on.
 
 ``ChainlitConfig`` itself is a plain class, not a Struct: it is never decoded,
 the CLI and ``reload_config`` reassign its sections, and tests patch methods
@@ -50,7 +51,6 @@ if TYPE_CHECKING:
     from chainlit.message import Message
     from chainlit.types import (
         ChatProfile,
-        Feedback,
         Starter,
         StarterCategory,
         ThreadDict,
@@ -85,9 +85,6 @@ session_timeout = 3600
 # Duration (in seconds) of the user session expiry
 user_session_timeout = 1296000  # 15 days
 
-# Enable third parties caching (e.g., LangChain cache)
-cache = false
-
 # Whether to persist user environment variables (API keys) to the database
 # Set to true to store user env vars in DB, false to exclude them for security
 persist_user_env = false
@@ -101,9 +98,6 @@ mask_user_env = false
 # form and the coroutine behind it are gone, and without this the turn simply
 # stops. Set to "" for no trace at all.
 # interrupted_ask_message = "The action was interrupted and has to be started again."
-
-# Authorized origins
-allow_origins = ["*"]
 
 [features]
 # Process and display HTML in messages. This can be a security risk (see https://stackoverflow.com/questions/19603097/why-is-it-dangerous-to-render-user-generated-html-or-javascript)
@@ -124,17 +118,11 @@ assistant_message_autoscroll = true
 # Where an autoscrolled assistant message lands: "bottom" follows the stream, "top" pins it like a user message
 # assistant_message_anchor = "bottom"
 
-# Automatically tag threads with the current chat profile (if a chat profile is used)
-auto_tag_thread = true
-
-# Allow users to edit their own messages
-edit_message = true
-
-# Allow users to share threads (backend + UI). Requires an app-defined on_shared_thread_view callback.
+# Let a thread's author publish it: `GET /project/share/<id>` then answers to
+# anyone with the link, and only for a thread whose author turned this on.
+# There is no per-viewer rule -- a share link that asked who you are would
+# not be a share link.
 allow_thread_sharing = false
-
-# Enable favorite messages
-favorites = false
 
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
@@ -151,12 +139,6 @@ favorites = false
     accept = ["*/*"]
     max_files = 20
     max_size_mb = 500
-
-[features.audio]
-    # Enable audio features
-    enabled = false
-    # Sample rate of the audio
-    sample_rate = 24000
 
 [UI]
 # Name of the assistant.
@@ -235,11 +217,6 @@ default_avatar_file_url = ""
 # Avatar size in pixels (default: 20).
 # avatar_size = 20
 
-# Specify a custom build directory for the frontend.
-# This can be used to customize the frontend code.
-# Be careful: If this is a relative path, it should not start with a slash.
-# custom_build = "./public/build"
-
 # Optional link to a "Forgot password?" page, shown under the password field
 # of the login form. Can also be set with the CHAINLIT_FORGOT_PASSWORD_URL
 # environment variable, which takes precedence.
@@ -288,6 +265,17 @@ default_avatar_file_url = ""
 #     label_refresh_interval = 60  # Optional. Re-fetch the label every N seconds.
 #     collapse_on_mobile = true    # Optional, defaults to true. false keeps the link in the header on a narrow screen.
 
+# Login buttons that skip the provider's own login page and go straight to one
+# identity provider behind it. Only a provider that brokers others can offer
+# these; `hint` is the alias configured there (Keycloak's `kc_idp_hint`).
+# [[UI.idp_shortcuts]]
+#     id = "vk"                      # The path segment: /auth/oauth/<provider>/idp/vk
+#     hint = "vkid"                  # What the broker is told.
+#     label = "Sign in with VK"      # The button's text, verbatim.
+#     icon_url = "/public/vk.svg"    # Optional.
+#     icon_url_light = "/public/vk_light.svg"  # Optional. Fallback: icon_url.
+#     icon_url_dark = "/public/vk_dark.svg"    # Optional. Fallback: icon_url.
+
 # The account page (`/account`), filled from the msgspec Struct the app registers with
 # `@cl.account`. The row in the user menu appears only when this table is present.
 # [UI.account]
@@ -304,12 +292,17 @@ DEFAULT_PORT = 8000
 DEFAULT_ROOT_PATH = ""
 
 
-class Settings(Struct, kw_only=True):
+class Settings(Struct, kw_only=True, forbid_unknown_fields=True):
     """Base of every TOML section.
 
     ``kw_only`` because the sections are built from tables, never
     positionally, and a positional constructor would silently bind a value
     to the wrong field when one is added.
+
+    ``forbid_unknown_fields`` because the alternative is a config file that
+    lies: a key nothing reads looks exactly like a key that works. msgspec
+    names the offending key and the table it sits in, which is the whole
+    diagnosis.
     """
 
 
@@ -337,14 +330,8 @@ class SpontaneousFileUploadFeature(Settings):
     max_size_mb: Optional[int] = None
 
 
-class AudioFeature(Settings):
-    sample_rate: int = 24000
-    enabled: bool = False
-
-
 class FeaturesSettings(Settings):
     spontaneous_file_upload: Optional[SpontaneousFileUploadFeature] = None
-    audio: Optional[AudioFeature] = msgspec.field(default_factory=AudioFeature)
     latex: bool = False
     user_message_markdown: bool = True
     user_message_autoscroll: bool = True
@@ -356,10 +343,7 @@ class FeaturesSettings(Settings):
     # reader on its last card under "bottom".
     assistant_message_anchor: Literal["bottom", "top"] = "bottom"
     unsafe_allow_html: bool = False
-    auto_tag_thread: bool = True
-    edit_message: bool = True
     allow_thread_sharing: bool = False
-    favorites: bool = False
     # Turn the "ask slot is busy" refusal into AskSlotBusyError instead of
     # a None return. Off by default: None is also what a timeout and an
     # empty answer produce, and existing apps branch on it.
@@ -390,6 +374,31 @@ class HeaderLink(Settings):
     label_url: Optional[str] = None
     # Re-fetch the label every N seconds; None disables periodic refresh.
     label_refresh_interval: Optional[int] = None
+
+
+class IdpShortcut(Settings):
+    """A login button that skips the provider's own login page.
+
+    Keycloak (and every other broker) can be told which identity provider to
+    hand the browser to straight away -- ``kc_idp_hint=vkid`` and the user
+    never sees the broker's own form. Which identity providers a deployment
+    brokers is the deployment's business, so it is configuration: the engine
+    knows how to pass a hint, not that VK exists.
+    """
+
+    # The path segment: ``/auth/oauth/<provider>/idp/<id>``.
+    id: str
+    # What the provider is told. Keycloak calls it ``kc_idp_hint``; the alias
+    # is the one configured in the realm.
+    hint: str
+    # The button's text, verbatim. Not a translation key: the identity
+    # provider's name is the same word in every language the fork ships, and
+    # a deployment that wants otherwise writes what it wants.
+    label: str
+    icon_url: Optional[str] = None
+    # Per-theme icon overrides; icon_url is the fallback for both themes.
+    icon_url_light: Optional[str] = None
+    icon_url_dark: Optional[str] = None
 
 
 class AccountSection(Settings):
@@ -498,8 +507,12 @@ class UISettings(Settings):
     logo_file_url: Optional[str] = None
     default_avatar_file_url: Optional[str] = None
     avatar_size: Optional[int] = None
-    custom_build: Optional[str] = None
     header_links: Optional[List[HeaderLink]] = None
+    # The login page's shortcut buttons, one per brokered identity provider.
+    # Offered only by a provider that can take a hint at all
+    # (``OAuthProvider.idp_hint_param``), so an app with a plain OAuth
+    # provider configuring these sees nothing.
+    idp_shortcuts: List[IdpShortcut] = msgspec.field(default_factory=list)
     # Built-in header buttons kept in the header on a narrow screen; the rest
     # move into the overflow menu. Known names: "new_chat", "chat_profiles",
     # "share", "readme", "api_keys", "theme", "user_nav", and "wordmark" --
@@ -542,7 +555,6 @@ class CodeSettings:
     on_chat_resume: Optional[Callable[["ThreadDict"], Any]] = None
     on_thread_ready: Optional[Callable[["ThreadDict"], Any]] = None
     on_message: Optional[Callable[["Message"], Any]] = None
-    on_feedback: Optional[Callable[["Feedback"], Any]] = None
     set_chat_profiles: Optional[
         Callable[[Optional["User"], Optional["str"]], Awaitable[List["ChatProfile"]]]
     ] = None
@@ -555,10 +567,6 @@ class CodeSettings:
             Awaitable[List["StarterCategory"]],
         ]
     ] = None
-    on_shared_thread_view: Optional[
-        Callable[["ThreadDict", Optional["User"]], Awaitable[bool]]
-    ] = None
-
     # The account page. The Struct is the type, the JSON Schema the client
     # renders, the validator a save runs through and the storage shape at
     # once; the two hooks let the app fill in and accept the values itself.
@@ -590,17 +598,12 @@ class CodeSettings:
 
 
 class ProjectSettings(Settings):
-    allow_origins: List[str] = msgspec.field(default_factory=lambda: ["*"])
     # List of environment variables to be provided by each user to use the app. If empty, no environment variables will be asked to the user.
     user_env: Optional[List[str]] = None
-    # Path to the local langchain cache database
-    lc_cache_path: Optional[str] = None
     # Duration (in seconds) during which the session is saved when the connection is lost
     session_timeout: int = 300
     # Duration (in seconds) of the user session expiry
     user_session_timeout: int = 1296000  # 15 days
-    # Enable third parties caching (e.g LangChain cache)
-    cache: bool = False
     # Whether to persist user environment variables (API keys) to the database
     persist_user_env: Optional[bool] = False
     # Whether to mask user environment variables (API keys) in the UI with password type
@@ -863,15 +866,29 @@ def load_module(target: str, force_refresh: bool = False):
     sys.path.pop(0)
 
 
+#: The only tables ``config.toml`` may carry. A top-level name outside this
+#: set is refused here rather than by a Struct, because nothing decodes it:
+#: ``decode_settings`` reaches for four tables by name and would walk past a
+#: fifth without a word.
+KNOWN_TABLES = frozenset({"project", "features", "UI", "meta"})
+
+
 def decode_settings(toml_dict: Dict[str, Any]) -> Dict[str, Any]:
     """The sections of a parsed ``config.toml``, as the settings types.
 
     Separate from :func:`load_settings` so a config can be checked without a
-    file on disk. Keys the sections do not declare are dropped by
-    ``msgspec.convert`` -- that is what lets a config from an older release
-    keep loading -- while a wrong type or an unknown literal raises
-    ``msgspec.ValidationError`` naming the key.
+    file on disk. A key no section declares, a wrong type and a literal
+    outside its choices all raise, naming the key: a config file whose keys
+    are half-read is a config file nobody can reason about, and the deleted
+    half is always the interesting one.
     """
+    unknown = sorted(set(toml_dict) - KNOWN_TABLES)
+    if unknown:
+        raise ValueError(
+            f"Unknown table(s) in '{config_file}': {', '.join(unknown)}. "
+            f"Known tables: {', '.join(sorted(KNOWN_TABLES))}."
+        )
+
     project_config = dict(toml_dict.get("project", {}))
     features_config = toml_dict.get("features", {})
     ui_config = toml_dict.get("UI", {})
@@ -881,8 +898,6 @@ def decode_settings(toml_dict: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(
             f"Your config file '{config_file}' is outdated. Please delete it and restart the app to regenerate it."
         )
-
-    project_config["lc_cache_path"] = os.path.join(config_dir, ".langchain.db")
 
     return {
         "features": msgspec.convert(features_config, type=FeaturesSettings),

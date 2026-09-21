@@ -18,7 +18,21 @@ import {
 import { Translator } from 'components/i18n';
 
 interface SubmitButtonProps {
-  disabled?: boolean;
+  /**
+   * Whether a click here would send something: the composer accepts *and*
+   * there is something in it. One prop, because it answers both questions
+   * this button asks — whether Send is live, and whether this is Send at
+   * all.
+   *
+   * The second one only became a question when an application gained a way
+   * to declare a run background: work is then running *and* the composer
+   * accepts, so "stop that" and "send this" are both things the click might
+   * mean. Empty box → Stop, there is nothing else it could do. Anything
+   * typed → Send, because they typed it to send it and Enter sends it too,
+   * so a Stop sitting there would disagree with the key beside it. Stop
+   * stays one clear box away.
+   */
+  canSend?: boolean;
   onSubmit: () => void;
   /**
    * Sizing from the composer, which needs a bigger tap target in its mobile
@@ -29,7 +43,7 @@ interface SubmitButtonProps {
 }
 
 export default function SubmitButton({
-  disabled,
+  canSend,
   onSubmit,
   className
 }: SubmitButtonProps) {
@@ -39,7 +53,7 @@ export default function SubmitButton({
 
   return (
     <TooltipProvider>
-      {loading && firstInteraction ? (
+      {loading && firstInteraction && !canSend ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -62,7 +76,7 @@ export default function SubmitButton({
           <TooltipTrigger asChild>
             <Button
               id="chat-submit"
-              disabled={disabled}
+              disabled={!canSend}
               onClick={onSubmit}
               size="icon"
               className={cn('rounded-full h-8 w-8', className)}

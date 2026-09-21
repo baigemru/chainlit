@@ -49,15 +49,7 @@ from chainlit.controllers.files import favicon_file, public_dir, served_file
 if TYPE_CHECKING:
     from chainlit.config import ChainlitConfig
 
-__all__ = (
-    "BUILD_PLACEHOLDER",
-    "MANIFEST_MEDIA_TYPE",
-    "PwaController",
-    "apple_touch_icon_file",
-    "manifest_icons",
-    "render_manifest",
-    "service_worker_file",
-)
+__all__ = ("BUILD_PLACEHOLDER", "PwaController", "render_manifest")
 
 #: The media type the spec gives the manifest. Litestar serialises a dict
 #: for anything matching ``application/…+json``, so this needs no encoder.

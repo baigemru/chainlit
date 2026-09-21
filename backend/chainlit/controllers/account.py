@@ -207,6 +207,15 @@ class AccountController(Controller):
         the type the *schema* says sits at that path is a 400 carrying
         msgspec's own message -- which names the offending field and is the
         only field addressing the client has.
+
+        The hook is then handed ``(user, item, account)``. The third argument
+        is there because ``cl.AccountRefresh(account=...)`` wants the whole
+        document and the hook was given one card: without it every
+        application that changes anything had to read ``users.account``
+        through a session of its own, racing the one this request is already
+        in. Read with ``_stored`` and not ``locked_account`` -- see
+        ``_store_action_values`` for what that trade costs and why it is the
+        right way round.
         """
         cls = _registered()
         hook = chainlit.config.config.code.account_actions.get(name)
@@ -229,7 +238,9 @@ class AccountController(Controller):
                 raise ValidationException(detail=str(error)) from error
 
         identity = caller(request)
-        outcome = await call_hook(hook, identity, item)
+        outcome = await call_hook(
+            hook, identity, item, await _stored(cls, identity, user_service)
+        )
 
         if isinstance(outcome, Toast):
             return AccountActionResponse(outcome=outcome)

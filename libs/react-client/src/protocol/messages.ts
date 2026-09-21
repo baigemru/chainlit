@@ -301,6 +301,7 @@ export interface SidebarSlotRef {
 
 export interface SidebarState {
   t: 'sidebar.state';
+  force?: boolean;
   slots?: SidebarSlotRef[];
   active?: string | null;
   visible?: boolean;
@@ -345,7 +346,6 @@ export interface Step {
   language?: string | null;
   icon?: string | null;
   command?: string | null;
-  modes?: Record<string, string> | null;
   tags?: string[] | null;
   metadata?: Record<string, unknown> | null;
   generation?: Record<string, unknown> | null;
@@ -389,7 +389,6 @@ export interface StepPatch {
   language?: string | null;
   icon?: string | null;
   command?: string | null;
-  modes?: Record<string, string> | null;
   tags?: string[] | null;
   metadata?: Record<string, unknown> | null;
   generation?: Record<string, unknown> | null;
@@ -427,6 +426,7 @@ export interface Stop {
 export interface TaskIndicator {
   t: 'task.indicator';
   running: boolean;
+  accepting?: boolean;
 }
 
 export interface TasklistElement {

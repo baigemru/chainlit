@@ -22,7 +22,7 @@ import pytest
 from litestar.di import Provide
 from litestar.testing import create_test_client
 
-from chainlit.config import config
+from chainlit.config import IdpShortcut, config
 from chainlit.oauth_providers import OAuthProvider
 from chainlit.persistence.records import UserRecord
 from chainlit.plugin import ChainlitPlugin
@@ -49,13 +49,12 @@ class FakeProvider(OAuthProvider):
     env: List[str] = []
     registration_url = "https://idp.example.com/register"
     forgot_password_url = "https://idp.example.com/forgot"
+    idp_hint_param: Optional[str] = "kc_idp_hint"
 
     def __init__(
         self,
         *,
         direct_grant: bool = False,
-        vk: bool = False,
-        yandex: bool = False,
         registration: bool = False,
         raises: bool = False,
     ) -> None:
@@ -64,8 +63,6 @@ class FakeProvider(OAuthProvider):
         self.authorize_url = "https://idp.example.com/auth"
         self.authorize_params = {"scope": "openid"}
         self._direct_grant = direct_grant
-        self._vk = vk
-        self._yandex = yandex
         self._registration = registration
         self._raises = raises
         self.code_exchanges: List[Tuple[str, str]] = []
@@ -79,18 +76,6 @@ class FakeProvider(OAuthProvider):
 
     def is_registration_button_enabled(self) -> bool:
         return self._registration
-
-    def get_vk_idp_hint(self) -> Optional[str]:
-        return "vk" if self._vk else None
-
-    def is_vk_button_enabled(self) -> bool:
-        return self._vk
-
-    def get_yandex_idp_hint(self) -> Optional[str]:
-        return "yandex" if self._yandex else None
-
-    def is_yandex_button_enabled(self) -> bool:
-        return self._yandex
 
     async def get_token(self, code: str, url: str) -> str:
         if self._raises:
@@ -176,6 +161,10 @@ def use_provider(monkeypatch: pytest.MonkeyPatch, provider: OAuthProvider) -> No
     monkeypatch.setattr("chainlit.oauth_providers.providers", [provider])
 
 
+def use_shortcuts(monkeypatch: pytest.MonkeyPatch, shortcuts) -> None:
+    monkeypatch.setattr(config.ui, "idp_shortcuts", shortcuts)
+
+
 def use_oauth_callback(monkeypatch: pytest.MonkeyPatch, callback) -> None:
     monkeypatch.setattr(config.code, "oauth_callback", callback, raising=False)
 
@@ -237,7 +226,8 @@ def token_for(**claims) -> str:
 
 
 def test_auth_config_lists_the_configured_provider(monkeypatch: pytest.MonkeyPatch):
-    use_provider(monkeypatch, FakeProvider(vk=True, registration=True))
+    use_provider(monkeypatch, FakeProvider(registration=True))
+    use_shortcuts(monkeypatch, [IdpShortcut(id="vk", hint="vkid", label="VK")])
     use_oauth_callback(monkeypatch, lambda *a: None)
 
     with client() as c:
@@ -246,7 +236,7 @@ def test_auth_config_lists_the_configured_provider(monkeypatch: pytest.MonkeyPat
     assert body["requireLogin"] is True
     assert body["oauthProviders"] == [PROVIDER_ID]
     assert body["oauthProviderDetails"][0]["id"] == PROVIDER_ID
-    assert body["oauthProviderDetails"][0]["vkEnabled"] is True
+    assert body["oauthProviderDetails"][0]["idpShortcuts"][0]["id"] == "vk"
     assert body["oauthProviderDetails"][0]["registrationEnabled"] is True
     assert body["ui"]["forgot_password_url"] == "https://idp.example.com/forgot"
 
@@ -323,34 +313,63 @@ def test_oauth_login_forwards_a_login_hint(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.parametrize(
-    ("suffix", "kwargs", "expected"),
-    [
-        ("/vk", {"vk": True}, "kc_idp_hint=vk"),
-        ("/yandex", {"yandex": True}, "kc_idp_hint=yandex"),
-    ],
+    ("shortcut_id", "hint"),
+    [("vk", "vkid"), ("yandex", "yandex-alias")],
 )
-def test_the_per_idp_entry_points_return_to_the_shared_callback(
-    monkeypatch: pytest.MonkeyPatch, suffix: str, kwargs: dict, expected: str
+def test_an_idp_shortcut_returns_to_the_shared_callback(
+    monkeypatch: pytest.MonkeyPatch, shortcut_id: str, hint: str
 ):
-    use_provider(monkeypatch, FakeProvider(**kwargs))
+    """One route, whatever the deployment named its shortcuts."""
+    use_provider(monkeypatch, FakeProvider())
+    use_shortcuts(
+        monkeypatch,
+        [
+            IdpShortcut(id="vk", hint="vkid", label="VK"),
+            IdpShortcut(id="yandex", hint="yandex-alias", label="Yandex"),
+        ],
+    )
     use_oauth_callback(monkeypatch, lambda *a: None)
 
     with client() as c:
-        response = c.get(f"/auth/oauth/{PROVIDER_ID}{suffix}", follow_redirects=False)
+        response = c.get(
+            f"/auth/oauth/{PROVIDER_ID}/idp/{shortcut_id}", follow_redirects=False
+        )
 
     assert response.status_code == 302
     location = response.headers["location"]
-    assert expected in location
+    assert f"kc_idp_hint={hint}" in location
     assert "keycloak%2Fcallback" in location
-    assert suffix.strip("/") not in location.split("redirect_uri=")[1].split("&")[0]
+    assert "idp" not in location.split("redirect_uri=")[1].split("&")[0]
 
 
-def test_a_disabled_per_idp_entry_point_is_a_404(monkeypatch: pytest.MonkeyPatch):
-    use_provider(monkeypatch, FakeProvider(vk=False))
+def test_an_undeclared_idp_shortcut_is_a_404(monkeypatch: pytest.MonkeyPatch):
+    """The alias comes from the config, never from the URL."""
+    use_provider(monkeypatch, FakeProvider())
+    use_shortcuts(monkeypatch, [])
     use_oauth_callback(monkeypatch, lambda *a: None)
 
     with client() as c:
-        assert c.get(f"/auth/oauth/{PROVIDER_ID}/vk").status_code == 404
+        response = c.get(f"/auth/oauth/{PROVIDER_ID}/idp/vk", follow_redirects=False)
+    # Not a redirect that happens to land nowhere: the refusal is the answer.
+    assert response.status_code == 404
+
+
+def test_an_idp_shortcut_through_a_plain_provider_is_a_404(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A provider that brokers nothing has nothing to hint at."""
+
+    class Plain(FakeProvider):
+        idp_hint_param = None
+
+    use_provider(monkeypatch, Plain())
+    use_shortcuts(monkeypatch, [IdpShortcut(id="vk", hint="vkid", label="VK")])
+    use_oauth_callback(monkeypatch, lambda *a: None)
+
+    with client() as c:
+        response = c.get(f"/auth/oauth/{PROVIDER_ID}/idp/vk", follow_redirects=False)
+    # Not a redirect that happens to land nowhere: the refusal is the answer.
+    assert response.status_code == 404
 
 
 def test_the_register_entry_point_uses_the_registration_url(

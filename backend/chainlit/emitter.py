@@ -235,8 +235,9 @@ class Emitter:
 
             session.send(AskStart(step=payload, spec=spec))
             # The spinner goes dark while the user is the one who has to
-            # act. Level state: restored from the tasks, not counted.
-            session.send(TaskIndicator(running=False))
+            # act, and the composer opens for the same reason. Level state:
+            # restored from the tasks, not counted.
+            session.send(TaskIndicator(running=False, accepting=True))
 
             try:
                 value = await asyncio.wait_for(
@@ -316,8 +317,17 @@ class Emitter:
     # ---------------------------------------------------------- task spinner
 
     def resync_task_indicator(self) -> None:
-        """Say whether anything is running, from the tasks, never a counter."""
-        self.session.send(TaskIndicator(running=self.session.is_busy))
+        """Say what the session's tasks say, never a counter.
+
+        Both booleans, always together: they are read off the same set of
+        tasks at the same instant, and a client told one of them late would
+        draw a spinner over an open composer or the reverse.
+        """
+        self.session.send(
+            TaskIndicator(
+                running=self.session.is_busy, accepting=self.session.accepting
+            )
+        )
 
     # ---------------------------------------------------------------- thread
 
@@ -419,15 +429,19 @@ class Emitter:
 
     # ------------------------------------------------------------------- misc
 
-    def sidebar_state(self) -> None:
+    def sidebar_state(self, *, force: bool = False) -> None:
         """Say what the element panel is, whole.
 
         Built from ``session.sidebar`` rather than from the arguments of
         whatever call produced it: the model is the truth and the frame is
         its projection, which is the entire difference between this and the
         ``sidebar.set`` it replaces.
+
+        ``force`` is the exception and says so in ``SidebarState``: it is a
+        property of the instruction, not of the panel, so it is passed in
+        here and never read back out of the model.
         """
-        self.session.send(state_frame(self.session.sidebar))
+        self.session.send(state_frame(self.session.sidebar, force=force))
 
     def send_toast(self, message: str, type: ToastType = "info") -> None:
         self.session.send(Toast(message=message, type=type))

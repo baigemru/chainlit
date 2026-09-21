@@ -27,7 +27,6 @@ import { useElementSidebar } from '../../libs/react-client/src/useElementSidebar
  */
 
 const sent: ClientMsg[] = [];
-let opening: { pageLoad: boolean } = { pageLoad: false };
 let sink: SessionSink | undefined;
 
 /** The viewport the rule and the layout both read. See `breakpoint.ts`. */
@@ -55,10 +54,7 @@ const transport = {
     error: false,
     superseded: false
   }),
-  onMessage: () => () => undefined,
-  get opening() {
-    return opening;
-  }
+  onMessage: () => () => undefined
 };
 
 let panel: IElementSidebarState;
@@ -103,7 +99,6 @@ const upsert = (id: string, name: string): ServerMsg => ({
 beforeEach(() => {
   sent.length = 0;
   sink = undefined;
-  opening = { pageLoad: false };
   widen(1280);
 });
 
@@ -171,34 +166,40 @@ describe('the sidebar.state handler', () => {
 });
 
 describe('the mobile rule', () => {
-  const restoreVisible = () =>
-    deliver(ready(), upsert('el-1', 'cards'), {
+  const raise = (extra: Record<string, unknown> = {}) =>
+    deliver({
       t: 'sidebar.state',
       slots: [{ id: 'cards', elementIds: ['el-1'] }],
       active: 'cards',
       visible: true,
-      rev: 4
-    });
+      rev: 4,
+      ...extra
+    } as ServerMsg);
+
+  const restoreVisible = () => {
+    deliver(ready(), upsert('el-1', 'cards'));
+    raise();
+  };
 
   it('puts the panel away on a phone that has just reloaded', () => {
     // The panel is a 95%-wide sheet there, and a reload that put it straight
     // back would cover the question the user reloaded to answer.
-    opening = { pageLoad: true };
     widen(390);
     mount();
 
     restoreVisible();
 
     expect(panel.visible).toBe(false);
-    // The slots are untouched: hidden, not thrown away.
+    // The slots are untouched: hidden, not thrown away, and the tab the
+    // server chose is selected -- a button in the feed leads to a ready tab.
     expect(panel.slots.map((s) => s.id)).toEqual(['cards']);
+    expect(panel.active).toBe('cards');
     // And the server is told, because it must never branch on the device
     // itself.
     expect(sent).toContainEqual({ t: 'sidebar.user', op: 'hide', rev: 4 });
   });
 
   it('leaves a wide viewport alone', () => {
-    opening = { pageLoad: true };
     widen(1280);
     mount();
 
@@ -208,34 +209,48 @@ describe('the mobile rule', () => {
     expect(sent).toEqual([]);
   });
 
-  it('leaves a phone alone when the connection was only a blip', () => {
-    // Not a page load: the browser still has its screen, and the user did
-    // not ask for anything.
-    opening = { pageLoad: false };
+  it('declines a raise that arrives mid-conversation too', () => {
+    // The scenario that finished while the user was reading the feed. Same
+    // sheet, same feed underneath it, same answer -- the panel is filled and
+    // the tab selected, and the user opens it when they choose to.
     widen(390);
     mount();
-
-    restoreVisible();
-
-    expect(panel.visible).toBe(true);
-  });
-
-  it('acts on the restore frame only, not on the next one', () => {
-    opening = { pageLoad: true };
-    widen(390);
-    mount();
-    restoreVisible();
+    deliver(ready(), upsert('el-1', 'cards'));
+    raise();
+    act(() => dispatch({ op: 'hide' }));
     sent.length = 0;
 
-    // The application opens something afterwards; that is a deliberate act
-    // and the rule has nothing to say about it.
-    deliver({
-      t: 'sidebar.state',
-      slots: [{ id: 'cards', elementIds: ['el-1'] }],
-      active: 'cards',
-      visible: true,
-      rev: 4
-    });
+    raise({ rev: 5 });
+
+    expect(panel.visible).toBe(false);
+    expect(panel.active).toBe('cards');
+    expect(sent).toContainEqual({ t: 'sidebar.user', op: 'hide', rev: 5 });
+  });
+
+  it('leaves a panel that is already on screen where it is', () => {
+    // The rule is about the transition, not the level. A second slot filled
+    // while the user has the panel open restates `visible: true`, and
+    // slamming it shut under their thumb is the opposite of the point.
+    widen(390);
+    mount();
+    deliver(ready(), upsert('el-1', 'cards'));
+    act(() => dispatch({ op: 'show' }));
+    sent.length = 0;
+
+    raise({ rev: 5 });
+
+    expect(panel.visible).toBe(true);
+    expect(sent).toEqual([]);
+  });
+
+  it('raises it anyway when the server says it means it', () => {
+    // `Sidebar.show()` and `set_slot(activate="force")`: the application has
+    // said this must be seen wherever it lands.
+    widen(390);
+    mount();
+    deliver(ready(), upsert('el-1', 'cards'));
+
+    raise({ force: true });
 
     expect(panel.visible).toBe(true);
     expect(sent).toEqual([]);

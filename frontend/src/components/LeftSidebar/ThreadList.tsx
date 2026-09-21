@@ -394,7 +394,13 @@ export function ThreadList({
           const items = threadHistory!.timeGroupedThreads![group];
           return (
             <SidebarGroup key={group}>
-              <SidebarGroupLabel>{getTimeGroupLabel(group)}</SidebarGroupLabel>
+              {/* A date is not a destination: set apart from the rows it
+                  heads — upper case, spaced, monospaced — it is read as the
+                  ruler down the side of the list and not as another thread
+                  to open. */}
+              <SidebarGroupLabel className="h-7 font-mono text-xs uppercase tracking-wider">
+                {getTimeGroupLabel(group)}
+              </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {items.map((thread) => {

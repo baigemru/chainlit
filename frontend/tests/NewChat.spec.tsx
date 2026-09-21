@@ -131,6 +131,26 @@ describe('NewChatButton', () => {
     expect(mockSetOpenMobile).toHaveBeenCalledWith(false);
   });
 
+  it('says what it does when the sidebar asks for the wide one', () => {
+    // In the header the button is one icon among six and has no room to say
+    // so; in the sidebar it is what the panel is opened for, and an icon
+    // there is a guess the user has to make.
+    render(<NewChatButton wide />);
+
+    const button = screen.getByRole('button');
+    expect(button.textContent).toContain('navigation.newChat.button');
+    expect(button.className).toContain('w-full');
+    expect(button.querySelector('svg')).toBeInTheDocument();
+  });
+
+  it('keeps the header copy an icon', () => {
+    render(<NewChatButton />);
+
+    const button = screen.getByRole('button');
+    expect(button.textContent).not.toContain('navigation.newChat.button');
+    expect(button.className).not.toContain('w-full');
+  });
+
   it('uses custom onConfirm handler if provided', () => {
     mockUseConfig.mockReturnValue({
       config: { ui: { confirm_new_chat: false } }

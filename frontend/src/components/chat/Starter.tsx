@@ -39,10 +39,11 @@ export const starterVariants = cva('', {
       // No width class at all: in the flat list's flex row that is the old
       // `w-fit`, and in a section's grid it lets the tile stretch to its
       // column, which is what puts two of them side by side on a phone.
-      tiles: 'justify-start rounded-3xl',
+      tiles:
+        'flex flex-col items-center justify-center gap-0.5 h-auto min-h-[3.5rem] px-4 py-3 rounded-2xl text-center whitespace-normal',
       plates:
         'flex flex-col items-start gap-1 w-full h-auto min-h-[6rem] p-4 rounded-2xl text-left whitespace-normal border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-      rows: 'flex w-full items-center gap-2 h-auto justify-start px-3 py-2 rounded-lg text-left whitespace-normal font-normal'
+      rows: 'flex w-full items-center gap-2 h-auto justify-start px-3 py-2 rounded-lg text-left whitespace-normal font-normal border border-input bg-background'
     },
     highlight: {
       true: '',
@@ -50,10 +51,14 @@ export const starterVariants = cva('', {
     }
   },
   compoundVariants: [
+    // A highlighted tile is the one the section wants pressed, not a banner:
+    // it says so with the accent on its border and its label. Filling it —
+    // which it used to do, at full width and one to a line — made two equal
+    // offers into one advertisement and threw the section's grid away.
     {
       layout: 'tiles',
       highlight: true,
-      class: 'w-full justify-center h-12 text-base rounded-2xl'
+      class: 'border-primary/60 text-primary hover:text-primary'
     },
     {
       layout: 'plates',
@@ -184,53 +189,52 @@ export default function Starter({ starter, layout = 'tiles' }: StarterProps) {
           <span className={cn('text-xs', muted)}>{starter.description}</span>
         ) : null}
         {starter.caption ? (
-          <span className={cn('mt-auto self-end text-xs', muted)}>
+          <span className={cn('mt-auto self-end font-mono text-xs', muted)}>
             {starter.caption}
           </span>
         ) : null}
       </>
     ) : layout === 'rows' ? (
+      // Three columns on one line: what the errand is, what it takes, what it
+      // costs. The name never shrinks and the price never wraps, so the
+      // description is the only part that gives ground — which is the right
+      // one to lose, and the reason it is not the one left stranded at the
+      // far edge of the row.
       <>
         {icon}
-        <span className="text-sm">{starter.label}</span>
+        <span className="shrink-0 text-sm font-medium">{starter.label}</span>
         {starter.description ? (
-          <span className={cn('min-w-0 truncate text-xs', muted)}>
-            <span aria-hidden="true" className="mr-1">
-              ·
-            </span>
+          <span className={cn('min-w-0 flex-1 text-xs', muted)}>
             {starter.description}
           </span>
         ) : null}
         {starter.caption ? (
-          <span className={cn('ml-auto shrink-0 text-xs', muted)}>
+          <span className={cn('ml-auto shrink-0 font-mono text-xs', muted)}>
             {starter.caption}
           </span>
         ) : null}
       </>
     ) : (
-      <div className="flex gap-2">
-        {icon}
-        <p
-          className={cn(
-            'truncate',
-            highlight ? 'text-base' : cn('text-sm', muted)
-          )}
-        >
-          {starter.label}
-        </p>
-      </div>
+      <>
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="text-sm font-medium">{starter.label}</span>
+        </div>
+        {starter.caption ? (
+          <span className={cn('font-mono text-xs', muted)}>
+            {starter.caption}
+          </span>
+        ) : null}
+      </>
     );
 
   return (
     <Button
       id={`starter-${starter.label.trim().toLowerCase().replaceAll(' ', '-')}`}
-      variant={
-        highlight && layout === 'tiles'
-          ? 'default'
-          : layout === 'tiles'
-            ? 'outline'
-            : 'ghost'
-      }
+      // Outline whatever the highlight says: a filled tile among outlined
+      // ones is a different kind of thing, and the two offers in a section
+      // are the same kind of thing.
+      variant={layout === 'tiles' ? 'outline' : 'ghost'}
       className={cn(starterVariants({ layout, highlight }))}
       disabled={inert || loading || !connected}
       aria-disabled={inert || undefined}

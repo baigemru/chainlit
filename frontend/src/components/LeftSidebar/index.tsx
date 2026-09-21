@@ -45,13 +45,15 @@ export default function LeftSidebar({
 
   return (
     <Sidebar {...props} className="border-none">
+      {/* A new chat is what this panel is opened to start, so it is the one
+          thing in the header with a name on it. The trigger that folds the
+          panel and the search that reaches into it stay icons: they act on
+          the list, they are not the list's purpose. */}
       <SidebarHeader className="py-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
           <SidebarTrigger />
-          <div className="flex items-center">
-            <SearchChats />
-            <NewChatButton navigate={navigate} />
-          </div>
+          <NewChatButton navigate={navigate} wide />
+          <SearchChats />
         </div>
       </SidebarHeader>
       {/* Outside `ThreadHistory`'s `SidebarContent`, and deliberately: that

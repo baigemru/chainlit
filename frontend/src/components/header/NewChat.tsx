@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import React, { useState } from 'react';
 
 import { useChatInteract, useConfig } from '@chainlit/react-client';
@@ -74,9 +75,22 @@ export const NewChatDialog = ({
 interface Props extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   navigate?: (to: string) => void;
   onConfirm?: () => void;
+  /**
+   * Draw the button as a named, full-width one instead of the icon in the
+   * header. The sidebar is where a new chat is started on purpose, and an
+   * icon there is a guess the user has to make; the header's copy sits among
+   * six other icons and has no room to say so.
+   */
+  wide?: boolean;
 }
 
-const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
+const NewChatButton = ({
+  navigate,
+  onConfirm,
+  wide,
+  className,
+  ...buttonProps
+}: Props) => {
   const [open, setOpen] = useState(false);
   const { clear } = useChatInteract();
   const { config } = useConfig();
@@ -122,27 +136,50 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
     handleClose();
   };
 
+  const button = wide ? (
+    // Named, so no tooltip: the label is the tooltip, and a tooltip over a
+    // button that already says what it does only gets in the way of pressing
+    // it on a touch screen.
+    <Button
+      variant="outline"
+      id="new-chat-button"
+      className={cn('w-full justify-start gap-2 font-normal', className)}
+      onClick={handleClickOpen}
+      {...buttonProps}
+    >
+      <EditSquare className="!size-5 shrink-0" />
+      <span className="truncate">
+        <Translator path="navigation.newChat.button" />
+      </span>
+    </Button>
+  ) : (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            id="new-chat-button"
+            className={cn(
+              'text-muted-foreground hover:text-muted-foreground',
+              className
+            )}
+            onClick={handleClickOpen}
+            {...buttonProps}
+          >
+            <EditSquare className="!size-6" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <Translator path="navigation.newChat.dialog.tooltip" />
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+
   return (
-    <div>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              id="new-chat-button"
-              className="text-muted-foreground hover:text-muted-foreground"
-              onClick={handleClickOpen}
-              {...buttonProps}
-            >
-              <EditSquare className="!size-6" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <Translator path="navigation.newChat.dialog.tooltip" />
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+    <div className={cn(wide && 'min-w-0 flex-1')}>
+      {button}
       <NewChatDialog
         open={open}
         handleClose={handleClose}

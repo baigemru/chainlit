@@ -111,6 +111,19 @@ export interface IChainlitConfig {
      * keeps working either way.
      */
     show_parent_thread_button?: boolean;
+    /**
+     * Whether the welcome screen opens with a picture of itself — the
+     * profile's icon, or the app logo when no profile names one. `false`
+     * starts the screen with the profile's description instead.
+     */
+    welcome_avatar?: boolean;
+    /**
+     * Draw `name` as a wordmark at the left of the header. Off unless the
+     * deployment asks; a phone draws it only when `mobile_header` names
+     * `"wordmark"`, because the wordmark has no overflow rendering to fall
+     * back to.
+     */
+    header_wordmark?: boolean;
     github?: string;
     custom_css?: string;
     custom_js?: string;

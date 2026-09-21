@@ -30,6 +30,9 @@ vi.mock('@/components/LeftSidebar/ThreadHistory', () => ({
 vi.mock('@/components/LeftSidebar/PinnedAccount', () => ({
   default: () => null
 }));
+vi.mock('@/components/LeftSidebar/AccountFooter', () => ({
+  default: () => null
+}));
 vi.mock('@/components/LeftSidebar/Search', () => ({ default: () => null }));
 vi.mock('@/components/header/NewChat', () => ({ default: () => null }));
 vi.mock('@/components/header/SidebarTrigger', () => ({ default: () => null }));

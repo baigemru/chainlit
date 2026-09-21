@@ -1,11 +1,10 @@
-import capitalize from 'lodash/capitalize';
 import { LogOut, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
 
 import { accountBadgeState, useAuth, useConfig } from '@chainlit/react-client';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import UserAvatar from '@/components/UserAvatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +16,6 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Translator } from 'components/i18n';
-import { useTranslation } from 'components/i18n/Translator';
 
 interface Props {
   /**
@@ -31,7 +29,6 @@ export default function UserNav({ collapsed }: Props) {
   const { user, logout } = useAuth();
   const { config } = useConfig();
   const navigate = useNavigate();
-  const { t } = useTranslation();
   // Pushed by the server on `account.badge`, and `undefined` until one
   // arrives: an application that registered no badge hook says nothing, and
   // a zero this client invented would be an answer it never gave.
@@ -102,23 +99,11 @@ export default function UserNav({ collapsed }: Props) {
           variant="ghost"
           className="relative h-8 w-8 rounded-full"
         >
-          <Avatar className="h-8 w-8">
-            {/* `GET /user` omits an empty `metadata` (msgspec
-                `omit_defaults`), so a user with nothing in it arrives
-                without the key at all. */}
-            <AvatarImage src={user?.metadata?.image} alt="user image" />
-            <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
-              {capitalize(displayName[0])}
-            </AvatarFallback>
-          </Avatar>
-          {/* The menu is closed most of the time, so the count inside it
-              cannot be what tells the user there is something to see. */}
-          {unseen > 0 ? (
-            <span
-              aria-label={t('account.badge.aria')}
-              className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-destructive ring-2 ring-background"
-            />
-          ) : null}
+          <UserAvatar
+            displayName={displayName}
+            image={user?.metadata?.image}
+            unseen={unseen}
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-26" align="end" forceMount>

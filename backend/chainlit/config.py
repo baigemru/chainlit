@@ -247,8 +247,18 @@ default_avatar_file_url = ""
 
 # Built-in header buttons kept in the header on a narrow screen; every other
 # one moves into the header's overflow menu. Known names: "new_chat",
-# "chat_profiles", "share", "readme", "api_keys", "theme", "user_nav".
+# "chat_profiles", "share", "readme", "api_keys", "theme", "user_nav", and
+# "wordmark" -- which has no overflow rendering, so naming it is the only way
+# a phone shows it at all.
 # mobile_header = ["new_chat", "chat_profiles", "user_nav"]
+
+# The welcome screen opens with the profile's icon, or the app logo when the
+# profile names none. false starts it with the profile's description instead.
+# welcome_avatar = true
+
+# Draw `name` as a wordmark at the left of the header. A phone shows it only
+# if `mobile_header` lists "wordmark".
+# header_wordmark = false
 
 # A phone opening the app is told the full application lives on a desktop,
 # with a link to it. Off unless an app asks for it: most deployments have
@@ -446,6 +456,21 @@ class UISettings(Settings):
     # field as overridden when it differs from its class default, so a profile
     # can switch this on and could never switch a ``True`` one off.
     show_parent_thread_button: bool = False
+    # Whether the welcome screen opens with a picture of itself -- the
+    # profile's ``icon``, or the app logo when no profile names one. ``False``
+    # means the screen starts with the profile's description instead: an app
+    # whose heading already says who is talking does not need the face above
+    # it repeating it. On by default, which fixes the direction a profile can
+    # move it -- ``_overlay`` counts a field as set when it differs from its
+    # class default, so a profile can hide the avatar and could never bring
+    # one back that the base section turned off.
+    welcome_avatar: bool = True
+    # The application's ``name``, drawn as a wordmark at the left of the
+    # header. Off unless a deployment asks: upstream's header opens with the
+    # buttons, and a name repeated over every chat is a logo nobody asked for.
+    # A phone shows it only if ``mobile_header`` lists "wordmark" -- there the
+    # row is three buttons wide already.
+    header_wordmark: bool = False
     default_theme: Optional[Literal["light", "dark"]] = "dark"
     language: Optional[str] = None
     layout: Optional[Literal["default", "wide"]] = "default"
@@ -477,7 +502,9 @@ class UISettings(Settings):
     header_links: Optional[List[HeaderLink]] = None
     # Built-in header buttons kept in the header on a narrow screen; the rest
     # move into the overflow menu. Known names: "new_chat", "chat_profiles",
-    # "share", "readme", "api_keys", "theme", "user_nav".
+    # "share", "readme", "api_keys", "theme", "user_nav", and "wordmark" --
+    # the one entry with nothing behind the overflow button, so a phone draws
+    # the wordmark only when this list names it.
     mobile_header: List[str] = msgspec.field(
         default_factory=lambda: list(DEFAULT_MOBILE_HEADER)
     )

@@ -286,6 +286,18 @@ at startup, unknown keys are ignored so an older file still loads. `ChainlitConf
 plain class; `config.code` (a `CodeSettings` dataclass) holds what the `@cl.*` decorators
 registered.
 
+Two `[UI]` switches decide what the entry screen and the header show, and both ride the wire
+as plain fields (`Settings` has no `omit_defaults`, so the client never guesses one of its
+own). `welcome_avatar` (default `true`) is whether the welcome screen opens with a picture —
+the profile's `icon`, or the app logo where no profile names one; `false` starts it with the
+profile's description instead. `header_wordmark` (default `false`, upstream's header) draws
+`ui.name` as a wordmark at the left of the header. Their defaults point in opposite
+directions on purpose: `_overlay` counts a field as set when it differs from its class
+default, so a profile can hide an avatar and can turn a wordmark on, and neither can be
+undone from a profile once the base section has moved it. The wordmark is also the one entry
+`mobile_header` may name that has nothing behind the overflow button — a phone draws it only
+when that list says `"wordmark"`.
+
 ---
 
 ## 3. The websocket

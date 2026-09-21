@@ -124,6 +124,23 @@ const Header = memo(() => {
     >
       <div className="flex items-center">
         {inSidebar && !sidebarOpen ? <SidebarTrigger /> : null}
+        {/* The app's own name, set in the header's own type rather than
+            fetched as a picture: a deployment that has a logo file already
+            has `Logo`, and one that has not must not be told to draw a PNG
+            to put its name on the screen. Deliberately outside
+            `HEADER_ITEMS` — that list is what `hasOverflow` counts, and a
+            wordmark has no menu row to fold into, so counting it would
+            conjure an overflow button with an empty menu behind it. It still
+            answers to `mobile_header`, which is how a phone is given the
+            choice between the name and the three buttons it has room for. */}
+        {config?.ui?.header_wordmark && stays('wordmark') ? (
+          <span
+            id="header-wordmark"
+            className="px-2 font-bold tracking-tight truncate"
+          >
+            {config?.ui?.name}
+          </span>
+        ) : null}
         {showNewChat && stays('new_chat') ? (
           <NewChatButton navigate={navigate} />
         ) : null}

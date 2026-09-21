@@ -35,13 +35,22 @@ interface Props {
   onFileUpload: (payload: File[]) => void;
   onFileUploadError: (error: string) => void;
   autoScrollRef: MutableRefObject<boolean>;
+  /**
+   * Which of the two arrangements to draw, overriding the viewport. Unset is
+   * the rule the chat has always followed — the phone gets the pill, the
+   * desktop the card — and the welcome screen is the one caller that names
+   * one: an empty screen has the whole page to spend, so the card's toolbar
+   * row buys nothing there and the pill reads as an invitation to type.
+   */
+  layout?: 'full' | 'pill';
 }
 
 export default function MessageComposer({
   fileSpec,
   onFileUpload,
   onFileUploadError,
-  autoScrollRef
+  autoScrollRef,
+  layout
 }: Props) {
   const inputRef = useRef<InputMethods>(null);
   // Above this component, not inside it: the composer is remounted by the
@@ -58,6 +67,10 @@ export default function MessageComposer({
   const disabled = _disabled || !!attachments.find((a) => !a.uploaded);
 
   const isMobile = useIsMobile();
+  // Everything below asks this and not `isMobile`: the arrangement is what
+  // the classes, the row and the draft's survival all turn on, and the
+  // viewport is only its default answer.
+  const pill = layout ? layout === 'pill' : isMobile;
 
   let promptValue = '';
   try {
@@ -167,9 +180,14 @@ export default function MessageComposer({
   // page element. The mount run of this effect covers the second — which is
   // why it must stay keyed on the layout alone and not be guarded on a
   // change: `value` in the deps would re-inject on every keystroke.
+  //
+  // Keyed on `pill` rather than on `isMobile`, because `pill` is what decides
+  // which parent the textarea hangs off: a caller that pins the arrangement
+  // makes a width change no remount at all, and must not be re-injected for
+  // one.
   useEffect(() => {
     if (value) inputRef.current?.setValueExtern(value);
-  }, [isMobile]);
+  }, [pill]);
 
   useEffect(() => {
     if (inputRef.current && promptValue && !promptUsed) {
@@ -185,10 +203,10 @@ export default function MessageComposer({
     }
   }, [promptValue, promptUsed]);
 
-  // The same three controls, arranged twice. On a phone they share one row
-  // with the textarea — Telegram's pill — because the desktop card spends
-  // ~136px of permanent height on a toolbar row of its own, and a phone has
-  // no such height to spend.
+  // The same three controls, arranged twice. In the pill they share one row
+  // with the textarea — Telegram's — because the card spends ~136px of
+  // permanent height on a toolbar row of its own, which a phone does not
+  // have to spend and an empty welcome screen has no reason to.
   const uploadButton = (
     <UploadButton
       disabled={disabled}
@@ -212,8 +230,9 @@ export default function MessageComposer({
     <SubmitButton
       onSubmit={submit}
       disabled={disabled || (!value.trim() && attachments.length === 0)}
-      // 40px on a phone: the desktop 32px is below every tap-target floor.
-      className={isMobile ? 'h-10 w-10' : undefined}
+      // 40px in the pill: the card's 32px is below every tap-target floor,
+      // and the pill is the arrangement a thumb meets.
+      className={pill ? 'h-10 w-10' : undefined}
     />
   );
 
@@ -221,7 +240,7 @@ export default function MessageComposer({
     <div
       id="message-composer"
       className={
-        isMobile
+        pill
           ? 'bg-accent dark:bg-card rounded-3xl p-1.5 pl-2 w-full flex flex-col'
           : 'bg-accent dark:bg-card rounded-3xl p-3 px-4 w-full min-h-24 flex flex-col'
       }
@@ -231,7 +250,7 @@ export default function MessageComposer({
           <Attachments />
         </div>
       ) : null}
-      {isMobile ? (
+      {pill ? (
         // `items-end`, not `items-center`: once the textarea grows past one
         // line the buttons must stay on the pill's bottom edge, next to the
         // line being typed.

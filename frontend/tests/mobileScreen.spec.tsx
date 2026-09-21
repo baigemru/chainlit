@@ -210,6 +210,74 @@ describe('Header', () => {
     expect(screen.queryByText('user_nav')).not.toBeInTheDocument();
   });
 
+  it('draws no wordmark unless the app asked for one', () => {
+    renderHeader({ name: 'PandaPoisk' });
+
+    expect(document.querySelector('#header-wordmark')).toBeNull();
+    expect(screen.queryByText('PandaPoisk')).not.toBeInTheDocument();
+  });
+
+  it('opens the wide header with the app’s own name', () => {
+    renderHeader({ name: 'PandaPoisk', header_wordmark: true });
+
+    const wordmark = document.querySelector('#header-wordmark') as HTMLElement;
+    expect(wordmark.textContent).toBe('PandaPoisk');
+    // First in the left group, before the button that starts a chat: it is
+    // the name of the place, not one of the things to do in it.
+    const left = Array.from(wordmark.parentElement!.children);
+    expect(left.indexOf(wordmark)).toBeLessThan(
+      left.indexOf(screen.getByText('new_chat'))
+    );
+  });
+
+  it('keeps the wordmark off a phone the app did not name it for', () => {
+    // It has no overflow rendering, so a narrow screen that did not ask for
+    // it in `mobile_header` simply has no wordmark -- and, crucially, the
+    // overflow button must not grow a row it cannot draw.
+    setWidth(375);
+    renderHeader({ name: 'PandaPoisk', header_wordmark: true });
+
+    expect(document.querySelector('#header-wordmark')).toBeNull();
+    expect(screen.queryByText('PandaPoisk')).not.toBeInTheDocument();
+  });
+
+  it('keeps the wordmark on a phone that named it', () => {
+    setWidth(375);
+    renderHeader({
+      name: 'PandaPoisk',
+      header_wordmark: true,
+      mobile_header: ['wordmark', 'user_nav']
+    });
+
+    expect(document.querySelector('#header-wordmark')).not.toBeNull();
+    expect(screen.queryByText('new_chat')).not.toBeInTheDocument();
+  });
+
+  it('conjures no overflow button for the wordmark alone', () => {
+    // `HEADER_ITEMS` is what `hasOverflow` counts, and the wordmark is
+    // deliberately not on it: counted, the one name this phone header does
+    // not keep would open a menu with nothing in it.
+    setWidth(375);
+    renderHeader({
+      name: 'PandaPoisk',
+      header_wordmark: true,
+      // Spelled out rather than spread from `HEADER_ITEMS`: the claim is
+      // about what that list must not grow, so the test cannot read it.
+      mobile_header: [
+        'new_chat',
+        'chat_profiles',
+        'share',
+        'readme',
+        'api_keys',
+        'theme',
+        'user_nav'
+      ]
+    });
+
+    expect(document.querySelector('#header-wordmark')).toBeNull();
+    expect(document.querySelector('#header-overflow-button')).toBeNull();
+  });
+
   it('collapses a header link unless it is pinned', () => {
     setWidth(375);
     renderHeader({

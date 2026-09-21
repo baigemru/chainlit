@@ -7,6 +7,7 @@ import {
   ChainlitContext,
   type IAccountActionResponse,
   type IAccountPage,
+  type IAccountSave,
   cloneClient,
   useApi,
   useConfig
@@ -88,10 +89,19 @@ function AccountBody({ onClose }: { onClose: () => void }) {
   // component to a runtime import it does not otherwise need.
   const status = (error as { status?: number } | undefined)?.status;
 
-  const onSubmit = async (values: Record<string, unknown>) => {
+  const onSubmit = async (
+    values: Record<string, unknown>,
+    base: Record<string, unknown>
+  ) => {
     try {
+      // Both halves, because the engine stores the difference between them:
+      // the account document has a second writer — the application, from a
+      // background arrival — and a save of the whole document would drop
+      // whatever landed while this page was open. `base` is the page the form
+      // was filled from, and the route refuses a save without one.
+      const save: IAccountSave = { values, base };
       // `put` resolves with the `Response`, not the parsed body.
-      const res = await saveClient.put('/project/account', values);
+      const res = await saveClient.put('/project/account', save);
       const page = (await res.json()) as IAccountPage;
       // `false`: the server just answered with the stored state, so a
       // revalidation would only ask it to repeat itself.

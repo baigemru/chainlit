@@ -110,8 +110,8 @@ converts, is dropped with a warning and the rest is kept) — or takes the defau
 that instance to `on_account_load(user, account)`. The PUT converts the body strictly and
 passes msgspec's own message through as the 400 `detail` — "Expected `float` <= 100.0 - at
 `$.calculation.margin`" — because the path in it is the only field addressing the client has;
-then `on_account_update`, then the store, then `_render` again with what it just wrote as the
-baseline instead of a second `SELECT`.
+then `on_account_update`, then the **merge** below, then `_render` again with what it stored as
+the baseline instead of a second `SELECT`.
 `405` when there is neither a hook nor a data layer, `404` when no Struct is registered.
 The hooks are stored unwrapped, not through `wrap_user_function`: a hook that raises fails the
 request as a 500 rather than being logged away while the engine stores and answers "saved".
@@ -138,6 +138,26 @@ checks the arity at import (`inspect.signature(...).bind(None, None)`), so the r
 one-argument hook is a `TypeError` where the application is read rather than a 500 on the first
 page load.
 
+**A save stores the user's edit, not the user's document.** `users.account` has a second
+writer: an application may put a background arrival — a measurement, a notification — into the
+same JSONB row while a page is open on it, and the whole-document `PUT` this replaces dropped it
+silently. So `PUT /project/account` carries two documents, `{"values": …, "base": …}`: `base` is
+the page the form was filled from, and a save without one is a `428`, because a save that cannot
+say what it was editing can only be stored by overwriting. The route then takes the leaves that
+differ between `base` and what came back, reads the row **`FOR UPDATE` in the request's own
+transaction** (`UserService.locked_account`) and applies the difference to what it finds
+(`account.merge_account`); the lock is released when the session commits in `before_send`. The
+load hook's write goes the same way, because a hook that spends a second on the network before
+it answers is a window of exactly the same kind. `base` comes from the browser and does not have
+to be trusted: it decides only which leaves the save claims, which is authority the client
+already has over `values`. Lists are matched by identity rather than by position — an arrival
+that prepends a row moves every index under it — and the identity is `x-key` where the
+application declared one, the element's own contents where it did not; the two rules and what
+each gives up are in `account.merge_account`'s docstring. Two writes are **not** merged: an
+action's `AccountRefresh(account=…)`, because the hook built its answer from a read of its own
+and there is no "what the page showed" to take a difference against, and the first-ever write
+for a user, because `FOR UPDATE` locks nothing when there is no row yet.
+
 **`readOnly` leaves are never stored.** A field marked `readOnly` in the schema
 (`Meta(extra_json_schema={"readOnly": True})`) is derived — a rate, a balance, a quota — and the
 application recomputes it on every load. `account.strip_readonly` puts every one of them back to
@@ -155,14 +175,16 @@ whole; the walk goes into Struct fields and into the Struct elements of a list, 
 derived values therefore needs a load hook to compute them: nothing else can, because nothing
 stores them.
 
-The schema conventions the client understands are plain JSON Schema plus three `x-` keys
+The schema conventions the client understands are plain JSON Schema plus a handful of `x-` keys
 carried through `Meta(extra_json_schema=...)`: `x-enum-labels` maps an enum value to its label,
 `x-widget` picks a control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link` —
 a `readOnly` string rendered as a button-styled anchor to the value, which is how an
 application puts «Платёжный кабинет» on the page pointing at its own `/billing/portal`
 redirect — and `cards`, `image`, `title` for a `list[Struct]` drawn as one card per element),
 and `x-actions` puts buttons on a card array or on a tab, `x-pinned: true` on a section field
-marks it for the pinned block in the left panel. `[UI.account]` in `config.toml`
+marks it for the pinned block in the left panel, and `x-key: true` on a field of a list's
+element names that element, which is what lets a save be merged into a list a background write
+has since reordered. `[UI.account]` in `config.toml`
 decides only whether the user menu shows the row and what it is called; what the page
 _contains_ is the Struct.
 

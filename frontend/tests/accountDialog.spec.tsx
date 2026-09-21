@@ -102,7 +102,9 @@ vi.mock('@/components/SchemaForm', () => ({
         // The real form owns the rejection (it is what re-enables the
         // button); swallowed here so a failing-save case does not surface as
         // an unhandled rejection in the run.
-        void Promise.resolve(formProps?.onSubmit({ a: 1 })).catch(
+        // Two arguments, as the real form submits: the edited values and the
+        // page they were filled from, which the dialog sends together.
+        void Promise.resolve(formProps?.onSubmit({ a: 1 }, { a: 0 })).catch(
           () => undefined
         )
       }
@@ -458,7 +460,10 @@ describe('the account dialog', () => {
     fireEvent.click(screen.getByText('stub_submit'));
 
     await waitFor(() =>
-      expect(mockPut).toHaveBeenCalledWith('/project/account', { a: 1 })
+      expect(mockPut).toHaveBeenCalledWith('/project/account', {
+        values: { a: 1 },
+        base: { a: 0 }
+      })
     );
     // The response body, not the submitted values: the engine answers with
     // what it stored, which a lenient decode may have trimmed.

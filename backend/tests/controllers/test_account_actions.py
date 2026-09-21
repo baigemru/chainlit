@@ -75,6 +75,9 @@ class FakeUsers:
     async def get_account(self, identifier: str) -> Dict[str, Any]:
         return self.stored
 
+    async def locked_account(self, identifier: str) -> Dict[str, Any]:
+        return self.stored
+
     async def set_account(self, identifier: str, values: Dict[str, Any]) -> None:
         self.stored = values
         self.written.append(values)

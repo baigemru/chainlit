@@ -44,6 +44,14 @@ export interface IJsonSchema {
   /** A lucide name, on a nested Struct: the icon of its row in the section menu. */
   'x-icon'?: string;
   'x-enum-labels'?: Record<string, string>;
+  /**
+   * On a field of a list element: this field is the element's name. The
+   * engine pairs elements by it when it merges a save into the stored
+   * document, so an edit reaches the right card after a background write has
+   * moved it. Carried here because the client renders the schema; nothing in
+   * the form reads it yet.
+   */
+  'x-key'?: boolean;
   [key: string]: unknown;
 }
 
@@ -63,6 +71,21 @@ export interface IAccountPage {
   values: Record<string, unknown>;
   readonly: boolean;
   message?: string | null;
+}
+
+/**
+ * The body of `PUT /project/account`: the form, and the page it was filled
+ * from.
+ *
+ * Both, because the engine stores the difference between them rather than the
+ * document: the account row has a second writer — whatever the application
+ * puts there from a background arrival — and a save that carried only `values`
+ * could not be told apart from one that meant to revert it. A save with no
+ * `base` is refused with 428.
+ */
+export interface IAccountSave {
+  values: Record<string, unknown>;
+  base: Record<string, unknown>;
 }
 
 /** What the action route answers; the page does one of three things with it. */

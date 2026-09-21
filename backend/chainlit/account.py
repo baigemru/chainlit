@@ -32,6 +32,14 @@ puts every one of them back to its default before anything is stored. The
 engine owns that rule so no application has to keep a list of which of its own
 fields are computed and clean them out of each save by hand.
 
+The engine is not the only writer of the row, either: an application may put a
+background arrival into the same document while a page is open on it. So a save
+is not a write of what the browser sent -- it is ``merge_account``, the leaves
+the user actually changed applied to the document as the store holds it at that
+moment, under the row's lock. ``x-key`` on a field of a list's element is the
+one thing the application has to say for that to work on its lists: it names
+the element, so an edit can be paired with it after a prepend has moved it.
+
 This module imports no Litestar and no configuration, so the rules below can be
 exercised without a request and without a process-global. The route is
 ``chainlit.controllers.account``.
@@ -50,6 +58,7 @@ __all__ = (
     "AccountActionResponse",
     "AccountActionResult",
     "AccountPage",
+    "AccountSave",
     "OpenThread",
     "OpenThreadOutcome",
     "PageOutcome",
@@ -61,6 +70,7 @@ __all__ = (
     "call_hook",
     "decode_stored",
     "element_type_at",
+    "merge_account",
     "register",
     "schema_of",
     "strip_readonly",
@@ -190,6 +200,236 @@ class AccountActionCall(msgspec.Struct):
 
     path: str
     item: Any = None
+
+
+class AccountSave(msgspec.Struct):
+    """What the client sends when the page is saved.
+
+    Two documents, not one. ``values`` is the form as the user left it, and
+    ``base`` is the page the form was filled from -- the same document, before
+    they touched it. The engine needs both because it is no longer the only
+    writer of the row: an application may put a background arrival into the
+    same JSONB document, and a save that carried only ``values`` could not be
+    told apart from a save that meant to revert that arrival. The difference
+    between ``base`` and ``values`` is the user's edit; everything else is
+    whatever the store says now. See ``merge_account``.
+
+    ``base`` is untrusted, and it does not have to be trusted: it decides only
+    which leaves the save *claims*, and a client that lies about it can ask
+    for exactly what a client could already ask for by putting those values in
+    ``values``. It is optional in the type and refused in the route, so the
+    refusal can say why rather than read as a malformed body.
+    """
+
+    values: Dict[str, Any]
+    base: Optional[Dict[str, Any]] = None
+
+
+def merge_account(base: S, posted: S, current: S) -> S:
+    """The user's edit, applied to the document as it is stored now.
+
+    A three-way merge at the leaves. ``base`` is what the page showed,
+    ``posted`` is what came back from the form, ``current`` is what the row
+    holds at the moment of the write. A leaf the user changed is taken from
+    ``posted``; every other leaf is taken from ``current``, so a write that
+    landed in the document while the page was open survives a save that
+    knew nothing about it. The whole-document overwrite this replaces lost
+    it silently, which is the one failure mode a settings page must not have.
+
+    Lists are the hard half, because an element's position is not an identity:
+    an arrival that prepends a row moves every index under it.
+
+    * A list of scalars is a value: it is taken whole from ``posted`` if the
+      user changed it, and whole from ``current`` otherwise.
+    * A list of Structs whose element declares ``x-key``
+      (``Meta(extra_json_schema={"x-key": True})``, read the way ``readOnly``
+      is) is a list of identified things: elements are paired by that key
+      across all three documents, so an edit lands on the right element
+      wherever it has drifted to, a removal removes it, and an addition is
+      appended.
+    * Without ``x-key`` the engine has no name for an element, so it pairs
+      ``base`` with ``posted`` by index -- the form edits cards in place, and
+      an edit keeps the length -- and then finds the element the user was
+      editing inside ``current`` by its *contents*. That is enough for the
+      common case (the arrival added elements, the user edited an existing
+      one) and admits it is not enough when the arrival edited the very
+      element the user did: nothing in ``current`` looks like what they were
+      shown, their change to it is dropped, and the drop is logged. An
+      application that cares declares ``x-key``.
+
+    Nothing here knows what any of these fields mean. The only thing the
+    engine is told is which field of an element is its name, and it is told
+    that in the schema, by the application.
+    """
+    node = msgspec_inspect.type_info(type(current))
+    if not isinstance(node, msgspec_inspect.StructType):  # pragma: no cover - defensive
+        return posted
+    changes: Dict[str, Any] = {}
+    for field in node.fields:
+        merged = _merge_value(
+            field.type,
+            getattr(base, field.name),
+            getattr(posted, field.name),
+            getattr(current, field.name),
+            field.encode_name,
+        )
+        if merged is not getattr(current, field.name):
+            changes[field.name] = merged
+    if not changes:
+        return current
+    return structs.replace(current, **changes)
+
+
+def _merge_value(
+    declared: msgspec_inspect.Type, base: Any, posted: Any, current: Any, where: str
+) -> Any:
+    """One field: recurse into a Struct, pair a list, else take a side."""
+    inner = _only_type(declared)
+    if (
+        isinstance(inner, msgspec_inspect.StructType)
+        and isinstance(base, msgspec.Struct)
+        and type(base) is type(posted) is type(current)
+    ):
+        return merge_account(base, posted, current)
+    if isinstance(inner, msgspec_inspect.ListType):
+        item = _only_type(inner.item_type)
+        if (
+            isinstance(item, msgspec_inspect.StructType)
+            and isinstance(base, list)
+            and isinstance(posted, list)
+            and isinstance(current, list)
+        ):
+            return _merge_list(item, base, posted, current, where)
+    return posted if posted != base else current
+
+
+def _merge_list(
+    item: msgspec_inspect.StructType,
+    base: list,
+    posted: list,
+    current: list,
+    where: str,
+) -> list:
+    key = _key_field(item)
+    if key is not None:
+        return _merge_keyed(key, base, posted, current, where)
+    return _merge_positional(base, posted, current, where)
+
+
+def _merge_keyed(key: str, base: list, posted: list, current: list, where: str) -> list:
+    """Pair elements by the field the application marked ``x-key``.
+
+    An element whose key is empty has not been named -- a row written before
+    the application introduced the key -- and is carried through from
+    ``current`` untouched rather than guessed at.
+    """
+    base_by = _by_key(base, key)
+    posted_by = _by_key(posted, key)
+    merged: list = []
+    for element in current:
+        name = _key_of(element, key)
+        if name is None or name not in base_by:
+            merged.append(element)
+            continue
+        if name not in posted_by:
+            continue  # the user removed it
+        merged.append(merge_account(base_by[name], posted_by[name], element))
+    known = {_key_of(element, key) for element in current}
+    for element in posted:
+        name = _key_of(element, key)
+        if name is None or name in known:
+            continue
+        if name in base_by:
+            # The user was editing something the other writer has since
+            # deleted. Re-adding it would resurrect a row somebody removed.
+            logger.warning(
+                "account: %s.%s is no longer stored; the save's change to it "
+                "is dropped",
+                where,
+                name,
+            )
+            continue
+        merged.append(element)
+    return merged
+
+
+def _merge_positional(base: list, posted: list, current: list, where: str) -> list:
+    """Pair ``base`` with ``posted`` by index, then find the element by value.
+
+    The index pairing holds only while the user edited in place. A different
+    length means they added or removed an element, and with no declared key
+    there is no way to say which -- so the list is what they sent, and
+    anything the other writer had added to it is gone. Logged, because that
+    is a loss, and because ``x-key`` is the fix.
+    """
+    if len(base) != len(posted):
+        if [_token(element) for element in current] != [
+            _token(element) for element in base
+        ]:
+            logger.warning(
+                "account: %s was rewritten by the save and has also changed in "
+                "the store; the stored version is dropped. Declare x-key on the "
+                "element's identifying field to merge instead.",
+                where,
+            )
+        return posted
+    merged = list(current)
+    taken: set[int] = set()
+    for was, sent in zip(base, posted):
+        if was == sent:
+            continue
+        token = _token(was)
+        index = next(
+            (
+                position
+                for position, element in enumerate(merged)
+                if position not in taken and _token(element) == token
+            ),
+            None,
+        )
+        if index is None:
+            logger.warning(
+                "account: the element of %s the save edited is not in the store "
+                "as it was shown; the change to it is dropped. Declare x-key on "
+                "the element's identifying field to merge instead.",
+                where,
+            )
+            continue
+        taken.add(index)
+        merged[index] = merge_account(was, sent, merged[index])
+    return merged
+
+
+def _by_key(elements: list, key: str) -> Dict[Any, Any]:
+    """The first element under each name; a repeated name names the first."""
+    found: Dict[Any, Any] = {}
+    for element in elements:
+        name = _key_of(element, key)
+        if name is not None and name not in found:
+            found[name] = element
+    return found
+
+
+def _key_of(element: Any, key: str) -> Any:
+    # An empty key is not a name: it is a row written before the application
+    # introduced one, and two of those are not the same element.
+    return getattr(element, key, None) or None
+
+
+def _token(element: Any) -> bytes:
+    """An element's contents, as one comparable value."""
+    return msgspec.json.encode(element)
+
+
+def _key_field(item: msgspec_inspect.StructType) -> Optional[str]:
+    """The field of an element the application marked as its name."""
+    for field in item.fields:
+        node = field.type
+        while isinstance(node, msgspec_inspect.Metadata):
+            if (node.extra_json_schema or {}).get("x-key"):
+                return field.name
+            node = node.type
+    return None
 
 
 def element_type_at(cls: Type[msgspec.Struct], path: str) -> Type[msgspec.Struct]:

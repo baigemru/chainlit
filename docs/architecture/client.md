@@ -495,8 +495,14 @@ control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link`, and on a
 `list[Struct]` the `cards` grid, whose items read `image` and `title`) and
 `x-enum-labels` names the options. A control the resolver does not recognise renders
 read-only rather than disappearing — the form has to keep submitting a field it cannot
-draw. Saving `PUT`s the values object back and re-renders from the response, which is
-what the engine stored; a rejection carries the server's `detail`, and the msgspec path
+draw. Saving `PUT`s two objects — `{values, base}`, the form and the page it was filled
+from — and re-renders from the response, which is what the engine stored. Both halves,
+because the engine stores the difference between them rather than the document: the
+account row has a second writer (the application, from a background arrival), and a save
+of the whole document dropped whatever landed while the page was open. `base` is the
+`values` the form last `reset` from, held in a ref for that reason — sending a fresher
+page would read as "the user deleted everything that arrived since" — and a save without
+one is refused with `428`. a rejection carries the server's `detail`, and the msgspec path
 in it (`at $.calculation.margin`) is the only field addressing the form has. That save
 goes out through a copy of the context client with `onError` cleared, the way `useApi`
 silences it for reads, so one failure raises one toast.

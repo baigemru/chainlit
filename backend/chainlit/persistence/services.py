@@ -274,6 +274,26 @@ class UserService(
         stored = await self.fetch_scalar(statements.user_account_query(identifier))
         return stored or {}
 
+    async def locked_account(self, identifier: str) -> Dict[str, Any]:
+        """The same values, with the row held until this session commits.
+
+        For the one caller that is about to write back what it reads: the
+        account document has two writers -- the page and whatever the
+        application puts there from a background arrival -- and a read that
+        does not hold the row lets the other one slip in between the read and
+        the write, where the loser's edit disappears without a trace.
+
+        ``FOR UPDATE`` locks a row that exists. A user who has never been
+        stored has none, so two first-ever writes can still race and the upsert
+        will let the second win; there is nothing in that row yet to lose, and
+        in a deployment with a login the sign-in mints it before any page can
+        be opened.
+        """
+        stored = await self.fetch_scalar(
+            statements.user_account_query(identifier).with_for_update()
+        )
+        return stored or {}
+
     async def set_account(self, identifier: str, values: Dict[str, Any]) -> None:
         """Store the account values, minting the row if no login has yet.
 

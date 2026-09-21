@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import {
   FieldValues,
   FormProvider,
@@ -35,8 +35,16 @@ export interface SchemaFormProps {
   schema: IJsonSchema;
   values: Record<string, unknown>;
   readonly?: boolean;
-  /** Resolves when the server accepted; rejects (with the server's detail) otherwise. */
-  onSubmit: (values: Record<string, unknown>) => Promise<void> | void;
+  /**
+   * Resolves when the server accepted; rejects (with the server's detail)
+   * otherwise. `base` is the page these values were filled from, which the
+   * save carries so the engine can store the difference rather than the
+   * document.
+   */
+  onSubmit: (
+    values: Record<string, unknown>,
+    base: Record<string, unknown>
+  ) => Promise<void> | void;
   /** A button from `x-actions` was pressed; `item` is the card's current form value, or null for a tab action. */
   onAction?: ActionHandler;
   /** The layout: sections, matches and the Save/Reset row, in the caller's order. */
@@ -108,16 +116,24 @@ const SchemaForm = ({
     formState: { isSubmitting }
   } = methods;
 
+  // What the form was last filled from, which is not always the `values`
+  // prop: SWR can revalidate under an open form, and the save has to report
+  // the page the user was actually editing. Sending a newer one would read as
+  // "the user deleted everything that arrived since", and the engine would
+  // do it.
+  const base = useRef(values);
+
   // The page hands back what the server stored after a save, so the form has
   // to adopt it: `reset(values)` moves `defaultValues` too, which is what
   // makes the Reset button below mean "the last accepted values".
   useEffect(() => {
+    base.current = values;
     reset(values);
   }, [values, reset]);
 
   const submit = handleSubmit(async (data) => {
     try {
-      await onSubmit(data as Record<string, unknown>);
+      await onSubmit(data as Record<string, unknown>, base.current);
     } catch {
       // The page owns the toast; here a refusal only has to give the button
       // back. Letting it escape would reach the browser as an unhandled

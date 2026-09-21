@@ -16,13 +16,14 @@ a successor session would be a second set of rules about who may claim it.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Type
+from typing import Any, Optional, Type
 
 import msgspec
 from litestar import Controller, get, post, put
 from litestar.connection import ASGIConnection
 from litestar.di import NamedDependency
 from litestar.exceptions import (
+    ClientException,
     MethodNotAllowedException,
     NotAuthorizedException,
     NotFoundException,
@@ -30,6 +31,7 @@ from litestar.exceptions import (
 )
 from litestar.handlers.base import BaseRouteHandler
 from litestar.params import FromPath, SkipValidation
+from litestar.status_codes import HTTP_428_PRECONDITION_REQUIRED
 from litestar.types import Empty
 
 import chainlit.config
@@ -37,6 +39,7 @@ from chainlit.account import (
     AccountActionCall,
     AccountActionResponse,
     AccountPage,
+    AccountSave,
     OpenThread,
     OpenThreadOutcome,
     PageOutcome,
@@ -47,6 +50,7 @@ from chainlit.account import (
     call_hook,
     decode_stored,
     element_type_at,
+    merge_account,
     strip_readonly,
 )
 from chainlit.account_badge import push_account_badge
@@ -107,23 +111,33 @@ class AccountController(Controller):
     async def write(
         self,
         request: AuthedRequest,
-        data: Dict[str, Any],
+        data: AccountSave,
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
     ) -> AccountPage:
-        """Validate, hand to the app, store, and answer with what was stored.
+        """Validate, hand to the app, merge onto the row, and answer with it.
 
-        The body is typed as a plain object because the Struct is only known
+        ``values`` is typed as a plain object because the Struct is only known
         at runtime -- the application registers it as it imports -- so the
         conversion happens here instead of at the signature. ``msgspec`` names
         the offending field (``$.calculation.margin``) and that message is the
         only field addressing the client has, so it is passed through rather
         than replaced with a generic refusal.
 
+        ``base`` is the page the form was filled from, and it is what makes
+        this a save of the user's *edit* rather than of their whole document.
+        It is decoded the lenient way the stored row is -- it was that row a
+        moment ago, and an application that has since renamed a field must not
+        turn every open tab's save into a 400 -- while ``values`` is converted
+        strictly, because that half is input and refusing it is the point.
+
         What is converted is not quite what is stored: ``strip_readonly``
         runs first, so a derived leaf the browser echoed back cannot be
         written over the value the application computes. It runs *before*
-        ``on_account_update`` too -- the hook is shown what will be stored,
-        not what was posted.
+        ``on_account_update`` too -- the hook is shown the save, not what was
+        posted -- and before the merge, which is deliberate: the hook is the
+        application's reading of what *this user* asked for, and handing it
+        the merged document would let it rewrite, as if the user had asked,
+        whatever another writer had just put there.
         """
         cls = _registered()
         code = chainlit.config.config.code
@@ -133,12 +147,27 @@ class AccountController(Controller):
                 "This application has nowhere to store account values: it "
                 "registered no on_account_update and has no data layer."
             )
+        if data.base is None:
+            # Not a compatibility branch: a save that cannot say what it was
+            # editing can only be stored by overwriting the document, and
+            # overwriting is exactly what silently dropped the other writer's
+            # work. The client is shipped inside this package, so the only
+            # caller that can land here is one that skipped the GET.
+            raise ClientException(
+                status_code=HTTP_428_PRECONDITION_REQUIRED,
+                detail=(
+                    "A save must carry `base`, the account page it was made "
+                    "from: only the difference between the two is stored, so "
+                    "a write that arrived while the page was open is kept."
+                ),
+            )
 
         try:
-            posted = msgspec.convert(data, cls)
+            posted = msgspec.convert(data.values, cls)
         except msgspec.ValidationError as error:
             raise ValidationException(detail=str(error)) from error
 
+        base = strip_readonly(decode_stored(data.base, cls))
         account = strip_readonly(posted)
         identity = caller(request)
         message: Optional[str] = None
@@ -146,18 +175,17 @@ class AccountController(Controller):
             returned = await call_hook(code.on_account_update, identity, account)
             # Anything but a string was not asking for a toast.
             message = returned if isinstance(returned, str) and returned else None
-        if user_service is not None and identity is not None:
-            await user_service.set_account(
-                identity.identifier, msgspec.to_builtins(account)
-            )
+        stored = await _store_merged(base, account, cls, identity, user_service)
 
         # Rebuilt the way the GET builds it, not echoed back: the app's own
         # load hook may normalise what it was handed, and the page must show
-        # what is now stored rather than what was posted. ``baseline=account``
-        # rather than a second SELECT -- it is the same session that has just
-        # written it, so the read could only answer with this value.
+        # what is now stored rather than what was posted -- which is also how
+        # a concurrent arrival the merge kept reaches the form that saved over
+        # it. ``baseline=stored`` rather than a second SELECT: it is the same
+        # session that has just written it, so the read could only answer with
+        # this value.
         return build_page(
-            await _render(cls, identity, user_service, baseline=account),
+            await _render(cls, identity, user_service, baseline=stored),
             readonly=readonly,
             message=message,
         )
@@ -281,7 +309,15 @@ async def _render(
     marking a feed seen is a legitimate write on a ``GET``. So the two are
     compared -- both through ``strip_readonly``, or a derived field the hook
     recomputed would look like a change on every single load -- and the store
-    is touched only when they differ.
+    is touched only when they differ. That write goes through the same merge a
+    ``PUT`` does: the hook may spend a second on the network before it answers,
+    and the arrival that lands in that second must not be undone by a page
+    load.
+
+    The page that comes back is the hook's, not the merge's, so a document
+    that changed underneath is shown on the next load rather than half-drawn
+    from two: what the hook returned is the only version of it that has the
+    derived leaves filled in.
 
     ``baseline`` short-circuits the read for a caller that has just written
     the values itself and so already knows them.
@@ -297,14 +333,39 @@ async def _render(
         cls,
         hook="@cl.on_account_load",
     )
+    kept = strip_readonly(baseline)
     keep = strip_readonly(account)
-    if (
-        user_service is not None
-        and identity is not None
-        and keep != strip_readonly(baseline)
-    ):
-        await user_service.set_account(identity.identifier, msgspec.to_builtins(keep))
+    if keep != kept:
+        await _store_merged(kept, keep, cls, identity, user_service)
     return account
+
+
+async def _store_merged(
+    base: msgspec.Struct,
+    account: msgspec.Struct,
+    cls: Type[msgspec.Struct],
+    identity: Optional[Identity],
+    user_service: Optional[UserService],
+) -> msgspec.Struct:
+    """Write what changed between ``base`` and ``account``, and return the row.
+
+    The read and the write are one transaction and the read holds the row,
+    which is the whole of the guarantee: between them there is no moment where
+    another writer's commit can pass unseen. The lock is released when the
+    request's session commits, in ``before_send`` -- so it also spans the load
+    hook that draws the answer, which is application code. That is the price
+    of showing the document that was actually stored, and the hook that runs
+    there is the one an application already runs on every page load.
+
+    With nowhere to store -- no persistence, or no identity to store under --
+    there is nothing to merge with and the caller's own values are the answer.
+    """
+    if user_service is None or identity is None:
+        return account
+    current = decode_stored(await user_service.locked_account(identity.identifier), cls)
+    merged = merge_account(base, account, current)
+    await user_service.set_account(identity.identifier, msgspec.to_builtins(merged))
+    return merged
 
 
 async def _stored(
@@ -335,6 +396,14 @@ async def _store_action_values(
     thing a ``PUT`` would put there, but the derived leaves the action worked
     out are the freshest there are, so they are what the page is drawn from
     and what the load hook is handed.
+
+    Not merged, unlike the other two writes, and this is the one place where
+    the whole document still wins: the hook was handed an item and built its
+    answer from a read of its own, so there is no "what the page showed" for a
+    difference to be taken against. Holding the row across the hook would buy
+    one instead, at the price of a lock held over whatever network the action
+    talks to. An action that changes one thing should return the values it was
+    handed with that one thing changed.
     """
     if account is None:
         return None

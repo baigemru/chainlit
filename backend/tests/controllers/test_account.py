@@ -64,7 +64,12 @@ DEFAULTS = {
 
 
 class FakeUsers:
-    """The two methods the controller asks `UserService` for."""
+    """The three methods the controller asks `UserService` for.
+
+    `locked_account` is `get_account` under the row's lock in the real
+    service; in memory there is nothing to lock, and what these tests are
+    about is what the route does with what it read.
+    """
 
     def __init__(self, stored: Optional[Dict[str, Any]] = None) -> None:
         self.stored: Dict[str, Any] = dict(stored or {})
@@ -73,9 +78,24 @@ class FakeUsers:
     async def get_account(self, identifier: str) -> Dict[str, Any]:
         return self.stored
 
+    async def locked_account(self, identifier: str) -> Dict[str, Any]:
+        return self.stored
+
     async def set_account(self, identifier: str, values: Dict[str, Any]) -> None:
         self.stored = values
         self.written.append(values)
+
+
+def _save(
+    values: Dict[str, Any], base: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """The body of a save: the form, and the page it was filled from.
+
+    A save carries both because the engine stores the difference between
+    them, not the document. `DEFAULTS` is the page a user who has stored
+    nothing was shown, which is what most of these tests are saving from.
+    """
+    return {"values": values, "base": DEFAULTS if base is None else base}
 
 
 @pytest.fixture(autouse=True)
@@ -388,7 +408,9 @@ def test_a_valid_put_reaches_the_hook_as_a_struct_and_the_store_as_builtins(
         _sign_in(client)
         response = client.put(
             "/project/account",
-            json={"calculation": {"margin": 35}, "notify": False, "plan": "free"},
+            json=_save(
+                {"calculation": {"margin": 35}, "notify": False, "plan": "free"}
+            ),
         )
 
     identifier, account = seen[0]
@@ -418,7 +440,7 @@ def test_a_save_hook_that_raises_fails_the_request_and_stores_nothing(registered
     users = FakeUsers()
     with _client(users) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.status_code == 500
     assert users.written == []
@@ -443,7 +465,7 @@ def test_a_sync_hook_is_accepted_too(registered):
     config.code.on_account_update = save
     with _client(FakeUsers()) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.status_code == 200
     assert response.json()["message"] == "ok"
@@ -457,7 +479,7 @@ def test_a_put_never_stores_a_readonly_leaf_the_browser_sent_back(registered):
     with _client(users) as client:
         _sign_in(client)
         response = client.put(
-            "/project/account", json={"notify": False, "plan": "enterprise"}
+            "/project/account", json=_save({"notify": False, "plan": "enterprise"})
         )
 
     assert response.status_code == 200
@@ -471,7 +493,7 @@ def test_a_put_strips_a_readonly_leaf_inside_a_card_too(registered):
         _sign_in(client)
         client.put(
             "/project/account",
-            json={"feed": {"cards": [{"title": "Кружка", "price": 12.5}]}},
+            json=_save({"feed": {"cards": [{"title": "Кружка", "price": 12.5}]}}),
         )
 
     assert users.written[0]["feed"]["cards"] == [{"title": "Кружка", "price": 0.0}]
@@ -490,7 +512,9 @@ def test_the_update_hook_is_shown_what_will_be_stored(registered):
     config.code.on_account_update = save
     with _client(FakeUsers()) as client:
         _sign_in(client)
-        client.put("/project/account", json={"notify": False, "plan": "enterprise"})
+        client.put(
+            "/project/account", json=_save({"notify": False, "plan": "enterprise"})
+        )
 
     assert seen[0].plan == "free"
     assert seen[0].notify is False
@@ -507,7 +531,7 @@ def test_a_put_writes_once_when_the_load_hook_agrees_with_it(registered):
     users = FakeUsers()
     with _client(users) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert len(users.written) == 1
     assert response.json()["values"]["plan"] == "pro"
@@ -526,7 +550,7 @@ def test_the_load_hook_after_a_put_sees_what_the_put_stored(registered):
     config.code.on_account_load = load
     with _client(FakeUsers()) as client:
         _sign_in(client)
-        client.put("/project/account", json={"notify": False})
+        client.put("/project/account", json=_save({"notify": False}))
 
     assert seen[0].notify is False
 
@@ -535,7 +559,7 @@ def test_a_put_with_no_hook_still_stores(registered):
     users = FakeUsers()
     with _client(users) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.status_code == 200
     assert users.written[0]["notify"] is False
@@ -547,7 +571,9 @@ def test_an_out_of_range_value_is_a_400_naming_the_field(registered):
     has to survive into the response body."""
     with _client(FakeUsers()) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"calculation": {"margin": 300}})
+        response = client.put(
+            "/project/account", json=_save({"calculation": {"margin": 300}})
+        )
 
     assert response.status_code == 400
     assert "$.calculation.margin" in response.json()["detail"]
@@ -556,7 +582,7 @@ def test_an_out_of_range_value_is_a_400_naming_the_field(registered):
 def test_a_wrong_type_is_a_400_too(registered):
     with _client(FakeUsers()) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": "maybe"})
+        response = client.put("/project/account", json=_save({"notify": "maybe"}))
 
     assert response.status_code == 400
     assert "$.notify" in response.json()["detail"]
@@ -566,7 +592,7 @@ def test_nothing_is_stored_when_validation_fails(registered):
     users = FakeUsers()
     with _client(users) as client:
         _sign_in(client)
-        client.put("/project/account", json={"calculation": {"margin": 300}})
+        client.put("/project/account", json=_save({"calculation": {"margin": 300}}))
 
     assert users.written == []
 
@@ -574,14 +600,14 @@ def test_nothing_is_stored_when_validation_fails(registered):
 def test_a_put_with_nowhere_to_store_is_a_405(registered):
     with _client() as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.status_code == 405
 
 
 def test_a_put_without_a_cookie_is_a_401(registered):
     with _client(FakeUsers()) as client:
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.status_code == 401
 
@@ -600,7 +626,9 @@ def test_the_answer_is_rebuilt_not_echoed(registered):
     config.code.on_account_update = save
     with _client() as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": True, "plan": "free"})
+        response = client.put(
+            "/project/account", json=_save({"notify": True, "plan": "free"})
+        )
 
     assert response.json()["values"] == {**DEFAULTS, "notify": False, "plan": "pro"}
 
@@ -621,7 +649,7 @@ def test_the_decorators_wire_the_same_routes(registered):
     users = FakeUsers()
     with _client(users) as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.json()["message"] == "ok"
     assert isinstance(seen[0], Account)
@@ -639,7 +667,7 @@ def test_a_hook_alone_makes_the_page_writable(registered):
     config.code.on_account_update = save
     with _client() as client:
         _sign_in(client)
-        response = client.put("/project/account", json={"notify": False})
+        response = client.put("/project/account", json=_save({"notify": False}))
 
     assert response.status_code == 200
     assert seen
@@ -663,3 +691,70 @@ def test_a_load_hook_returning_a_mapping_is_a_500(registered):
 
     assert response.status_code == 500
     assert users.written == []
+
+
+# --- two writers on one document ---------------------------------------------
+
+
+def test_a_save_that_cannot_say_what_it_edited_is_refused(registered):
+    """Without `base` the route could only store the document whole, and a
+    whole-document write is what silently dropped the other writer's work.
+    The client is shipped inside this package, so there is no caller to be
+    gentle with -- only one that skipped the GET."""
+    users = FakeUsers({"notify": False})
+    with _client(users) as client:
+        _sign_in(client)
+        response = client.put("/project/account", json={"values": {"notify": True}})
+
+    assert response.status_code == 428
+    assert "base" in response.json()["detail"]
+    assert users.written == []
+
+
+def test_a_write_that_landed_while_the_page_was_open_survives_the_save(registered):
+    """The race this whole mechanism exists for: the tab was opened, an
+    arrival put a card in the document, and the user then pressed Save on a
+    form that had never heard of it."""
+    users = FakeUsers({"notify": True, "feed": {"cards": [], "seen": False}})
+    with _client(users) as client:
+        _sign_in(client)
+        shown = client.get("/project/account").json()["values"]
+        users.stored = {
+            **users.stored,
+            "feed": {"cards": [{"title": "Замер", "price": 0.0}], "seen": False},
+        }
+        response = client.put(
+            "/project/account",
+            json=_save({**shown, "notify": False}, base=shown),
+        )
+
+    assert response.status_code == 200
+    assert users.stored["notify"] is False
+    assert users.stored["feed"]["cards"] == [{"title": "Замер", "price": 0.0}]
+    # And the answer shows it, so the form that saved over it adopts it.
+    assert response.json()["values"]["feed"]["cards"] == [
+        {"title": "Замер", "price": 0.0}
+    ]
+
+
+def test_a_write_that_lands_while_the_load_hook_runs_survives_it(registered):
+    """A GET writes too -- marking a feed seen is the usual reason -- and the
+    hook that decides it may spend a second on the network first. Whatever
+    arrives in that second is still there afterwards."""
+    users = FakeUsers({"notify": True, "feed": {"cards": [], "seen": False}})
+
+    async def load(user, account):
+        users.stored = {
+            **users.stored,
+            "feed": {"cards": [{"title": "Замер", "price": 0.0}], "seen": False},
+        }
+        return msgspec.structs.replace(account, notify=False)
+
+    config.code.on_account_load = load
+    with _client(users) as client:
+        _sign_in(client)
+        response = client.get("/project/account")
+
+    assert response.status_code == 200
+    assert users.stored["notify"] is False
+    assert users.stored["feed"]["cards"] == [{"title": "Замер", "price": 0.0}]

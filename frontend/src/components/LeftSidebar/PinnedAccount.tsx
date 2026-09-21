@@ -9,7 +9,8 @@ import {
   SidebarGroup,
   SidebarMenu,
   SidebarMenuButton,
-  SidebarMenuItem
+  SidebarMenuItem,
+  SidebarSeparator
 } from '@/components/ui/sidebar';
 
 /**
@@ -62,19 +63,26 @@ export default function PinnedAccount() {
   const active = pathname === '/account' ? searchParams.get('tab') : null;
 
   return (
-    <SidebarGroup>
-      <SidebarMenu>
-        {tabs.map((tab) => (
-          <SidebarMenuItem key={tab.name}>
-            <SidebarMenuButton asChild isActive={tab.name === active}>
-              <Link to={`/account?tab=${tab.name}`}>
-                <Icon name={tab.icon || 'settings-2'} className="size-4" />
-                <span className="truncate">{tab.title}</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ))}
-      </SidebarMenu>
-    </SidebarGroup>
+    <>
+      <SidebarGroup>
+        <SidebarMenu>
+          {tabs.map((tab) => (
+            <SidebarMenuItem key={tab.name}>
+              <SidebarMenuButton asChild isActive={tab.name === active}>
+                <Link to={`/account?tab=${tab.name}`}>
+                  <Icon name={tab.icon || 'settings-2'} className="size-4" />
+                  <span className="truncate">{tab.title}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+      {/* The rule belongs to the block above it, not to the history below:
+          drawn from the sidebar it would be a line under nothing wherever the
+          application pinned no sections, and this component is the only place
+          that knows whether there are any. */}
+      <SidebarSeparator />
+    </>
   );
 }

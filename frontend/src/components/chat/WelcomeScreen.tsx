@@ -61,10 +61,17 @@ export default function WelcomeScreen(props: Props) {
               }
             />
             {currentChatProfile?.markdown_description ? (
+              // A heading and, under it, the profile's own invitation. The
+              // heading keeps the size markdown gives it and loses only the
+              // top margin it would carry inside an article; every paragraph
+              // after it is the subtitle's register — small, muted, centred —
+              // because a profile that writes a second line means it to read
+              // as a subtitle and not as the first paragraph of a document.
               <Markdown
                 allowHtml={allowHtml}
                 latex={latex}
                 renderMarkdown={true}
+                className="text-center [&_h1]:mt-0 [&_h2]:mt-0 [&_h2]:border-b-0 [&_h3]:mt-0 [&_h4]:mt-0 [&_div]:mt-1 [&_div]:text-sm [&_div]:leading-snug [&_div]:text-muted-foreground"
               >
                 {currentChatProfile.markdown_description}
               </Markdown>
@@ -89,10 +96,18 @@ export default function WelcomeScreen(props: Props) {
   if (hasMessage(messages)) return null;
 
   return (
+    // Centred by auto margins and not by `justify-center`, and with no
+    // negative margin standing in for the header: a flex parent that centres
+    // an item taller than itself overflows it in both directions, and the
+    // half above the scroll container's top edge cannot be scrolled back to —
+    // which is how the profile's avatar came to be cut off and the last
+    // section to sit under the bottom edge. Auto margins collapse to nothing
+    // once the content is the taller of the two, so the whole screen stays
+    // reachable.
     <div
       id="welcome-screen"
       className={cn(
-        'flex flex-col -mt-[60px] gap-4 w-full flex-grow items-center justify-center welcome-screen mx-auto transition-opacity duration-500 opacity-0 delay-100',
+        'flex flex-col gap-4 w-full my-auto items-center welcome-screen mx-auto transition-opacity duration-500 opacity-0 delay-100',
         isVisible && 'opacity-100'
       )}
     >

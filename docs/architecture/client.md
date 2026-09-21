@@ -366,7 +366,16 @@ its element is `<Home />`, and the account is a dialog over it.
 chat: the profile's logo and `markdown_description`, the composer, the profile's
 `composer_hint`, and the starters. The hint is markdown in the watermark's register —
 small, muted, one paragraph — and it belongs to the profile, not to the app: a profile
-that set none draws nothing, and no profile ever borrows another's.
+that set none draws nothing, and no profile ever borrows another's. The description is
+markdown too, and set for two blocks: the heading keeps the size markdown gives it and
+loses its top margin, every paragraph after it is a subtitle — small, muted, centred.
+
+It is centred by `my-auto` and not by `justify-center`, and compensates for nothing: a
+flex parent that centres an item taller than itself overflows it at both ends, and the
+half above the scroll container's top edge cannot be scrolled back to. That, plus a
+`-mt-[60px]` standing in for the header, is how the profile's avatar came to be cut off
+at the top while the last section sat under the bottom edge. Auto margins collapse once
+the content is the taller of the two, so a screen that does not fit simply scrolls.
 
 **Starters are sections, not a filter.** `Starters.tsx` used to draw the categories as
 pills and reveal one category's starters when a pill was pressed; a list of offers the
@@ -376,10 +385,16 @@ screen chooses between them. The device filter (`matchesDevice`) still reaches i
 each one, and a category it empties is dropped rather than offered onto nothing. A flat
 `starters` list with no categories is unchanged.
 
-`StarterCategory.tsx` draws one section — heading (`label`), the line under it
-(`description`), and the starters in the density `layout` names. `collapsible` wraps it
-in native `<details>/<summary>` («‹label› · N ▸», N being the starters this device can
-see): the Radix wrappers were cleaned out on 15.09 and a section that folds is exactly
+`StarterCategory.tsx` draws one section — heading (`label`), `description` set against it
+on the same line, and the starters in the density `layout` names. The section opens with
+a `border-t`: the tiers are of different densities on purpose, and without a rule between
+them a row of tiles reads as the tail of the section above. The description is upper
+case, spaced and monospaced, so a line written to qualify a heading reads as an aside to
+it; on a phone it is `max-sm:hidden`, where the summary has room for the fold affordance
+and nothing else. `collapsible` wraps it
+in native `<details>/<summary>` («‹label› · N ▸» on a phone, the count `sm:hidden`
+because a section that arrives open has nothing folded away to count): the Radix
+wrappers were cleaned out on 15.09 and a section that folds is exactly
 what the element is for, keyboard, screen reader and find-in-page included, for no
 dependency at all. It opens on a desktop and is folded on a phone, decided by
 `useDeviceKey()` and not `useIsMobile()` — the latter reports `false` until its effect
@@ -388,11 +403,21 @@ unrecognised `layout` falls back to `tiles`: a newer backend naming a density th
 has not heard of must still draw the offers.
 
 `Starter.tsx` is **one** component with a `cva` over `layout` and `highlight`, the way
-`sidebarMenuButtonVariants` is built. `tiles` is the button it always was; `plates` is a
+`sidebarMenuButtonVariants` is built. `tiles` is an outlined box of two lines — label,
+then `caption` in the quiet monospaced register the captions share — laid out by
+`StarterCategory` in a `grid-cols-2` at every width, because a wrapping flex line sized
+every tile to its own label and two offers of equal standing came out one wide and one
+narrow. A highlighted tile takes the accent on its border and its label and nothing
+else: filled and full-width, which is what it used to be, it stopped being one of two
+offers and became an advertisement with the section's grid thrown away. `plates` is a
 card — label, `description`, `caption` in the bottom corner, `highlight` on the accent
-colour; `rows` is a line. The overrides against `buttonVariants` are load-bearing: its
+colour; `rows` is a line of three columns — the name (never shrinks), the errand
+(`flex-1`, the only part that gives ground) and the price (never wraps, right). The
+overrides against `buttonVariants` are load-bearing: its
 base carries `whitespace-nowrap` and its default size an `h-10`, both of which clip a
-plate as soon as its description wraps.
+plate as soon as its description wraps. No width class in the `tiles` base, deliberately:
+a grid cell stretches the button on its own, and the flat category-less list still wants
+the old `w-fit`.
 
 A press is answered by the first of three things the starter names: `href` →
 `navigate(href)` and **nothing else** (the page it opens — the account — is a dialog over
@@ -535,7 +560,11 @@ count on them: how many sections deserve the sidebar is the application's judgem
 about its own schema, and a component that enforced a limit would have to decide which
 section to drop. On a phone nothing extra is needed — the sheet closes on the
 `location.key` effect in `LeftSidebar/index.tsx` like every other navigation inside it.
-`frontend/tests/pinnedAccount.spec.tsx` pins all of it against a real router.
+The `SidebarSeparator` that closes the block off from the history belongs to this
+component and not to the sidebar: drawn from above it would be a line under nothing
+wherever the application pinned no sections, and this is the only place that knows
+whether there are any. `frontend/tests/pinnedAccount.spec.tsx` pins all of it against a
+real router.
 
 `ThreadAddressSync.tsx` (mounted in `pages/Page.tsx`, so on every route) owns **both**
 directions of "the URL asks and `session.ready` answers". They used to be two
@@ -613,6 +642,16 @@ button is hidden: a server-sent `thread.open` still returns the user to the pare
 `clear()` and navigates home. `LeftSidebar/ThreadHistory.tsx` pages threads and
 navigates to `/thread/:id`; it refreshes on `firstInteraction` and reorders on a new
 user message.
+
+**The sidebar header names one thing.** `NewChatButton` takes a `wide` prop, and the
+sidebar is the only site that passes it: a full-width outlined button carrying
+`navigation.newChat.button` and no tooltip, because the label is the tooltip. In the
+header the same component stays the icon it was — one of six, with no room to say so.
+The trigger that folds the panel and the search that reaches into it stay icons beside
+it: they act on the list, they are not what the panel is opened for. Below, each time
+group's `SidebarGroupLabel` (`ThreadList.tsx`) is upper case, spaced and monospaced —
+a date is not a destination, and set like the rows it heads it reads as one more thread
+called "Today".
 
 **Sidebar state.** The vendored shadcn provider has always written `sidebar:state` on
 every toggle (`components/ui/sidebar.tsx`); the missing half was reading it back, which
@@ -703,13 +742,17 @@ in a `RecoilRoot` — and pins the link the fix is: a close 4401 leaves `userSta
 while a 1006 leaves the signed-in user exactly where it was. Other specs cover
 message-tree merging, ask-action
 pruning, transcript freezing, wait messages, compact steps, icons, content rendering,
-`NewChat`, `openThread` and `threadAddressSync` (both directions of the
+`NewChat` (including the named wide button the sidebar asks for, against the icon the
+header keeps), `threadGroupLabel` (the time-group heading set apart from the rows it
+heads), `openThread` and `threadAddressSync` (both directions of the
 address↔session loop). The welcome screen has four: `deviceVisibility.spec.tsx` (the
 `matchesDevice`/`pickDefaultProfile` rules and the device filter over starters),
 `starterSections.spec.tsx` (every section drawn, in the server's order, with nothing
-pressed; the three densities and the fallback; `<details>` folded on a phone and open on a
-desktop with the visible count in its summary; and what a press does — message, door,
-`href` and nothing else, a disabled starter doing none of the three),
+pressed; the description set beside the heading and the rule above it; the three
+densities and the fallback — the tiles' grid, a highlighted tile that is neither filled
+nor full width, the row's three columns in order; `<details>` folded on a phone and open
+on a desktop with the visible count in its summary; and what a press does — message,
+door, `href` and nothing else, a disabled starter doing none of the three),
 `welcomeHint.spec.tsx` (the hint drawn, absent, and never borrowed from another profile)
 and `chatProfilesListed.spec.tsx` (the selector gated on what is _offered_, while the open
 list still names the door the user is in). The account has six: `schemaFormResolve.spec.ts` drives

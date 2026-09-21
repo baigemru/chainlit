@@ -7,16 +7,39 @@ is exercised is the combination.
 """
 
 from typing import Optional
+from urllib.parse import quote
 
 import chainlit as cl
+
+
+def icon(glyph: str) -> str:
+    """A one-glyph icon as a data URI.
+
+    Drawn here and not fetched: the sample is the smoke test, and an icon
+    that comes off a CDN turns "the section icon does not render" into a
+    question about somebody's hotlink policy.
+    """
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+        f'<text x="16" y="24" font-size="24" text-anchor="middle">{glyph}</text>'
+        "</svg>"
+    )
+    return "data:image/svg+xml;utf8," + quote(svg)
 
 
 @cl.set_chat_profiles
 async def chat_profiles(user: Optional[cl.User] = None):
     return [
+        # The icon is what makes the welcome screen draw the description at
+        # all, and the description is two blocks on purpose: the heading the
+        # screen opens with, and the line under it that says what to do next.
         cl.ChatProfile(
             name="Assistant",
-            markdown_description="The one profile a visitor is offered.",
+            icon=icon("🐼"),
+            markdown_description=(
+                "### What are we looking for?\n\n"
+                "Type it, attach a photo or press a button — I take it from there."
+            ),
             default=True,
             composer_hint="Enter sends. **Shift+Enter** starts a new line.",
         ),
@@ -38,14 +61,19 @@ async def starter_categories(user: Optional[cl.User] = None):
             label="Quick",
             description="One click, one answer.",
             layout="tiles",
-            icon="https://cdn-icons-png.flaticon.com/512/3094/3094837.png",
+            icon=icon("⚡"),
             starters=[
+                # Two tiles of equal standing, one of them the section's
+                # preference: the highlight is a border and a colour, not a
+                # banner across the row.
                 cl.Starter(
-                    label="Write a poem about nature",
+                    label="📝 Write a poem",
                     message="Write a poem about nature",
+                    caption="2 credits",
+                    highlight=True,
                 ),
                 cl.Starter(
-                    label="Create a short story",
+                    label="📖 Tell a story",
                     message="Create a short story about adventure",
                     caption="~1 min",
                 ),
@@ -55,7 +83,7 @@ async def starter_categories(user: Optional[cl.User] = None):
             label="Runs",
             description="Longer work, with a second line saying what it does.",
             layout="plates",
-            icon="https://cdn-icons-png.flaticon.com/512/3976/3976625.png",
+            icon=icon("🧭"),
             starters=[
                 cl.Starter(
                     label="Explain a complex topic",
@@ -89,24 +117,28 @@ async def starter_categories(user: Optional[cl.User] = None):
             description="A long tail, folded away on a phone.",
             layout="rows",
             collapsible=True,
-            icon="https://cdn-icons-png.flaticon.com/512/1055/1055646.png",
+            icon=icon("🗂"),
             starters=[
                 cl.Starter(
-                    label="Summarize a topic",
+                    label="Summarize",
+                    description="a topic → the key points of it, in order",
                     message="Summarize the key points of machine learning",
+                    caption="1 credit",
                 ),
                 cl.Starter(
                     label="Create a plan",
-                    description="A week of study, laid out.",
+                    description="a subject → a week of study, laid out",
                     message="Help me create a weekly study plan",
+                    caption="2 credits",
                 ),
                 # Not a chat at all: the client navigates, the thread is left
                 # alone. `href` wins over `profile` and `message`.
                 cl.Starter(
                     label="Your account",
-                    description="Goes to a page instead of saying anything.",
+                    description="goes to a page instead of saying anything",
                     message="",
                     href="/account?tab=settings",
+                    caption="free",
                 ),
             ],
         ),

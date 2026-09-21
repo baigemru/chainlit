@@ -56,7 +56,9 @@ export default function Starters({ className }: Props) {
     return (
       <div
         id="starters"
-        className={cn('flex w-full flex-col gap-6', className)}
+        // Tight, because each section draws its own rule and the padding
+        // under it: the gap is the air above that line, not the whole gutter.
+        className={cn('flex w-full flex-col gap-2', className)}
       >
         {starterCategories.map((category) => (
           <StarterCategory

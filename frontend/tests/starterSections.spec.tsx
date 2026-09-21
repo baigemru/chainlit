@@ -113,7 +113,7 @@ describe('starter sections', () => {
     expect(screen.getByText('Buy it')).toBeInTheDocument();
   });
 
-  it('carries the section description under its heading', () => {
+  it('sets the section description beside its heading, not under it', () => {
     withCategories([category('Quick', { description: 'the same as Enter' })]);
 
     render(
@@ -122,7 +122,31 @@ describe('starter sections', () => {
       </RecoilRoot>
     );
 
-    expect(screen.getByText('the same as Enter')).toBeInTheDocument();
+    const line = screen.getByText('the same as Enter');
+    expect(line).toBeInTheDocument();
+    // One line, one parent: the aside is set against the heading, in the
+    // register that keeps it from competing with it.
+    expect(line.parentElement).toBe(screen.getByText('Quick').parentElement);
+    expect(line.className).toContain('uppercase');
+    expect(line.className).toContain('font-mono');
+  });
+
+  it('rules each section off from the one above it', () => {
+    // The sections are of different densities on purpose; without the line a
+    // row of tiles reads as the tail of the section above.
+    withCategories([category('Quick'), category('Tasks')]);
+
+    const { container } = render(
+      <RecoilRoot>
+        <Starters />
+      </RecoilRoot>
+    );
+
+    for (const section of container.querySelectorAll(
+      '[data-test^="starter-category-"]'
+    )) {
+      expect(section.className).toContain('border-t');
+    }
   });
 
   it('drops a section the device filter emptied', () => {
@@ -209,6 +233,100 @@ describe('starter sections', () => {
 
     expect(screen.getByText('Find it')).toBeInTheDocument();
     expect(screen.queryByText('never drawn as a tile')).not.toBeInTheDocument();
+  });
+});
+
+describe('the densities', () => {
+  const tiles = (starters: IStarter[]) =>
+    withCategories([{ label: 'Quick', layout: 'tiles', starters }]);
+
+  it('puts the tiles of a section in equal columns', () => {
+    // A wrapping flex line sized every tile to its own label, and two offers
+    // of equal standing came out one wide and one narrow.
+    tiles([starter('Photograph it'), starter('Describe it')]);
+
+    const { container } = render(
+      <RecoilRoot>
+        <Starters />
+      </RecoilRoot>
+    );
+
+    const list = container.querySelector('section > div:last-child')!;
+    expect(list.className).toContain('grid');
+    expect(list.className).toContain('grid-cols-2');
+  });
+
+  it('marks the preferred tile without filling it or taking the row', () => {
+    tiles([starter('Photograph it', { highlight: true })]);
+
+    render(
+      <RecoilRoot>
+        <Starters />
+      </RecoilRoot>
+    );
+
+    const button = screen.getByRole('button');
+    // Accent on the border and the label; the fill and the full width were
+    // the old geometry, and they threw the section's grid away.
+    expect(button.className).toContain('border-primary/60');
+    expect(button.className).not.toContain('bg-primary');
+    expect(button.className).not.toContain('w-full');
+  });
+
+  it('gives a tile its caption as a second, quieter line', () => {
+    tiles([starter('Photograph it', { caption: '2 credits' })]);
+
+    render(
+      <RecoilRoot>
+        <Starters />
+      </RecoilRoot>
+    );
+
+    const caption = screen.getByText('2 credits');
+    expect(caption.className).toContain('font-mono');
+    expect(caption.className).toContain('text-muted-foreground');
+    // Beneath the label, not beside it.
+    expect(caption.parentElement).toBe(
+      screen.getByText('Photograph it').closest('button')
+    );
+  });
+
+  it('lays a row out as name, then errand, then price', () => {
+    withCategories([
+      {
+        label: 'Tasks',
+        layout: 'rows',
+        starters: [
+          starter('Check a supplier', {
+            description: 'a link → a trust report',
+            caption: '4 calls'
+          })
+        ]
+      }
+    ]);
+
+    render(
+      <RecoilRoot>
+        <Starters />
+      </RecoilRoot>
+    );
+
+    const label = screen.getByText('Check a supplier');
+    const description = screen.getByText('a link → a trust report');
+    const caption = screen.getByText('4 calls');
+
+    const follows = (a: Element, b: Element) =>
+      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(label, description)).toBe(true);
+    expect(follows(description, caption)).toBe(true);
+
+    // The name never shrinks and the price never wraps, so the description
+    // is the only part that gives ground — and it is not left stranded at
+    // the far edge of the row while the name sits at the near one.
+    expect(label.className).toContain('shrink-0');
+    expect(description.className).toContain('flex-1');
+    expect(caption.className).toContain('shrink-0');
+    expect(caption.className).toContain('font-mono');
   });
 });
 

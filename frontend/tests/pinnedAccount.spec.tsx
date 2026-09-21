@@ -114,6 +114,23 @@ describe('the pinned account sections', () => {
     expect(container.querySelector('[data-sidebar="group"]')).not.toBeNull();
   });
 
+  it('closes the block with a rule against the history below it', () => {
+    const { container } = mount();
+
+    expect(
+      container.querySelector('[data-sidebar="separator"]')
+    ).not.toBeNull();
+  });
+
+  it('draws no rule when it drew no rows', () => {
+    // A line under nothing: the sidebar cannot tell, which is why the
+    // separator is this component's and not the sidebar's.
+    mockUseAuth.mockReturnValue({ user: null });
+    const { container } = mount();
+
+    expect(container.querySelector('[data-sidebar="separator"]')).toBeNull();
+  });
+
   it('sends each row to its section of the account dialog', () => {
     mount();
 

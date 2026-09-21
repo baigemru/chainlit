@@ -41,7 +41,13 @@ describe('Starters with Categories', () => {
 
   it('folds a collapsible section behind a summary that counts it', () => {
     cy.get('[data-test="starter-category-Errands"]').should('match', 'details');
-    cy.get('[data-test="starter-category-Errands"] summary').contains('· 1');
+    // The count answers "how much is folded away", so it is drawn where a
+    // section arrives folded — on a phone. At the desk the section is open
+    // and a count of what is already on screen is noise beside the heading.
+    cy.viewport('iphone-x');
+    cy.get('[data-test="starter-category-Errands"] summary')
+      .contains('· 1')
+      .should('be.visible');
   });
 
   it('should be able to use a starter from a category', () => {

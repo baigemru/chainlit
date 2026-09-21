@@ -229,7 +229,7 @@ export default function MessageComposer({
   const submitButton = (
     <SubmitButton
       onSubmit={submit}
-      disabled={disabled || (!value.trim() && attachments.length === 0)}
+      canSend={!disabled && (!!value.trim() || attachments.length > 0)}
       // 40px in the pill: the card's 32px is below every tap-target floor,
       // and the pill is the arrangement a thumb meets.
       className={pill ? 'h-10 w-10' : undefined}

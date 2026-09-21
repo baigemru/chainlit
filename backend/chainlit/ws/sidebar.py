@@ -22,7 +22,7 @@ reason (see ``_persist``).
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import msgspec
 
@@ -45,7 +45,6 @@ __all__ = [
     "SidebarState",
     "apply_user_op",
     "forget_element",
-    "orphaned",
     "release",
     "row_id",
     "sidebar_meta",
@@ -171,7 +170,7 @@ class SidebarState(msgspec.Struct):
         elements: Sequence[Element],
         *,
         title: Optional[str] = None,
-        activate: bool = True,
+        activate: Union[bool, str] = True,
         closable: bool = True,
         canvas: bool = False,
         persisted: bool = True,
@@ -192,6 +191,10 @@ class SidebarState(msgspec.Struct):
         had once put the panel away is the shape of bug nobody reports.
         ``activate=False`` is the way to fill a slot without taking the
         screen, and it touches neither ``active`` nor ``visible``.
+
+        Anything truthy activates. ``"force"`` is one of the truthy values
+        and means the same thing to the model; the difference it makes is on
+        the frame, and it is the caller's to carry there.
         """
         if not elements:
             return self.close_slot(slot_id)
@@ -312,9 +315,16 @@ class SidebarState(msgspec.Struct):
             self.active = self.slots[0].id
 
 
-def state_frame(sidebar: SidebarState) -> SidebarStateFrame:
-    """The panel as the wire says it: slots by reference, elements by id."""
+def state_frame(sidebar: SidebarState, *, force: bool = False) -> SidebarStateFrame:
+    """The panel as the wire says it: slots by reference, elements by id.
+
+    ``force`` is the one thing in the frame that is not a projection of the
+    model, and it is not one on purpose: it describes *this* instruction, not
+    the panel. A replay reads the model and so never forces -- which is what
+    keeps a reload from putting a phone's sheet back over the feed.
+    """
     return SidebarStateFrame(
+        force=force,
         slots=[
             SidebarSlotRef(
                 id=slot.id,

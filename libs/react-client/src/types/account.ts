@@ -44,14 +44,6 @@ export interface IJsonSchema {
   /** A lucide name, on a nested Struct: the icon of its row in the section menu. */
   'x-icon'?: string;
   'x-enum-labels'?: Record<string, string>;
-  /**
-   * On a field of a list element: this field is the element's name. The
-   * engine pairs elements by it when it merges a save into the stored
-   * document, so an edit reaches the right card after a background write has
-   * moved it. Carried here because the client renders the schema; nothing in
-   * the form reads it yet.
-   */
-  'x-key'?: boolean;
   [key: string]: unknown;
 }
 

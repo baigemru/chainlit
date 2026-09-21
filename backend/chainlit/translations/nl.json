@@ -64,9 +64,7 @@
     "provider": {
       "continue": "Doorgaan met {{provider}}",
       "signin": "Inloggen met {{provider}}",
-      "register": "Registreren met {{provider}}",
-      "vk": "Sign in with VK",
-      "yandex": "Sign in with Yandex"
+      "register": "Registreren met {{provider}}"
     }
   },
   "chat": {

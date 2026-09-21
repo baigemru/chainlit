@@ -44,6 +44,7 @@ vi.mock('@chainlit/react-client', () => ({
   useChatSession: () => ({ chatProfile }),
   useChatInteract: () => ({ clear: mockClear }),
   // Only ever handed to `useSetRecoilState`, which is answered by key below.
+  acceptingState: { key: 'Accepting' },
   askUserState: { key: 'AskUser' },
   loadingState: { key: 'Loading' },
   messagesState: { key: 'Messages' }

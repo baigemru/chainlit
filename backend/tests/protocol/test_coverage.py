@@ -165,10 +165,10 @@ INTENTIONALLY_DROPPED: dict[str, str] = {
     "chat_settings": "chat settings are unused; no cl.ChatSettings instance",
     "chat_settings_change": "chat settings are unused",
     "chat_settings_edit": "chat settings are unused",
-    # Commands and modes: no cl.Command; the one cl.Mode call site is
-    # commented out in the consumer.
+    # Commands and modes: no cl.Command, and the modes system was deleted
+    # outright -- struct, column and public names -- in 3.0.0a39.
     "set_commands": "commands are unused; no cl.Command instance",
-    "set_modes": "modes are unused; the only call site is commented out",
+    "set_modes": "the modes system is deleted; there is nothing to send",
     # Favorites: `favorites = false`. The abstract get_favorite_steps goes
     # with them, or the feature is deleted and its tax is not.
     "set_favorites": "`favorites = false`; the feature is off",

@@ -608,7 +608,6 @@ def row_to_step(row: Row[Any]) -> StepRecord:
         thread_id=str(mapping["threadId"]),
         parent_id=from_uuid(mapping["parentId"]),
         command=mapping["command"],
-        modes=mapping["modes"],
         streaming=bool(mapping["streaming"]),
         wait_for_answer=mapping["waitForAnswer"],
         is_error=mapping["isError"],

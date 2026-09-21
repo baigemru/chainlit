@@ -309,37 +309,6 @@ async def test_set_starter_categories_with_chat_profile(test_config):
     ]
 
 
-async def test_on_shared_thread_view(test_config):
-    @callbacks.on_shared_thread_view
-    async def allow(thread, viewer: User | None):
-        if viewer is None:
-            raise ValueError("Viewer not allowed")
-        return viewer.identifier == "friend"
-
-    friend = User(identifier="friend")
-    assert await _hook(test_config.code.on_shared_thread_view)(THREAD, friend) is True
-    assert not await _hook(test_config.code.on_shared_thread_view)(
-        THREAD, User(identifier="x")
-    )
-    # The wrapper swallows the error; the route treats None as a refusal.
-    assert not await _hook(test_config.code.on_shared_thread_view)(THREAD, None)
-
-
-async def test_on_feedback(test_config):
-    from chainlit.types import Feedback
-
-    seen = None
-
-    @callbacks.on_feedback
-    async def handle(feedback: Feedback):
-        nonlocal seen
-        seen = feedback
-
-    feedback = Feedback(forId="s1", value=1)
-    await _hook(test_config.code.on_feedback)(feedback)
-    assert seen is feedback
-
-
 def test_chat_profile_with_config_overrides():
     from chainlit.config import ChainlitConfigOverrides, UISettings
 

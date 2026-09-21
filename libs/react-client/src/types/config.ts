@@ -23,7 +23,10 @@ export interface IStarter {
   href?: string;
   /** The second line: what pressing this will actually do. */
   description?: string;
-  /** The note in the corner — a price, a duration. The fork never reads it. */
+  /**
+   * The note in the corner — a price, a duration. The client renders it and
+   * never interprets it: the string is the application's, whole.
+   */
   caption?: string;
   /**
    * Offered but not available. The starter stays on screen, dimmed and
@@ -72,12 +75,26 @@ export interface ChatProfile {
   starters?: IStarter[];
 }
 
+/**
+ * A login button that skips the provider's own form and goes straight to one
+ * identity provider behind it. The deployment declares these in
+ * `[[UI.idp_shortcuts]]`; the alias the broker is told stays on the server,
+ * so all the browser needs is what to draw and which id to ask for.
+ */
+export interface IIdpShortcut {
+  id: string;
+  label: string;
+  iconUrl?: string | null;
+  iconUrlLight?: string | null;
+  iconUrlDark?: string | null;
+}
+
 export interface IOAuthProviderDetail {
   id: string;
   loginEnabled: boolean;
   registrationEnabled: boolean;
-  vkEnabled?: boolean;
-  yandexEnabled?: boolean;
+  /** Empty for a provider that brokers no other identity provider. */
+  idpShortcuts?: IIdpShortcut[];
   iconUrl?: string | null;
   iconUrlLight?: string | null;
   iconUrlDark?: string | null;

@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Collection,
     Dict,
     List,
@@ -123,6 +124,16 @@ class CallbackRunner(Protocol):
 
     async def on_stop(self, session: "Session") -> None:
         """The user asked for the running task to stop."""
+        ...
+
+    def launch_background(
+        self, session: "Session", coro: "Awaitable[Any]"
+    ) -> "asyncio.Task[Any]":
+        """Run a coroutine as work that does not hold the composer shut.
+
+        Declared on the port because ``cl.run_in_background`` reaches it
+        through the session, the same way every other application call does.
+        """
         ...
 
     async def release(self, session: "Session") -> None:
@@ -276,6 +287,14 @@ class Session:
         self.current_task: Optional["asyncio.Task[Any]"] = None
         self.thread_ready_task: Optional["asyncio.Task[Any]"] = None
 
+        #: Work the application declared background: it runs, it is shown as
+        #: running, and it does not hold the composer shut. A set and not a
+        #: slot, because the point of it is that the next message starts its
+        #: own ``on_message`` beside it -- a slot would drop the reference to
+        #: the run in flight, and a run nothing holds is a run ``stop`` cannot
+        #: reach and teardown cannot cancel.
+        self.background_tasks: set["asyncio.Task[Any]"] = set()
+
         self.transcript: List[TranscriptEntry] = []
 
         #: The element panel, next to the transcript because it is the same
@@ -348,23 +367,49 @@ class Session:
         return self.pending_ask is not None and self.pending_ask.is_live
 
     @property
-    def has_live_task(self) -> bool:
+    def has_foreground_task(self) -> bool:
+        """A turn the user is waiting out: a message being answered, a resume."""
         return any(
             task is not None and not task.done()
             for task in (self.current_task, self.thread_ready_task)
         )
 
     @property
+    def has_live_task(self) -> bool:
+        """Anything at all still running, foreground or background.
+
+        This is the one the transport asks: it decides whether the session is
+        worth keeping, whose steps survive a reload and whether a thread may
+        be pruned underneath it. A background run is work by every one of
+        those measures.
+        """
+        return self.has_foreground_task or any(
+            not task.done() for task in self.background_tasks
+        )
+
+    @property
     def is_busy(self) -> bool:
         """Whether the spinner should be lit: working, and not waiting on the user.
 
-        Not ``has_live_task``: a task parked on a question is alive -- it
-        keeps the session and protects its steps -- but the one who has to
-        act is the user, and a lit spinner locks the composer they would
-        act in. The old counter got this right by accident; this gets it
-        right by definition.
+        Not ``has_live_task`` alone: a task parked on a question is alive --
+        it keeps the session and protects its steps -- but the one who has to
+        act is the user, and a lit spinner over a question is a lie about
+        whose turn it is.
         """
         return self.has_live_task and not self.has_live_ask
+
+    @property
+    def accepting(self) -> bool:
+        """Whether the composer may send: nothing is holding this turn.
+
+        The old ``is_busy``, exactly -- foreground work and no open question
+        -- inverted and given its own name, because the two questions came
+        apart the moment a run could be declared background. "Something is
+        running" and "it is your turn to speak" used to be one boolean, and
+        an application that wanted a person to correct a long run mid-flight
+        had no way to say so.
+        """
+        return not self.has_foreground_task or self.has_live_ask
 
     @property
     def has_parked_reply(self) -> bool:
@@ -591,6 +636,11 @@ class Session:
         """
         for task in (self.current_task, self.thread_ready_task):
             if task is not None and not task.done():
+                task.cancel()
+        # Background work dies with the session like everything else: it is
+        # not detached from the conversation, only from the composer.
+        for task in list(self.background_tasks):
+            if not task.done():
                 task.cancel()
         if self.pending_ask is not None:
             self.pending_ask.cancel()

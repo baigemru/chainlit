@@ -1,5 +1,4 @@
 import functools
-import importlib
 import inspect
 import os
 from asyncio import CancelledError
@@ -7,18 +6,12 @@ from datetime import UTC, datetime
 from typing import Callable
 
 import click
-from packaging import version
 
 from chainlit.logger import logger
 
 
 def utc_now():
     dt = datetime.now(UTC).replace(tzinfo=None)
-    return dt.isoformat() + "Z"
-
-
-def timestamp_utc(timestamp: float):
-    dt = datetime.fromtimestamp(timestamp, UTC).replace(tzinfo=None)
     return dt.isoformat() + "Z"
 
 
@@ -60,40 +53,6 @@ def wrap_user_function(user_function: Callable) -> Callable:
             logger.exception(e)
 
     return wrapper
-
-
-def make_module_getattr(registry):
-    """Leverage PEP 562 to make imports lazy in an __init__.py
-
-    The registry must be a dictionary with the items to import as keys and the
-    modules they belong to as a value.
-    """
-
-    def __getattr__(name):
-        module_path = registry[name]
-        module = importlib.import_module(module_path, __package__)
-        return getattr(module, name)
-
-    return __getattr__
-
-
-def check_module_version(name, required_version):
-    """
-    Check the version of a module.
-
-    Args:
-        name (str): A module name.
-        version (str): Minimum version.
-
-    Returns:
-        (bool): Return True if the module is installed and the version
-            match the minimum required version.
-    """
-    try:
-        module = importlib.import_module(name)
-    except ModuleNotFoundError:
-        return False
-    return version.parse(module.__version__) >= version.parse(required_version)
 
 
 def check_file(target: str):

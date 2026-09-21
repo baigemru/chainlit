@@ -152,7 +152,7 @@ CARD = {"title": "Кружка", "price": 12.5, "watch": True}
 
 def test_without_a_cookie_the_action_route_is_401(registered):
     @cl.account_action("compare")
-    async def compare(user, item):  # pragma: no cover - must never run
+    async def compare(user, item, account):  # pragma: no cover - must never run
         raise AssertionError("an anonymous caller reached the hook")
 
     with _client() as client:
@@ -178,7 +178,7 @@ def test_the_item_reaches_the_hook_as_the_struct_the_schema_names(registered):
     seen: List[Tuple[Any, Any]] = []
 
     @cl.account_action("compare")
-    async def compare(user, item):
+    async def compare(user, item, account):
         seen.append((user, item))
         return cl.AccountToast(message="ok")
 
@@ -199,7 +199,7 @@ def test_a_tab_action_hands_the_hook_none_rather_than_the_tab(registered):
     seen: List[Any] = []
 
     @cl.account_action("export")
-    async def export(user, item):
+    async def export(user, item, account):
         seen.append(item)
         return cl.AccountToast(message="ok")
 
@@ -213,7 +213,7 @@ def test_a_tab_action_hands_the_hook_none_rather_than_the_tab(registered):
 
 def test_a_path_the_struct_cannot_address_is_a_400(registered):
     @cl.account_action("compare")
-    async def compare(user, item):  # pragma: no cover - must never run
+    async def compare(user, item, account):  # pragma: no cover - must never run
         raise AssertionError("the hook ran on an unresolvable path")
 
     with _client() as client:
@@ -229,7 +229,7 @@ def test_an_item_that_does_not_fit_is_a_400_naming_the_field(registered):
     addressing the client has."""
 
     @cl.account_action("compare")
-    async def compare(user, item):  # pragma: no cover - must never run
+    async def compare(user, item, account):  # pragma: no cover - must never run
         raise AssertionError("the hook ran on an item that does not fit")
 
     with _client() as client:
@@ -245,7 +245,7 @@ def test_an_item_that_does_not_fit_is_a_400_naming_the_field(registered):
 
 def test_a_toast_outcome_is_the_hooks_message(registered):
     @cl.account_action("compare")
-    async def compare(user, item):
+    async def compare(user, item, account):
         return cl.AccountToast(message="Нашли дешевле")
 
     with _client() as client:
@@ -265,7 +265,7 @@ def test_a_refresh_outcome_carries_the_page_the_get_would_build(registered):
         return Account(watch=Watch(items=[WatchedItem(title="Кружка")]))
 
     @cl.account_action("compare")
-    async def compare(user, item):
+    async def compare(user, item, account):
         return cl.AccountRefresh(message="Обновлено")
 
     with _client() as client:
@@ -282,7 +282,7 @@ def test_a_refresh_outcome_carries_the_page_the_get_would_build(registered):
 
 def test_an_unknown_return_value_is_a_500(registered):
     @cl.account_action("compare")
-    async def compare(user, item):
+    async def compare(user, item, account):
         return "please open a chat"
 
     with _client(raise_server_exceptions=False) as client:
@@ -302,7 +302,7 @@ def test_open_thread_parks_the_message_for_the_caller_and_nobody_else(registered
     transit = TransitStore()
 
     @cl.account_action("compare")
-    async def compare(user, item):
+    async def compare(user, item, account):
         return cl.AccountOpenThread(
             chat_profile="Быстрый",
             transit_message={"compare": item.title},
@@ -345,7 +345,7 @@ def test_open_thread_with_nothing_to_hand_over_names_no_thread(registered):
     transit = TransitStore()
 
     @cl.account_action("start")
-    async def start(user, item):
+    async def start(user, item, account):
         return cl.AccountOpenThread(chat_profile="Быстрый")
 
     with _client(transit) as client:
@@ -368,7 +368,7 @@ def test_a_refresh_with_an_account_stores_it_and_draws_the_page_from_it(register
     just retired."""
 
     @cl.account_action("dismiss")
-    async def dismiss(user, item):
+    async def dismiss(user, item, account):
         return cl.AccountRefresh(message="Убрали", account=Account(plan="pro"))
 
     users = FakeUsers({"plan": "free", "watch": {"items": [{"title": "Кружка"}]}})
@@ -390,7 +390,7 @@ def test_a_refresh_stores_no_readonly_leaf(registered):
     """The same rule a PUT runs, at the one other door into the store."""
 
     @cl.account_action("dismiss")
-    async def dismiss(user, item):
+    async def dismiss(user, item, account):
         return cl.AccountRefresh(
             account=Account(
                 balance=1250.0,
@@ -419,7 +419,7 @@ def test_a_refresh_without_an_account_stores_nothing(registered):
     """An action that only looked at something is not a write."""
 
     @cl.account_action("compare")
-    async def compare(user, item):
+    async def compare(user, item, account):
         return cl.AccountRefresh(message="Смотрим")
 
     users = FakeUsers({"plan": "pro"})
@@ -443,7 +443,7 @@ def test_the_load_hook_after_a_refresh_sees_what_the_action_stored(registered):
         return msgspec.structs.replace(account, balance=1250.0)
 
     @cl.account_action("dismiss")
-    async def dismiss(user, item):
+    async def dismiss(user, item, account):
         return cl.AccountRefresh(account=Account(plan="pro"))
 
     users = FakeUsers({"plan": "free"})
@@ -462,7 +462,7 @@ def test_a_refresh_carrying_a_mapping_is_a_500(registered):
     the default of every key it omits into the row."""
 
     @cl.account_action("dismiss")
-    async def dismiss(user, item):
+    async def dismiss(user, item, account):
         return cl.AccountRefresh(account={"plan": "pro"})
 
     with _client(users=FakeUsers(), raise_server_exceptions=False) as client:
@@ -474,7 +474,7 @@ def test_a_refresh_carrying_a_mapping_is_a_500(registered):
 
 def test_a_refresh_with_an_account_and_nowhere_to_store_still_draws_it(registered):
     @cl.account_action("dismiss")
-    async def dismiss(user, item):
+    async def dismiss(user, item, account):
         return cl.AccountRefresh(account=Account(plan="pro"))
 
     with _client() as client:
@@ -483,3 +483,71 @@ def test_a_refresh_with_an_account_and_nowhere_to_store_still_draws_it(registere
 
     assert response.status_code == 201
     assert response.json()["outcome"]["page"]["values"]["plan"] == "pro"
+
+
+# --- the third argument ------------------------------------------------------
+
+
+def test_the_hook_is_handed_the_whole_account_as_the_store_holds_it(registered):
+    """Because ``cl.AccountRefresh(account=...)`` wants the whole document.
+
+    Handed one card and asked for the whole page back, every application had
+    to read ``users.account`` through a session of its own -- racing the one
+    the request is already in, and duplicating the engine's lazy decoder to
+    make sense of what came back. The engine has the values; it passes them.
+    """
+    seen: List[Any] = []
+
+    @cl.account_action("compare")
+    async def compare(user, item, account):
+        seen.append(account)
+        return cl.AccountToast(message="ok")
+
+    users = FakeUsers({"plan": "pro", "watch": {"items": [CARD]}})
+    with _client(users=users) as client:
+        _sign_in(client)
+        response = _post(client, "compare", "watch.items.0", CARD)
+
+    assert response.status_code == 201
+    [account] = seen
+    assert isinstance(account, Account)
+    assert account.plan == "pro"
+    assert [it.title for it in account.watch.items] == ["Кружка"]
+    # Read, not locked: the lock a save holds spans its merge, and holding
+    # one here would span whatever network the action talks to. See
+    # ``_store_action_values``.
+    assert users.written == []
+
+
+def test_an_action_returns_what_it_was_handed_with_one_thing_changed(registered):
+    """The shape the third argument makes possible, end to end."""
+
+    @cl.account_action("dismiss")
+    async def dismiss(user, item, account):
+        return cl.AccountRefresh(
+            account=msgspec.structs.replace(account, plan="free"), message="Сброшено"
+        )
+
+    users = FakeUsers({"plan": "pro", "watch": {"items": [CARD]}})
+    with _client(users=users) as client:
+        _sign_in(client)
+        response = _post(client, "dismiss", "watch", None)
+
+    assert response.status_code == 201
+    values = response.json()["outcome"]["page"]["values"]
+    assert values["plan"] == "free"
+    # And the card it was not asked about is still there: the action changed
+    # what it was given rather than rebuilding it.
+    assert [it["title"] for it in values["watch"]["items"]] == ["Кружка"]
+
+
+def test_a_hook_with_the_old_signature_is_refused_at_import(registered):
+    """Where a mismatch is cheapest to see. Called with three arguments and
+    written with two, it is a 500 on somebody's first click otherwise."""
+    with pytest.raises(TypeError, match=r"@cl.account_action\('compare'\)"):
+
+        @cl.account_action("compare")
+        async def compare(user, item):  # pragma: no cover - never registered
+            return cl.AccountToast(message="ok")
+
+    assert "compare" not in config.code.account_actions

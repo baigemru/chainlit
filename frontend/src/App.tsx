@@ -23,7 +23,6 @@ import { userEnvState } from 'state/user';
 
 declare global {
   interface Window {
-    cl_shadowRootElement?: HTMLDivElement;
     theme?: {
       light: Record<string, string>;
       dark: Record<string, string>;

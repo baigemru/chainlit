@@ -194,10 +194,9 @@ class TestFallsBackToRegularMessage:
         [
             (_text(), (FileRef(id="f1"),)),
             (_text(command="search"), ()),
-            (_text(modes={"model": "gpt"}), ()),
             (_text(type="system_message"), ()),
         ],
-        ids=["attachments", "command", "modes", "not-a-user-message"],
+        ids=["attachments", "command", "not-a-user-message"],
     )
     async def test_anything_but_plain_text_stays_a_message(
         self, ctx, session, code, no_author_rename, message, files

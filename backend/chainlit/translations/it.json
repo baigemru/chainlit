@@ -64,9 +64,7 @@
     "provider": {
       "continue": "Continua con {{provider}}",
       "signin": "Accedi con {{provider}}",
-      "register": "Registrati con {{provider}}",
-      "vk": "Sign in with VK",
-      "yandex": "Sign in with Yandex"
+      "register": "Registrati con {{provider}}"
     }
   },
   "chat": {

@@ -70,7 +70,7 @@ const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(({ className, children, position = 'popper', ...props }, ref) => (
-  <SelectPortal container={window.cl_shadowRootElement}>
+  <SelectPortal>
     <SelectPrimitive.Content
       ref={ref}
       className={cn(

@@ -58,7 +58,6 @@ class MessageBase(ABC):
     persisted = False
     is_error = False
     command: Optional[str] = None
-    modes: Optional[Dict[str, str]] = None
     parent_id: Optional[str] = None
     language: Optional[str] = None
     metadata: Optional[Dict] = None
@@ -141,7 +140,6 @@ class MessageBase(ABC):
             content=_dict.get("output", ""),
             author=_dict.get("name", config.ui.name),
             command=_dict.get("command"),
-            modes=_dict.get("modes"),
             type=type,  # type: ignore
             language=_dict.get("language"),
             metadata=_dict.get("metadata", {}),
@@ -154,7 +152,6 @@ class MessageBase(ABC):
             "parentId": self.parent_id,
             "createdAt": self.created_at,
             "command": self.command,
-            "modes": self.modes,
             "start": self.created_at,
             "end": self.created_at,
             "output": self.content,
@@ -338,7 +335,6 @@ class Message(MessageBase):
         id: Optional[str] = None,
         parent_id: Optional[str] = None,
         command: Optional[str] = None,
-        modes: Optional[Dict[str, str]] = None,
         created_at: Union[str, None] = None,
         wait: Union[bool, List[str]] = False,
         wait_interval: float = 5.0,
@@ -369,9 +365,6 @@ class Message(MessageBase):
 
         if command:
             self.command = str(command)
-
-        if modes:
-            self.modes = modes
 
         if created_at:
             self.created_at = created_at

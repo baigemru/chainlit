@@ -2,6 +2,7 @@ import { useCallback, useContext, useMemo, useRef } from 'react';
 import { useRecoilCallback, useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 import {
+  acceptingState,
   accountBadgeState,
   actionState,
   askUserState,
@@ -87,6 +88,7 @@ const useChatSession = () => {
 
   const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
   const setLoading = useSetRecoilState(loadingState);
+  const setAccepting = useSetRecoilState(acceptingState);
   const setMessages = useSetRecoilState(messagesState);
   const setAskUser = useSetRecoilState(askUserState);
   const setElements = useSetRecoilState(elementState);
@@ -136,12 +138,6 @@ const useChatSession = () => {
     []
   );
 
-  // True from a `session.ready` until the first `sidebar.state` that follows
-  // it: the restore's panel frame, and the only one the mobile rule below
-  // may act on. Reset per connection rather than per page, because that is
-  // the question being asked — "is this the panel a reload just got back?".
-  const restoringSidebar = useRef(false);
-
   const applySidebarFrame = useRecoilCallback(
     ({ set, snapshot }) =>
       (msg: Extract<ServerMsg, { t: 'sidebar.state' }>) => {
@@ -168,21 +164,39 @@ const useChatSession = () => {
             .filter((element): element is IMessageElement => !!element)
         }));
 
-        const wasRestore = restoringSidebar.current;
-        restoringSidebar.current = false;
         // The one place this client branches on the screen. The panel is a
-        // 95%-wide sheet on a phone, so a reload that put it straight back
-        // would cover the question the user reloaded to answer. The
-        // *viewport*, through the shared breakpoint -- the same question
-        // `useIsMobile` answers when it decides to draw that sheet, and not
-        // the `device` label the hello carries, which a `?device=pc` pin can
-        // set against the layout. Hidden locally *and* on the server,
-        // because the server must never decide anything by device: the same
-        // conversation opened on a laptop has to behave the same way.
+        // 95%-wide sheet on a phone, so raising it buries the feed — and the
+        // feed is where everything that wants an answer lives: the question
+        // the user came back to, the run counter, the plan notice. So a
+        // frame that *raises* the panel on a phone is applied without the
+        // raise; its slots and its active tab land in full, so the button
+        // that says "open the shortlist" still leads to a ready tab.
+        //
+        // The transition, not the level: a frame that merely restates
+        // `visible: true` while the panel is already open — a second slot
+        // filled, a title changed — must not slam shut a panel the user
+        // opened with their own thumb. A page load starts from the atom's
+        // `visible: false`, so the reload case is this same rule and needs
+        // no flag of its own; a reconnect with the panel open is not a
+        // transition and is left alone.
+        //
+        // `force` is the server saying it means it (`Sidebar.show()`,
+        // `set_slot(activate="force")`) and is the only exemption.
+        //
+        // Judged by the *viewport*, through the shared breakpoint — the same
+        // question `useIsMobile` answers when it decides to draw that sheet,
+        // and not the `device` label the hello carries, which a `?device=pc`
+        // pin can set against the layout. Hidden locally *and* on the
+        // server, because the server must never decide anything by device:
+        // the same conversation opened on a laptop has to behave the same
+        // way.
+        const wasVisible =
+          snapshot.getLoadable(elementSidebarState).valueMaybe()?.visible ===
+          true;
         const hideOnMobile =
-          wasRestore &&
           msg.visible === true &&
-          transport.opening.pageLoad &&
+          !wasVisible &&
+          msg.force !== true &&
           isMobileViewport();
 
         const rev = msg.rev ?? 0;
@@ -216,8 +230,6 @@ const useChatSession = () => {
         // tab would sit on /thread/<refused> with the session in another
         // thread, and the same component would clear it on sight.
         setCurrentThreadId(msg.threadId ?? undefined);
-        // The next `sidebar.state` is this connection's restore frame.
-        restoringSidebar.current = true;
       },
 
       error: (msg) => {
@@ -354,17 +366,28 @@ const useChatSession = () => {
         setMessages((old) =>
           addMessage(old, stampChatProfile(message, chatProfile))
         );
+        // The spinner goes dark and the composer opens: the question is
+        // the turn now, and it is the user's.
         setLoading(false);
+        setAccepting(true);
       },
 
       'ask.end': ({ stepId, reason }) => {
         endAsk(stepId);
-        if (reason === 'timeout') setLoading(false);
+        if (reason === 'timeout') {
+          setLoading(false);
+          setAccepting(true);
+        }
       },
 
       // ---- task indicator --------------------------------------------
-      'task.indicator': ({ running }) => {
+      // Two booleans, not one inverted: an application may declare a run
+      // background, and then something is running *and* it is the user's
+      // turn. `accepting` is optional on the wire (`omit_defaults`), and
+      // absent means the permissive default, never a locked composer.
+      'task.indicator': ({ running, accepting }) => {
         setLoading(running);
+        setAccepting(accepting ?? true);
       },
 
       // ---- threads ---------------------------------------------------
@@ -475,6 +498,7 @@ const useChatSession = () => {
       endAsk,
       idToResume,
       pruneStaleAskActions,
+      setAccepting,
       setAccountBadge,
       setActions,
       setAskUser,

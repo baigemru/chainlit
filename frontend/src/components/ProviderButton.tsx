@@ -9,8 +9,6 @@ import { GitHub } from 'components/icons/Github';
 import { Gitlab } from 'components/icons/Gitlab';
 import { Google } from 'components/icons/Google';
 import { Okta } from 'components/icons/Okta';
-import { VK } from 'components/icons/VK';
-import { Yandex } from 'components/icons/Yandex';
 
 import { Button } from './ui/button';
 
@@ -56,30 +54,31 @@ function renderProviderIcon(provider: string) {
 
 interface ProviderButtonProps {
   provider: string;
-  mode?: 'signin' | 'register' | 'vk' | 'yandex';
+  mode?: 'signin' | 'register';
   icon?: Pick<IOAuthProviderDetail, 'iconUrl' | 'iconUrlLight' | 'iconUrlDark'>;
+  /**
+   * The button's text, verbatim, instead of the translated
+   * "<verb> with <provider>". An identity-provider shortcut carries its own
+   * label from the config -- the deployment named it, and no bundle here
+   * knows which identity providers a broker fronts.
+   */
+  label?: string;
   onClick: () => void;
 }
 
-function getLabelKeys(mode: 'signin' | 'register' | 'vk' | 'yandex') {
-  // Fall back to older keys for translation bundles that predate the newer
-  // ones (signin/register split, then the VK/Yandex shortcut buttons).
-  switch (mode) {
-    case 'register':
-      return ['auth.provider.register', 'auth.provider.continue'];
-    case 'vk':
-      return ['auth.provider.vk', 'auth.provider.signin'];
-    case 'yandex':
-      return ['auth.provider.yandex', 'auth.provider.signin'];
-    default:
-      return ['auth.provider.signin', 'auth.provider.continue'];
-  }
+function getLabelKeys(mode: 'signin' | 'register') {
+  // Fall back to the older key for translation bundles that predate the
+  // signin/register split.
+  return mode === 'register'
+    ? ['auth.provider.register', 'auth.provider.continue']
+    : ['auth.provider.signin', 'auth.provider.continue'];
 }
 
 const ProviderButton = ({
   provider,
   mode = 'signin',
   icon,
+  label,
   onClick
 }: ProviderButtonProps): JSX.Element => {
   const { t } = useTranslation();
@@ -90,11 +89,7 @@ const ProviderButton = ({
   );
   return (
     <Button type="button" variant="outline" onClick={onClick}>
-      {mode === 'vk' ? (
-        <VK />
-      ) : mode === 'yandex' ? (
-        <Yandex />
-      ) : hasCustomIcon ? (
+      {hasCustomIcon ? (
         <LinkIcon
           iconUrl={icon?.iconUrl}
           iconUrlLight={icon?.iconUrlLight}
@@ -104,9 +99,10 @@ const ProviderButton = ({
       ) : (
         renderProviderIcon(provider.toLowerCase())
       )}
-      {t(getLabelKeys(mode), {
-        provider: getProviderName(provider)
-      })}
+      {label ??
+        t(getLabelKeys(mode), {
+          provider: getProviderName(provider)
+        })}
     </Button>
   );
 };

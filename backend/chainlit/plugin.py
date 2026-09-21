@@ -45,6 +45,7 @@ from typing import (
 
 from litestar import Litestar, Request, Response, Router
 from litestar.config.app import AppConfig
+from litestar.datastructures import CacheControlHeader
 from litestar.di import Provide
 from litestar.enums import MediaType
 from litestar.exceptions import (
@@ -340,6 +341,30 @@ class ChainlitPlugin(InitPlugin):
             PwaController,
             self._websocket(),
         ]
+        # Custom element sources, ahead of ``/public`` and only for the
+        # freshness header. Two overlapping static routers coexist and the
+        # more specific path wins, so this is the whole of the difference:
+        # an element's ``.jsx`` is compiled in the browser, an edit to it is
+        # a deploy, and without a ``Cache-Control`` the browser applies
+        # heuristic freshness and can keep yesterday's form for days.
+        #
+        # ``max_age`` rather than ``no-cache, must-revalidate``: Litestar
+        # 2.24 does not read ``If-None-Match`` at all (there is no such
+        # branch anywhere in the package), so a revalidation could never
+        # answer 304 and every load would re-download every element in full.
+        # A minute is the honest trade -- an edit reaches open browsers
+        # within it, and one re-fetch per element per minute costs a few
+        # kilobytes.
+        handlers.append(
+            create_static_files_router(
+                path="/public/elements",
+                directories=[self._public_dir / "elements"],
+                name="chainlit_public_elements",
+                html_mode=False,
+                cache_control=CacheControlHeader(max_age=60),
+                opt={"exclude_from_auth": True},
+            )
+        )
         # The app's own static files. Public by definition -- the login page
         # shows the logo, and custom element sources are fetched before any
         # user exists. The directory need not exist: the router resolves it
@@ -455,6 +480,15 @@ class ChainlitPlugin(InitPlugin):
         app_config.dependencies.setdefault(
             "persistence_enabled",
             Provide(lambda: self._persistence is not None, sync_to_thread=False),
+        )
+        # The runner, by name, for the same reason as ``sessions``: a host's
+        # route that has to reach into a session -- a webhook saying a run
+        # finished -- asks Litestar for it instead of digging the plugin out
+        # of ``app.plugins``. A handler that knows the plugin registry is a
+        # handler no test can rebind without monkeypatching.
+        app_config.dependencies.setdefault(
+            "runner",
+            Provide(lambda: self._runner, sync_to_thread=False, use_cache=True),
         )
         # Not part of ``Persistence.dependencies()``: those are per-request
         # services built on the request's session, and this is one long-lived

@@ -219,25 +219,6 @@ export class ChatTransport {
     return this.descriptor;
   }
 
-  /**
-   * What the last `hello` said about the connection it opened.
-   *
-   * One fact a *frame handler* cannot work out for itself: whether this
-   * connection is the one a page load made. The module flag behind it flips
-   * on the first `session.ready`, so by the time any other frame arrives the
-   * answer is gone. The element panel's mobile rule reads it — a restore
-   * after F5 must not drop a 95%-wide sheet over the chat, while a healed
-   * network blip must leave the screen alone.
-   *
-   * Deliberately not the `device` label: that is what the host computed for
-   * the funnel, and `?device=pc` can pin it against the viewport the layout
-   * actually uses. Whether the panel is a sheet is a question about width,
-   * and `breakpoint.ts` is where it is asked.
-   */
-  get opening(): { pageLoad: boolean } {
-    return { pageLoad: this.openedOnPageLoad };
-  }
-
   // ---------------------------------------------------------------- stores
 
   /** `useSyncExternalStore` subscription for {@link getSnapshot}. */

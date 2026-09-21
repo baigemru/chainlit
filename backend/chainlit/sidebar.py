@@ -18,7 +18,7 @@ time a PDF was opened beside it.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Literal, Optional, Sequence, Union
 
 import msgspec
 
@@ -49,7 +49,7 @@ class Sidebar:
         elements: Sequence[ElementBased],
         *,
         title: Optional[str] = None,
-        activate: bool = True,
+        activate: Union[bool, Literal["force"]] = True,
         closable: bool = True,
         canvas: bool = False,
         persist: bool = True,
@@ -69,12 +69,26 @@ class Sidebar:
         slot being created. An empty ``elements`` is ``close_slot(id)``: an
         empty tab is a promise of content that is not coming.
 
-        ``activate`` selects the tab **and** puts the panel on screen, on a
+        ``activate`` selects the tab and asks for the panel on screen, on a
         new slot and on a refresh alike -- "bring this to the front" and
-        "leave it where nobody can see it" cannot both be true, and an
-        application refreshing its one long-lived slot has to be able to
-        count on the result being seen. ``activate=False`` fills the slot
-        without taking the screen and touches neither.
+        "leave it where nobody can see it" cannot both be true.
+        ``activate=False`` fills the slot without taking the screen and
+        touches neither.
+
+        *Asks*, because where the panel is a full-screen sheet -- a phone --
+        raising it buries the feed, and the feed is where everything that
+        wants an answer lives: a question, a running counter, a notice. So
+        the client applies the raise or declines it by the screen it is
+        actually on, and either way the slot is filled and the tab selected:
+        a button in the feed saying "open the shortlist" leads to a ready tab
+        rather than an empty one. ``activate="force"`` is for the rare call
+        that must be seen wherever it lands and accepts covering the feed to
+        do it; ``Sidebar.show()`` is the same thing said on its own.
+
+        The screen is judged in the browser and nowhere else. The server
+        never branches on the device a client reported -- that label can be
+        pinned against the layout with ``?device=pc``, and a conversation
+        must not behave differently depending on what a hello claimed.
 
         ``id`` may not be ``"preview"``: that address belongs to the user's
         click in the feed, and an application writing into it would erase
@@ -157,7 +171,7 @@ class Sidebar:
         )
         release(session, dropped, rows=had_rows)
         persistence.patch_sidebar(session)
-        context.emitter.sidebar_state()
+        context.emitter.sidebar_state(force=activate == "force")
 
     @staticmethod
     async def close_slot(id: str) -> None:
@@ -180,9 +194,14 @@ class Sidebar:
 
     @staticmethod
     async def show() -> None:
-        """Put the panel on screen, with or without anything in it."""
+        """Put the panel on screen, with or without anything in it.
+
+        Unconditional, unlike ``set_slot(activate=True)``: this call has no
+        other purpose, so there is nothing for the screen to weigh it
+        against, and it is honoured on a phone too -- over the feed.
+        """
         context.session.sidebar.show()
-        context.emitter.sidebar_state()
+        context.emitter.sidebar_state(force=True)
 
     @staticmethod
     async def hide() -> None:

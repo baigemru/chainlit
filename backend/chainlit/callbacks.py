@@ -24,7 +24,7 @@ from typing import (
 
 from msgspec import Struct
 
-from chainlit.account import register as register_account
+from chainlit.account import AccountActionResult, register as register_account
 from chainlit.action import Action
 from chainlit.config import config
 from chainlit.message import Message
@@ -40,6 +40,19 @@ from chainlit.user import User
 from chainlit.utils import wrap_user_function
 
 S = TypeVar("S", bound=Struct)
+
+AccountActionHook = Callable[
+    ..., Union[AccountActionResult, Awaitable[AccountActionResult]]
+]
+"""What ``@cl.account_action`` decorates.
+
+``...`` rather than a parameter list because the second argument is the
+application's: a button on a card is called ``(user, item, account)``, one in
+a tab header ``(user, None, account)``, and ``call_hook`` awaits the result
+only if there is one to await. The arity itself is checked at import by
+``_assert_arity``, where a mismatch costs a start-up error rather than a 500
+on the first click. The return type is the part worth pinning -- it is the whole contract
+between the hook and the page."""
 
 
 def on_app_startup(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
@@ -376,27 +389,6 @@ def action_callback(name: str) -> Callable:
     return decorator
 
 
-def on_feedback(func: Callable) -> Callable:
-    """
-    Hook to react to user feedback events from the UI.
-    The decorated function is called every time feedback is received.
-
-    Args:
-        func (Callable[[Feedback], Any]): The function to be called when feedback is received. Takes a cl.Feedback object.
-
-    Example:
-        @cl.on_feedback
-        async def on_feedback(feedback: Feedback):
-            print(f"Received feedback: {feedback.value} for step {feedback.forId}")
-            # Handle feedback here
-
-    Returns:
-        Callable[[Feedback], Any]: The decorated on_feedback function.
-    """
-    config.code.on_feedback = wrap_user_function(func)
-    return func
-
-
 def account(cls: Type[S]) -> Type[S]:
     """Declare the account page, as one ``msgspec.Struct``.
 
@@ -459,26 +451,30 @@ def on_account_load(
     return func
 
 
-def _assert_takes_user_and_account(func: Callable[..., Any], decorator: str) -> None:
-    """Refuse a retired one-argument account hook, at import.
+def _assert_arity(func: Callable[..., Any], decorator: str, *names: str) -> None:
+    """Refuse a hook the engine cannot call, at import.
 
-    Both hooks that used to read ``users.account`` themselves are now handed
-    it. The signature is tried rather than counted: ``bind`` already knows
-    what ``*args``, a default, a bound method and a ``functools.partial`` do
-    to an argument list. Checked here because a hook the engine will call
-    with two arguments and an application wrote with one is a 500 on the
-    first page load, and the import is where that is cheapest to see.
+    Every account hook is *handed* what it used to read. The signature is
+    tried rather than counted: ``bind`` already knows what ``*args``, a
+    default, a bound method and a ``functools.partial`` do to an argument
+    list. Checked here because a hook the engine will call with three
+    arguments and an application wrote with two is a 500 on the first click,
+    and the import is where that is cheapest to see.
     """
     try:
-        inspect.signature(func).bind(None, None)
+        inspect.signature(func).bind(*(None,) * len(names))
     except TypeError as error:
         raise TypeError(
-            f"{decorator} takes (user, account), and {func.__name__} does not: "
-            f"{error}. The engine hands the hook the values it has read for "
-            "this user, so a hook no longer opens a session of its own and no "
-            "longer answers from before a write the request has not committed "
-            "-- the one-argument form is retired."
+            f"{decorator} takes ({', '.join(names)}), and {func.__name__} does "
+            f"not: {error}. The engine hands the hook the values it has read "
+            "for this user, so a hook no longer opens a session of its own and "
+            "no longer answers from before a write the request has not "
+            "committed -- the shorter forms are retired."
         ) from error
+
+
+def _assert_takes_user_and_account(func: Callable[..., Any], decorator: str) -> None:
+    _assert_arity(func, decorator, "user", "account")
 
 
 def on_account_update(
@@ -508,19 +504,32 @@ def on_account_update(
 
 def account_action(
     name: str,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[AccountActionHook], AccountActionHook]:
     """Answer a button the account page's schema declares in ``x-actions``.
 
-    The hook is called ``(user, item)``: ``item`` is the card the button
-    sits on, already converted to the Struct the *schema* says it is, or
-    ``None`` for a button in a tab header. Return ``cl.AccountToast``,
+    The hook is called ``(user, item, account)``: ``item`` is the card the
+    button sits on, already converted to the Struct the *schema* says it is,
+    or ``None`` for a button in a tab header, and ``account`` is the whole
+    ``@cl.account`` Struct as the store holds it -- the same value
+    ``@cl.on_account_load`` and ``@cl.on_account_badge`` are handed, read
+    with the request's own session. Return ``cl.AccountToast``,
     ``cl.AccountRefresh`` or ``cl.AccountOpenThread``; anything else is a
     bug in the application and is reported as a 500.
 
     ``cl.AccountRefresh(account=...)`` is how an action changes what is
     stored: the engine writes it with the request's own session -- minus the
-    ``readOnly`` leaves -- and draws the page from it. A hook that opened a
-    session of its own would be racing the one the request is already in.
+    ``readOnly`` leaves -- and draws the page from it. Since a refresh
+    carries the *whole* document, the third argument is what it is built
+    from: an action that changes one card returns the account it was handed
+    with that one card changed. Reading the column again through a session of
+    its own was the only way to do that before, and it raced the one the
+    request is already in.
+
+    Read unlocked, unlike a ``PUT``: the lock a save holds spans the merge,
+    and holding one here would span whatever network the action talks to.
+    What that costs is stated in ``_store_action_values`` -- the whole
+    document the action returns wins, so an action must change what it was
+    handed rather than rebuild it.
 
     Stored unwrapped, like the other account hooks: a button that failed
     must fail the request rather than be logged away while the page
@@ -528,7 +537,7 @@ def account_action(
 
     Example:
         @cl.account_action("compare")
-        async def compare(user, item: WatchedItem | None):
+        async def compare(user, item: WatchedItem | None, account: Account):
             return cl.AccountOpenThread(chat_profile="Fast", transit_message=item)
 
     Args:
@@ -538,7 +547,8 @@ def account_action(
         Callable: The decorator that registers the hook and returns it.
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(func: AccountActionHook) -> AccountActionHook:
+        _assert_arity(func, f"@cl.account_action({name!r})", "user", "item", "account")
         config.code.account_actions[name] = func
         return func
 
@@ -577,17 +587,4 @@ def on_account_badge(
     """
     _assert_takes_user_and_account(func, "@cl.on_account_badge")
     config.code.on_account_badge = func
-    return func
-
-
-def on_shared_thread_view(
-    func: Callable[[ThreadDict, Optional[User]], Awaitable[bool]],
-) -> Callable[[ThreadDict, Optional[User]], Awaitable[bool]]:
-    """Hook to authorize viewing a shared thread.
-
-    Users must implement and return True to allow a non-author to view a thread.
-    Thread metadata contains "is_shared" boolean flag and "shared_at" timestamp for custom thread sharing.
-    Signature: async (thread: ThreadDict, viewer: Optional[User]) -> bool
-    """
-    config.code.on_shared_thread_view = wrap_user_function(func)
     return func

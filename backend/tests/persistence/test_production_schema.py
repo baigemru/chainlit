@@ -109,6 +109,13 @@ ADDED_BY_0004: Dict[str, Set[Tuple[str, bool]]] = {
     "users": {("account", False)},
 }
 
+# Columns revision 0005 drops: `steps.modes`, the storage of a composer picker
+# that was never drawn. Production still has it until the revision runs, which
+# is why it stays in the inventory above and is subtracted here.
+REMOVED_BY_0005: Dict[str, Set[Tuple[str, bool]]] = {
+    "steps": {("modes", True)},
+}
+
 MODELS = {
     "users": models.User,
     "threads": models.Thread,
@@ -124,7 +131,7 @@ def test_model_columns_match_production(table_name: str) -> None:
         PRODUCTION_COLUMNS[table_name]
         | ADDED_BY_0002.get(table_name, set())
         | ADDED_BY_0004.get(table_name, set())
-    )
+    ) - REMOVED_BY_0005.get(table_name, set())
     actual = {
         (column.name, column.nullable is True)
         for column in MODELS[table_name].__table__.columns

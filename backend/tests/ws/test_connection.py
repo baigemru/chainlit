@@ -1617,3 +1617,131 @@ async def test_live_a_refused_credential_is_a_close_code_not_an_http_status(
             ready = (await open_live(member, pageLoad=True))[0]
             assert ready["t"] == "session.ready"
             assert ready["threadId"] == THREAD
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: a run the application declared background
+# --------------------------------------------------------------------------
+
+
+async def drain_live(
+    sock: ClientConnection, *, quiet: float = 0.4, limit: int = 80
+) -> List[Dict[str, Any]]:
+    """Every frame until the server has been silent for ``quiet`` seconds.
+
+    The level frames are what these cases are about, and a level is only
+    worth reading once it has settled: one turn emits several indicators on
+    its way through, and the interesting one is the last.
+    """
+    frames: List[Dict[str, Any]] = []
+    for _ in range(limit):
+        try:
+            frames.append(json.loads(await asyncio.wait_for(sock.recv(), quiet)))
+        except TimeoutError:
+            return frames
+    raise AssertionError(f"the server never went quiet: {[f['t'] for f in frames]}")
+
+
+def last_indicator(frames: List[Dict[str, Any]]) -> Tuple[bool, bool]:
+    """The settled ``(running, accepting)``, as a client would read it.
+
+    ``accepting`` is omitted from the frame when it is true -- the struct is
+    ``omit_defaults`` and true is the default -- so the absence is the
+    permissive answer and not a missing one.
+    """
+    indicators = [f for f in frames if f["t"] == "task.indicator"]
+    assert indicators, f"no task.indicator among {[f['t'] for f in frames]}"
+    return indicators[-1]["running"], indicators[-1].get("accepting", True)
+
+
+def outputs_of(frames: List[Dict[str, Any]]) -> List[Any]:
+    return [f["step"].get("output") for f in frames if f["t"] == "step.upsert"]
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_background_run_keeps_its_handle_and_its_composer(
+    ws_impl: str,
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """A second message while a declared-background run is going.
+
+    Three things at once, and they only hold together over a real socket
+    with a real runner behind it: the indicator says *running* while it says
+    the composer may send, the second message gets its own ``on_message``
+    rather than queueing behind the first, and the run in flight is still
+    held -- so Stop can reach it.
+
+    That last one is the reason this is a set and not a slot. ``_launch``
+    writes the turn into ``session.current_task``, and a second turn
+    replaces it; a background run stored the same way would have its only
+    handle dropped by the very message it exists to allow, and would then
+    run on in a conversation nobody could stop.
+    """
+    plugin = make_plugin()
+    turns: List[str] = []
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    handles: List[Any] = []
+
+    async def long_run() -> None:
+        started.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async def on_message(msg: cl.Message) -> None:
+        turns.append(msg.content)
+        if msg.content == "start":
+            handles.append(cl.run_in_background(long_run()))
+            await cl.Message(content="working on it").send()
+        else:
+            await cl.Message(content=f"noted {msg.content}").send()
+
+    test_config.code.on_message = on_message
+
+    await asyncio.to_thread(seed_user, db_url, ALICE)
+    cookie = {"Cookie": f"{auth.key}={auth.create_token(ALICE)}"}
+
+    async with live_server(Litestar(plugins=[plugin]), ws=ws_impl) as port:
+        async with connect(
+            f"ws://127.0.0.1:{port}/ws", additional_headers=cookie
+        ) as sock:
+            opening = await open_live(sock, pageLoad=True, threadId=None)
+            thread_id = opening[0]["threadId"]
+
+            await sock.send(user_message("start"))
+            await asyncio.wait_for(started.wait(), 5)
+            settled = await drain_live(sock)
+            assert "working on it" in outputs_of(settled), outputs_of(settled)
+
+            # The turn is over and the run is not. This is the frame the
+            # composer reads, and both halves of it matter: a spinner that
+            # went dark would claim the run had finished, and ``accepting:
+            # false`` would lock the box this whole case is about.
+            assert last_indicator(settled) == (True, True)
+
+            # The correction, typed over the run rather than after it.
+            await sock.send(user_message("the other one"))
+            second = await drain_live(sock)
+            assert "noted the other one" in outputs_of(second), outputs_of(second)
+            assert turns == ["start", "the other one"]
+
+            session = plugin.runner.registry.find_thread(thread_id)
+            assert session is not None
+            assert not handles[0].done(), "the second message cancelled the run"
+            assert handles[0] in session.background_tasks, (
+                "the run's handle was dropped; nothing can stop it now"
+            )
+
+            # And Stop still means stop: background is about the composer,
+            # not about outliving the conversation.
+            await sock.send(json.dumps({"t": "stop"}))
+            await asyncio.wait_for(cancelled.wait(), 5)
+
+            after = await drain_live(sock)
+            assert last_indicator(after) == (False, True)

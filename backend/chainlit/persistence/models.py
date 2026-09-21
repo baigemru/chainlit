@@ -252,9 +252,6 @@ class Step(Base):
     default_open: Mapped[Optional[bool]] = mapped_column(
         "defaultOpen", Boolean(), nullable=True
     )
-    modes: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "modes", types.JsonB, nullable=True
-    )
     auto_collapse: Mapped[Optional[bool]] = mapped_column(
         "autoCollapse", Boolean(), nullable=True
     )

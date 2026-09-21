@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from litestar import Litestar, Request, get, post
+from litestar.di import NamedDependency, Provide
 from litestar.exceptions import NotFoundException
 from litestar.testing import TestClient, create_test_client
 
@@ -22,6 +23,7 @@ from chainlit.plugin import (
     ChainlitPlugin,
     max_request_body_size,
 )
+from chainlit.runner import ApplicationRunner
 
 
 @get("/host/hello", exclude_from_auth=True)
@@ -142,6 +144,41 @@ def test_without_persistence_the_database_routes_refuse_rather_than_break():
     with create_test_client(plugins=[ChainlitPlugin()]) as client:
         assert client.get("/health").status_code == 200
         assert client.post("/project/threads", json={}).status_code == 503
+
+
+def test_a_host_route_takes_the_runner_as_a_dependency(frontend_dir: Path):
+    """The runner is bound by name, like ``sessions`` and ``transit``.
+
+    A host route that has to reach into a live session -- a webhook saying
+    a background run finished -- asks Litestar for the runner. Digging it
+    out of ``app.plugins`` instead makes the handler know about the plugin
+    registry, and leaves a test nothing to rebind but a private function.
+    """
+    seen: dict = {}
+
+    @get("/host/runner", exclude_from_auth=True)
+    async def host_runner(runner: NamedDependency[ApplicationRunner]) -> dict:
+        seen["runner"] = runner
+        return {"ok": True}
+
+    plugin = ChainlitPlugin(frontend_dir=frontend_dir)
+    with create_test_client(route_handlers=[host_runner], plugins=[plugin]) as client:
+        assert client.get("/host/runner").status_code == 200
+
+    assert seen["runner"] is plugin.runner
+
+
+def test_a_host_that_bound_its_own_runner_keeps_it(frontend_dir: Path):
+    """``setdefault``, like every other name the plugin contributes."""
+    sentinel = object()
+    app = Litestar(
+        plugins=[ChainlitPlugin(frontend_dir=frontend_dir)],
+        dependencies={"runner": Provide(lambda: sentinel, sync_to_thread=False)},
+    )
+
+    bound = app.dependencies["runner"]
+    assert isinstance(bound, Provide)
+    assert bound.dependency() is sentinel
 
 
 # --- request_max_body_size ---------------------------------------------------

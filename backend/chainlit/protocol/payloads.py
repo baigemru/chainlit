@@ -48,8 +48,6 @@ __all__ = [
     "FileElement",
     "FileRef",
     "ImageElement",
-    "Mode",
-    "ModeOption",
     "PdfElement",
     "PlotlyElement",
     "SidebarSlotRef",
@@ -147,7 +145,6 @@ class Step(msgspec.Struct, rename="camel", omit_defaults=True):
     language: str | None = None
     icon: str | None = None
     command: str | None = None
-    modes: dict[str, str] | None = None
     tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
     generation: dict[str, Any] | None = None
@@ -192,7 +189,6 @@ class StepPatch(msgspec.Struct, rename="camel", omit_defaults=True):
     language: Union[str, UnsetType, None] = UNSET
     icon: Union[str, UnsetType, None] = UNSET
     command: Union[str, UnsetType, None] = UNSET
-    modes: Union[dict[str, str], UnsetType, None] = UNSET
     tags: Union[list[str], UnsetType, None] = UNSET
     metadata: Union[dict[str, Any], UnsetType, None] = UNSET
     generation: Union[dict[str, Any], UnsetType, None] = UNSET
@@ -422,17 +418,3 @@ class Command(msgspec.Struct, rename="camel", omit_defaults=True):
     button: bool = False
     persistent: bool = False
     selected: bool = False
-
-
-class ModeOption(msgspec.Struct, rename="camel", omit_defaults=True):
-    id: str
-    name: str
-    description: str | None = None
-    icon: str | None = None
-    default: bool = False
-
-
-class Mode(msgspec.Struct, rename="camel", omit_defaults=True):
-    id: str
-    name: str
-    options: list[ModeOption] = []

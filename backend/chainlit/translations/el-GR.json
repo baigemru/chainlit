@@ -64,9 +64,7 @@
     "provider": {
       "continue": "Συνέχεια με {{provider}}",
       "signin": "Σύνδεση με {{provider}}",
-      "register": "Εγγραφή με {{provider}}",
-      "vk": "Sign in with VK",
-      "yandex": "Sign in with Yandex"
+      "register": "Εγγραφή με {{provider}}"
     }
   },
   "chat": {

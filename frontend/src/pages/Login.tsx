@@ -150,12 +150,14 @@ export default function Login() {
                 window.location.href =
                   apiClient.getOAuthRegisterEndpoint(provider);
               }}
-              onOAuthVkSignIn={async (provider: string) => {
-                window.location.href = apiClient.getOAuthVkEndpoint(provider);
-              }}
-              onOAuthYandexSignIn={async (provider: string) => {
-                window.location.href =
-                  apiClient.getOAuthYandexEndpoint(provider);
+              onOAuthIdpSignIn={async (
+                provider: string,
+                shortcutId: string
+              ) => {
+                window.location.href = apiClient.getOAuthIdpEndpoint(
+                  provider,
+                  shortcutId
+                );
               }}
             />
           </div>

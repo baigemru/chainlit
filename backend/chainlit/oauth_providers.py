@@ -1,6 +1,6 @@
 import os
 import urllib.parse
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import httpx
 from litestar.exceptions import (
@@ -9,7 +9,11 @@ from litestar.exceptions import (
     PermissionDeniedException,
 )
 
+import chainlit.config
 from chainlit.user import User
+
+if TYPE_CHECKING:
+    from chainlit.config import IdpShortcut
 
 ACCESS_TOKEN_MISSING = "Access token missing in the response"
 
@@ -28,6 +32,11 @@ class OAuthProvider:
     # id-derived prefix it does not change when the provider is renamed via
     # OAUTH_*_NAME, so flags stay aligned with the OAUTH_KEYCLOAK_* credentials.
     env_prefix: Optional[str] = None
+    # The authorize-URL parameter this provider reads to jump straight to one
+    # of the identity providers it brokers -- Keycloak's ``kc_idp_hint``.
+    # ``None`` means the provider brokers nothing, and the login page offers
+    # no shortcuts through it however many the config declares.
+    idp_hint_param: Optional[str] = None
 
     def is_configured(self):
         return all([os.environ.get(env) for env in self.env])
@@ -79,27 +88,6 @@ class OAuthProvider:
 
     def is_direct_grant_enabled(self) -> bool:
         return False
-
-    def get_vk_idp_hint(self) -> Optional[str]:
-        """Identity-provider alias the VK button short-circuits to (Keycloak's
-        kc_idp_hint). None means the provider cannot render a VK button."""
-        return None
-
-    def is_vk_button_enabled(self) -> bool:
-        return self.get_vk_idp_hint() is not None and self._get_env_flag(
-            "VK_BUTTON", False
-        )
-
-    def get_yandex_idp_hint(self) -> Optional[str]:
-        """Identity-provider alias the Yandex button short-circuits to
-        (Keycloak's kc_idp_hint). None means the provider cannot render a
-        Yandex button."""
-        return None
-
-    def is_yandex_button_enabled(self) -> bool:
-        return self.get_yandex_idp_hint() is not None and self._get_env_flag(
-            "YANDEX_BUTTON", False
-        )
 
     def get_icon_url(self, theme: Optional[str] = None) -> Optional[str]:
         """Return the custom button icon from OAUTH_{PREFIX}_ICON_URL env vars.
@@ -590,6 +578,7 @@ class KeycloakOAuthProvider(OAuthProvider):
     ]
     id = os.environ.get("OAUTH_KEYCLOAK_NAME", "keycloak")
     env_prefix = "KEYCLOAK"
+    idp_hint_param = "kc_idp_hint"
 
     def __init__(self):
         self.refresh_token = None
@@ -620,12 +609,6 @@ class KeycloakOAuthProvider(OAuthProvider):
 
     def is_direct_grant_enabled(self) -> bool:
         return self._get_env_flag("DIRECT_GRANT", False)
-
-    def get_vk_idp_hint(self) -> Optional[str]:
-        return self._get_env_value("VK_IDP_ALIAS") or "vkid"
-
-    def get_yandex_idp_hint(self) -> Optional[str]:
-        return self._get_env_value("YANDEX_IDP_ALIAS") or "yandex"
 
     async def get_raw_token_response(self, code: str, url: str) -> dict:
         payload = {
@@ -790,14 +773,40 @@ def get_configured_oauth_providers():
     return [p.id for p in providers if p.is_configured()]
 
 
+def idp_shortcuts(provider: OAuthProvider) -> List["IdpShortcut"]:
+    """The configured shortcuts this provider can actually carry.
+
+    Empty for a provider that brokers nothing: a shortcut through it could
+    only send the browser to the provider's own login page with a parameter
+    it ignores, which is the plain login button wearing another name.
+    """
+    if provider.idp_hint_param is None:
+        return []
+    return list(chainlit.config.config.ui.idp_shortcuts)
+
+
+def find_idp_shortcut(
+    provider: OAuthProvider, shortcut_id: str
+) -> Optional["IdpShortcut"]:
+    return next((s for s in idp_shortcuts(provider) if s.id == shortcut_id), None)
+
+
 def get_oauth_provider_details() -> List[Dict[str, object]]:
     return [
         {
             "id": p.id,
             "loginEnabled": p.is_login_button_enabled(),
             "registrationEnabled": p.is_registration_button_enabled(),
-            "vkEnabled": p.is_vk_button_enabled(),
-            "yandexEnabled": p.is_yandex_button_enabled(),
+            "idpShortcuts": [
+                {
+                    "id": s.id,
+                    "label": s.label,
+                    "iconUrl": s.icon_url,
+                    "iconUrlLight": s.icon_url_light or s.icon_url,
+                    "iconUrlDark": s.icon_url_dark or s.icon_url,
+                }
+                for s in idp_shortcuts(p)
+            ],
             "iconUrl": p.get_icon_url(),
             "iconUrlLight": p.get_icon_url("light"),
             "iconUrlDark": p.get_icon_url("dark"),

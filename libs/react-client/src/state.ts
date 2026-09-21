@@ -129,6 +129,18 @@ export const loadingState = atom<boolean>({
   default: false
 });
 
+/**
+ * Whether the composer may send. Used to be `!loading` and is not any more:
+ * an application can declare a run background (`cl.run_in_background`), and
+ * then the work is shown as running while the person keeps typing into it.
+ * Default `true`, so a client that has heard nothing yet is a client whose
+ * composer works.
+ */
+export const acceptingState = atom<boolean>({
+  key: 'Accepting',
+  default: true
+});
+
 export const askUserState = atom<IAsk | undefined>({
   key: 'AskUser',
   default: undefined

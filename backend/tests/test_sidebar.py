@@ -900,3 +900,63 @@ class TestMeta:
         stored = persist.thread_state(session)
 
         assert stored[SIDEBAR_META_KEY]["slots"][0]["elementIds"] == [rid("e1")]
+
+
+class TestHowHardTheRaiseIs:
+    """``force``: the difference between asking for the screen and taking it.
+
+    ``visible`` says where the panel belongs and the client applies it; on a
+    phone the panel is a full-screen sheet over the feed, so the client
+    declines a raise it was merely asked for. The server does not know which
+    screen it is talking to and must not -- the ``device`` a hello carried
+    can be pinned against the layout with ``?device=pc`` -- so what it sends
+    is the strength of the instruction, and the browser weighs it.
+    """
+
+    async def test_filling_a_slot_asks_rather_than_takes(self, ctx, session):
+        await Sidebar.set_slot("cards", [text("a", eid("a"))])
+
+        frame = last_state(session)
+        assert frame.visible is True
+        assert frame.force is False, (
+            "a slot refresh must not be able to bury the feed on a phone"
+        )
+
+    async def test_force_says_the_application_means_it(self, ctx, session):
+        await Sidebar.set_slot("cards", [text("a", eid("a"))], activate="force")
+
+        frame = last_state(session)
+        assert frame.visible is True
+        assert frame.force is True
+        assert session.sidebar.active == "cards"
+
+    async def test_not_activating_neither_raises_nor_forces(self, ctx, session):
+        await Sidebar.set_slot("cards", [text("a", eid("a"))], activate=False)
+
+        frame = last_state(session)
+        assert frame.visible is False
+        assert frame.force is False
+
+    async def test_show_is_the_unconditional_one(self, ctx, session):
+        """It has no other purpose, so there is nothing to weigh it against."""
+        await Sidebar.set_slot("cards", [text("a", eid("a"))], activate=False)
+        await Sidebar.show()
+
+        frame = last_state(session)
+        assert frame.visible is True
+        assert frame.force is True
+
+    async def test_a_replay_never_forces(self, ctx, session):
+        """What comes back after a reload is read off the model, and the model
+        has no opinion about how hard anybody once asked. That is what keeps
+        an F5 on a phone from putting the sheet back over the question the
+        reload was for."""
+        await Sidebar.set_slot("cards", [text("a", eid("a"))], activate="force")
+        start = mark(session)
+
+        ctx.emitter.sidebar_state()
+
+        replayed = last_state(session)
+        assert replayed in since(session, start)
+        assert replayed.visible is True
+        assert replayed.force is False

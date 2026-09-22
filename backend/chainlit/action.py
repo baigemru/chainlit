@@ -8,7 +8,7 @@ the runner rebuilds an ``Action`` straight from the clicked payload.
 
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Literal, Mapping, Optional
 
 from chainlit.context import context
 
@@ -17,14 +17,23 @@ from chainlit.context import context
 class Action:
     # Name of the action, this should be used in the action_callback
     name: str
-    # The parameters to call this action with.
-    payload: Dict
+    # The parameters to call this action with. Defaults to empty because the
+    # wire drops an empty payload (omit_defaults) and the click posts back
+    # exactly what it received: a chip with nothing to say used to arrive as
+    # a missing argument and a 500.
+    payload: Dict = field(default_factory=dict)
     # The label of the action. This is what the user will see.
     label: str = ""
     # The tooltip of the action button. This is what the user will see when they hover the action.
     tooltip: str = ""
     # The lucid icon name for this action.
     icon: Optional[str] = None
+    # How the button asks to be drawn: "primary" for the one thing to do
+    # next, "secondary" for an alternative to it, "chip" for a small pill
+    # carrying a question, "default" for the quiet row. Nothing here is a
+    # colour -- the palette belongs to the client. An unknown value is
+    # refused by the wire struct when the action is sent, not here.
+    variant: Literal["default", "primary", "secondary", "chip"] = "default"
     # This should not be set manually, only used internally.
     forId: Optional[str] = None
     # The ID of the action

@@ -18,6 +18,7 @@ from ..frames import Expect
 from ..spec import AskState, Given, Incoming, Scenario, assert_that
 
 ACTION = {"id": "a1", "name": "continue", "forId": "step-1"}
+CHIP = {"id": "a2", "name": "weight", "forId": "step-1", "variant": "chip"}
 ELEMENT = {"id": "el-1", "forId": "step-1"}
 
 HELLO = Incoming("hello")
@@ -70,6 +71,21 @@ ASK_SCENARIOS = (
         given=_reconnect(pending_ask=AskState(actions=(ACTION,))),
         when=(HELLO,),
         expect=(Expect("action.add"), Expect("ask.start")),
+    ),
+    Scenario(
+        name="a re-emitted button keeps the weight it was sent with",
+        why=(
+            "The variant is how the application said which button is the "
+            "offer and which one is a small question next to it. Re-sending "
+            "them all in the quiet default rewrites the screen the user was "
+            "looking at before the connection dropped."
+        ),
+        given=_reconnect(pending_ask=AskState(actions=(ACTION, CHIP))),
+        when=(HELLO,),
+        expect=(
+            Expect("action.add", {"action.id": "a2", "action.variant": "chip"}),
+            Expect("ask.start"),
+        ),
     ),
     Scenario(
         name="a page reload gets the ask element back",

@@ -17,6 +17,7 @@ export interface Action {
   tooltip?: string;
   icon?: string | null;
   forId?: string | null;
+  variant?: 'chip' | 'default' | 'primary' | 'secondary';
 }
 
 export interface ActionAdd {

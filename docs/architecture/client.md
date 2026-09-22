@@ -44,15 +44,27 @@ host element uses therefore exists only if the application source happens to use
 too — and would silently vanish the day that usage is deleted.
 
 The `safelist` block fixes that. It is a contract with host apps, not decoration.
-Three patterns: browser filter utilities; a layout/spacing/type group (`grid-cols-1..12`,
+Five patterns: browser filter utilities; a layout/spacing/type group (`grid-cols-1..12`,
 `col-span-*`, `gap-*`, margins and paddings, `space-x|y-*`, the width/height scale,
 `min-w|max-w`, tracking, leading, font weights, text sizes, `rounded*`, `items|self-*`,
-`justify-*`, `flex-*`, `line-clamp-1..6`, `truncate`, `whitespace-*`, `overflow-*`);
-and an opacity/semantic-colour group
+`justify-*`, `flex-*`, `shrink|grow`, `line-clamp-1..6`, `truncate`, `whitespace-*`,
+`overflow-*`); the group a row with a thumbnail and a table of numbers needs on top of
+that (the display utilities `hidden|block|inline-block|flex|inline-flex|grid`, the
+position utilities with `top|right|bottom|left|inset-0|auto` and `z-0..50`, `divide-x|y`,
+`object-cover|contain|…`, `tabular-nums`, `line-through`, `underline`, `align-*`); the
+same layout vocabulary again under `sm:` and `md:`, deliberately a **subset** — every
+pattern there ships three times, and a phone layout needs the things that reflow, not the
+whole utility surface; and an opacity/semantic-colour group
 (`opacity-0..100`, `border|text|bg-(primary|muted|accent|destructive)[-foreground][/opacity]`)
 with `hover` and `disabled` variants. To extend it, add to the relevant regex, keeping
 the guarantee in mind: anything a host element may use must be matched here, and
-anything matched here ships in every build forever.
+anything matched here ships in every build forever. Measured when the last three groups
+were added: the built stylesheet went from 173 KB to 198 KB uncompressed, 28 KB gzipped.
+
+`frontend/tests/safelist.spec.ts` is the guard: it runs Tailwind in-process over this
+config with an **empty** content set, so the only thing that can produce a class is the
+safelist itself, and asserts a sample of each group is in the output. A spec that grepped
+`dist/` would depend on a build the test gate does not run.
 
 ### What a custom element may rely on
 
@@ -376,6 +388,25 @@ since `DEFAULT_MOBILE_HEADER` does not list `"wordmark"`, a phone shows it only 
 config asked. `frontend/tests/mobileScreen.spec.tsx` covers both halves, including the one
 that is easy to break: a phone header with the wordmark on and unnamed grows no overflow
 button for it.
+
+**The row under a message.** `Messages/Message/Buttons/` draws the copy button, the
+feedback pair, the debug link and whatever `cl.Action`s name that message. The actions
+themselves are `Buttons/Actions/index.tsx`, which is the only thing there that knows a
+chip from a command: chips (`variant="chip"`) go in a wrapping line of their own — they
+are questions the user may tap, and a question does not belong in a row of offers —
+while the commands are a wrapping row on a wide screen and a two-column grid on a phone.
+A column of four turned the offer after an answer into a scroll, which is the moment the
+measured 24–45% of people act on.
+
+`Action.variant` is `default | primary | secondary | chip`, and it is a _weight_: the
+application says how loudly a button asks to be pressed and `ActionButton.tsx` maps that
+onto the theme's own `Button` variants (`ghost`, `default`, `outline`, and `outline` plus
+a `rounded-full` pill). No application ever names a colour, so a dark theme stays the
+client's business. One trap is worth knowing before editing that map: `cn` is
+tailwind-merge and the class list the button is handed beats the one its variant built,
+so the `text-muted-foreground` the quiet variants carry must not be applied to `primary`
+— it would overwrite the `text-primary-foreground` that makes the accented button
+readable. `frontend/tests/actionVariants.spec.tsx` pins both the mapping and the layout.
 
 **The welcome screen** (`components/chat/WelcomeScreen.tsx`) is four tiers on an empty
 chat: the profile's logo and `markdown_description`, the composer, the profile's
@@ -797,6 +828,10 @@ in a `RecoilRoot` — and pins the link the fix is: a close 4401 leaves `userSta
 while a 1006 leaves the signed-in user exactly where it was. Other specs cover
 message-tree merging, ask-action
 pruning, transcript freezing, wait messages, compact steps, icons, content rendering,
+`actionVariants.spec.tsx` (each variant's classes — including the `primary` button that
+must not inherit `text-muted-foreground` — the chips in their own line, and the commands
+two to a line on a phone and a wrapping row above it), `safelist.spec.ts` (Tailwind
+compiled in-process with no content set, so only the safelist can produce a class),
 `NewChat` (including the named wide button the sidebar asks for, against the icon the
 header keeps), `threadGroupLabel` (the time-group heading set apart from the rows it
 heads), `openThread` and `threadAddressSync` (both directions of the

@@ -316,6 +316,14 @@ class Action(msgspec.Struct, rename="camel", omit_defaults=True):
     tooltip: str = ""
     icon: str | None = None
     for_id: str | None = None
+    #: How the button asks to be drawn. Weight, not colour: the palette is
+    #: the client's. ``chip`` is the odd one out -- a pill carrying a
+    #: question ("weight of the box?"), which the client lays out in its own
+    #: wrapping row rather than in the row of commands.
+    #:
+    #: ``omit_defaults`` keeps ``"default"`` off the wire, so the client has
+    #: to read a missing field as ``default``.
+    variant: Literal["default", "primary", "secondary", "chip"] = "default"
 
 
 # --------------------------------------------------------------------------

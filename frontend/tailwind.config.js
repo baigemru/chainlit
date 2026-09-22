@@ -130,7 +130,27 @@ export default {
     // grid because a feature that used `grid-cols-2` was deleted here.
     {
       pattern:
-        /^(grid-cols-(?:[1-9]|1[0-2])|col-span-(?:[1-9]|1[0-2])|gap(?:-[xy])?-(?:0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|8)|-?[mp][trblxy]?-(?:0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|8|10|12|auto)|space-[xy]-(?:0|0\.5|1|1\.5|2|3|4)|[hw]-(?:0|0\.5|1|1\.5|2|3|4|5|6|8|10|12|16|20|24|32|40|48|64|full|auto|fit|screen)|(?:min|max)-w-(?:0|full|xs|sm|md|lg|xl|2xl|none|fit)|tracking-(?:tighter|tight|normal|wide|wider|widest)|leading-(?:none|tight|snug|normal|relaxed|loose)|font-(?:thin|light|normal|medium|semibold|bold|mono|sans)|(?:uppercase|lowercase|capitalize|normal-case)|border(?:-[trbl]|-[xy])?(?:-(?:0|2|4|8))?|text-(?:xs|sm|base|lg|xl|2xl|left|center|right)|rounded(?:-[tblr]|-[tb][lr])?(?:-(?:none|sm|md|lg|xl|2xl|full))?|(?:items|self)-(?:start|end|center|stretch|baseline)|justify-(?:start|end|center|between|around|evenly)|flex-(?:row|col|wrap|nowrap|1|auto|none|shrink-0|grow)|line-clamp-[1-6]|truncate|whitespace-(?:nowrap|pre-wrap|normal)|overflow-(?:hidden|auto|x-auto|y-auto))$/
+        /^(grid-cols-(?:[1-9]|1[0-2])|col-span-(?:[1-9]|1[0-2])|gap(?:-[xy])?-(?:0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|8)|-?[mp][trblxy]?-(?:0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|8|10|12|auto)|space-[xy]-(?:0|0\.5|1|1\.5|2|3|4)|[hw]-(?:0|0\.5|1|1\.5|2|3|4|5|6|8|10|12|16|20|24|32|40|48|64|full|auto|fit|screen)|(?:min|max)-w-(?:0|full|xs|sm|md|lg|xl|2xl|none|fit)|tracking-(?:tighter|tight|normal|wide|wider|widest)|leading-(?:none|tight|snug|normal|relaxed|loose)|font-(?:thin|light|normal|medium|semibold|bold|mono|sans)|(?:uppercase|lowercase|capitalize|normal-case)|border(?:-[trbl]|-[xy])?(?:-(?:0|2|4|8))?|text-(?:xs|sm|base|lg|xl|2xl|left|center|right)|rounded(?:-[tblr]|-[tb][lr])?(?:-(?:none|sm|md|lg|xl|2xl|full))?|(?:items|self)-(?:start|end|center|stretch|baseline)|justify-(?:start|end|center|between|around|evenly)|flex-(?:row|col|wrap|nowrap|1|auto|none|shrink-0|grow)|(?:shrink|grow)(?:-0)?|line-clamp-[1-6]|truncate|whitespace-(?:nowrap|pre-wrap|normal)|overflow-(?:hidden|auto|x-auto|y-auto))$/
+    },
+    // The rest of what a row with a thumbnail and a table of numbers needs.
+    // `divide-*` draws the rules between rows without a border on each one;
+    // `object-*` keeps a photo of unknown aspect inside its box;
+    // `tabular-nums` is what makes a column of prices line up; `sticky` plus
+    // an inset and a `z-*` is how a table header survives a scroll inside a
+    // panel. None of these appear in the app's own source, so none of them
+    // would exist for a host element without this.
+    {
+      pattern:
+        /^(hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
+    },
+    // The same layout vocabulary at the two breakpoints a host element can
+    // actually design for. Deliberately a subset of the group above: every
+    // pattern listed here ships three times, and a phone layout needs the
+    // things that reflow, not the whole utility surface.
+    {
+      pattern:
+        /^(grid-cols-(?:[1-9]|1[0-2])|col-span-(?:[1-9]|1[0-2])|gap(?:-[xy])?-(?:0|1|2|3|4|5|6|8)|-?[mp][trblxy]?-(?:0|1|2|3|4|5|6|8)|[hw]-(?:0|4|6|8|10|12|16|20|24|32|40|48|64|full|auto|fit)|(?:min|max)-w-(?:0|full|xs|sm|md|lg|xl|none|fit)|text-(?:xs|sm|base|lg|xl|2xl|left|center|right)|(?:items|self)-(?:start|end|center|stretch|baseline)|justify-(?:start|end|center|between|around|evenly)|flex-(?:row|col|wrap|nowrap|1|auto|none)|hidden|block|inline-block|flex|inline-flex|grid|truncate|line-clamp-[1-6])$/,
+      variants: ['sm', 'md']
     },
     {
       pattern:

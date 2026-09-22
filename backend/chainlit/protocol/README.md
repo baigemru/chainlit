@@ -173,6 +173,17 @@ Everything else was already camelCase (`forId`, `chainlitKey`, `parentId`,
   `_is_convertible_text_reply` gate in `socket.py` exists partly to defend
   against exactly that). It is now
   `{kind: "element", submitted: bool, props: {...}}`.
+- **`Action` carries a `variant`.** `"default" | "primary" | "secondary" |
+"chip"`, and a weight rather than a colour: the application says which
+  button is the offer, which is the alternative to it and which is a small
+  question standing next to them, and the client's theme decides what each
+  looks like. `omit_defaults` keeps `"default"` off the wire, so a client
+  reads a missing `variant` as `"default"`. A value outside the four is
+  refused by `msgspec.convert` on the way out (`emitter._as_action`, i.e. at
+  `Action.send`) and by the decoder on the way back in — the only validation
+  the field gets, since `chainlit.action.Action` is a plain dataclass and
+  checks nothing.
+
 - **`Feedback` requires `value` and `forId`**, as the legacy
   `types.Feedback` dataclass did. The first cut of this struct defaulted
   them, and `0` is a thumbs-_down_ — so `Feedback()` was a silent negative

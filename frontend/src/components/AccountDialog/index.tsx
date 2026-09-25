@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { useContext, useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import {
@@ -14,7 +14,7 @@ import {
 } from '@chainlit/react-client';
 
 import Alert from '@/components/Alert';
-import SchemaForm from '@/components/SchemaForm';
+import SchemaForm, { LEADING } from '@/components/SchemaForm';
 import { useTranslation } from '@/components/i18n/Translator';
 import {
   Dialog,
@@ -66,9 +66,26 @@ function AccountBody({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const handoff = useSessionHandoff();
   const isMobile = useIsMobile();
+  const [searchParams] = useSearchParams();
 
-  const { data, error, isLoading, mutate } =
-    useApi<IAccountPage>('/project/account');
+  // The section on screen travels with every request, and a new section is a
+  // new request. Asked again rather than loaded once: "the feed was opened"
+  // is news to the application only if it hears it when it happens, and a
+  // page loaded for the section the dialog opened on would never tell it
+  // that the user went on to the feed. The general section is the dialog's
+  // own name for the Struct's top-level scalars, not a field the
+  // application declared, so it goes out as no section at all.
+  const tab = searchParams.get('tab');
+  const query = tab && tab !== LEADING ? `?tab=${encodeURIComponent(tab)}` : '';
+
+  // `keepPreviousData`: while the next section's page is in flight the form
+  // stays on the one it has, rather than falling back to the placeholders
+  // and remounting -- which would take a draft with it. The form keeps the
+  // draft across the page that then arrives (see `SchemaForm`).
+  const { data, error, isLoading, mutate } = useApi<IAccountPage>(
+    `/project/account${query}`,
+    { keepPreviousData: true }
+  );
 
   // `APIBase.fetch` hands every failure to the context client's `onError`,
   // which toasts `Bad Request: <detail>`. The dialog says it better -- the
@@ -101,7 +118,7 @@ function AccountBody({ onClose }: { onClose: () => void }) {
       // was filled from, and the route refuses a save without one.
       const save: IAccountSave = { values, base };
       // `put` resolves with the `Response`, not the parsed body.
-      const res = await saveClient.put('/project/account', save);
+      const res = await saveClient.put(`/project/account${query}`, save);
       const page = (await res.json()) as IAccountPage;
       // `false`: the server just answered with the stored state, so a
       // revalidation would only ask it to repeat itself.
@@ -126,10 +143,13 @@ function AccountBody({ onClose }: { onClose: () => void }) {
    */
   const onAction = async (name: string, path: string, item: unknown | null) => {
     try {
-      const res = await saveClient.post(`/project/account/actions/${name}`, {
-        path,
-        item
-      });
+      const res = await saveClient.post(
+        `/project/account/actions/${name}${query}`,
+        {
+          path,
+          item
+        }
+      );
       const { outcome } = (await res.json()) as IAccountActionResponse;
       switch (outcome.t) {
         case 'toast':
@@ -166,7 +186,7 @@ function AccountBody({ onClose }: { onClose: () => void }) {
   };
 
   const body = () => {
-    if (isLoading) {
+    if (isLoading && !data) {
       return (
         <div className="flex flex-1 flex-col gap-4 p-6">
           <Skeleton className="h-10 w-full" />

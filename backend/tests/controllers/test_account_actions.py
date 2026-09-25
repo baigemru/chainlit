@@ -261,7 +261,7 @@ def test_a_refresh_outcome_carries_the_page_the_get_would_build(registered):
     the page has to show what it changed, without a reload."""
 
     @cl.on_account_load
-    async def load(user, account):
+    async def load(user, account, tab):
         return Account(watch=Watch(items=[WatchedItem(title="Кружка")]))
 
     @cl.account_action("compare")
@@ -278,6 +278,31 @@ def test_a_refresh_outcome_carries_the_page_the_get_would_build(registered):
     assert outcome["message"] == "Обновлено"
     assert outcome["page"]["values"]["watch"]["items"][0]["title"] == "Кружка"
     assert outcome["page"]["schema"]["$ref"] == "#/$defs/Account"
+
+
+def test_a_refresh_draws_its_page_for_the_section_the_button_was_in(registered):
+    """The rebuilt page is a load like any other, so the load hook hears
+    the section `?tab=` names -- the dialog sends the one it is showing."""
+    tabs: List[Optional[str]] = []
+
+    @cl.on_account_load
+    async def load(user, account, tab):
+        tabs.append(tab)
+        return account
+
+    @cl.account_action("compare")
+    async def compare(user, item, account):
+        return cl.AccountRefresh()
+
+    with _client() as client:
+        _sign_in(client)
+        response = client.post(
+            "/project/account/actions/compare?tab=watch",
+            json={"path": "watch.items.0", "item": CARD},
+        )
+
+    assert response.status_code == 201
+    assert tabs == ["watch"]
 
 
 def test_an_unknown_return_value_is_a_500(registered):
@@ -438,7 +463,7 @@ def test_the_load_hook_after_a_refresh_sees_what_the_action_stored(registered):
     seen: List[Any] = []
 
     @cl.on_account_load
-    async def load(user, account):
+    async def load(user, account, tab):
         seen.append(account)
         return msgspec.structs.replace(account, balance=1250.0)
 

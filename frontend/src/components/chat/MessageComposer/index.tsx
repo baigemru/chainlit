@@ -36,11 +36,13 @@ interface Props {
   onFileUploadError: (error: string) => void;
   autoScrollRef: MutableRefObject<boolean>;
   /**
-   * Which of the two arrangements to draw, overriding the viewport. Unset is
-   * the rule the chat has always followed — the phone gets the pill, the
-   * desktop the card — and the welcome screen is the one caller that names
-   * one: an empty screen has the whole page to spend, so the card's toolbar
-   * row buys nothing there and the pill reads as an invitation to type.
+   * Which of the two arrangements to draw, overriding the viewport. Both
+   * callers in this package name the pill: the welcome screen, where an
+   * empty page reads it as an invitation to type, and the chat's footer,
+   * where the card's toolbar row was height taken from the conversation for
+   * three buttons the pill already carries on its one line. Unset still
+   * means the viewport's answer -- the pill on a phone, the card on a
+   * desktop -- for a caller that wants the toolbar row back.
    */
   layout?: 'full' | 'pill';
 }

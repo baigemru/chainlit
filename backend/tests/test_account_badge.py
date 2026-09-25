@@ -148,7 +148,7 @@ def test_reading_the_account_page_pushes_the_count_of_the_marked_values(
     test_config.code.account = Account
 
     @cl.on_account_load
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, seen=True)
 
     @cl.on_account_badge
@@ -187,7 +187,7 @@ def test_the_route_hands_the_hook_the_stored_shape_not_the_rendered_one(
     test_config.code.account = Account
 
     @cl.on_account_load
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, plan="pro")
 
     @cl.on_account_badge

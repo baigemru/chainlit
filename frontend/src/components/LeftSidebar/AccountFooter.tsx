@@ -4,6 +4,7 @@ import { useRecoilValue } from 'recoil';
 import { accountBadgeState, useAuth, useConfig } from '@chainlit/react-client';
 
 import UserAvatar from '@/components/UserAvatar';
+import { Badge } from '@/components/ui/badge';
 import {
   SidebarFooter,
   SidebarMenu,
@@ -25,6 +26,11 @@ import { Translator } from 'components/i18n';
  * `PinnedAccount` is: that block draws one row per *section* and so cannot
  * exist without the schema, while this row leads to the page itself and needs
  * to know nothing about what is on it.
+ *
+ * The count is written out here as well as dotted on the face. The dot says
+ * "something is new"; the number says whether it is worth the click, and
+ * this row is the one that is always on screen -- the user menu that also
+ * carries the number is closed most of the time.
  */
 export default function AccountFooter() {
   const { config } = useConfig();
@@ -36,6 +42,7 @@ export default function AccountFooter() {
   if (!account?.enabled || !user) return null;
 
   const displayName = user.display_name || user.identifier;
+  const unseen = badge ?? 0;
 
   return (
     <SidebarFooter>
@@ -61,6 +68,17 @@ export default function AccountFooter() {
                   <Translator path="navigation.user.menu.account" />
                 )}
               </span>
+              {unseen > 0 ? (
+                // `ml-auto` pins it to the row's right edge: the title may
+                // truncate, the count may not.
+                <Badge
+                  variant="destructive"
+                  data-testid="account-footer-count"
+                  className="ml-auto shrink-0 px-1.5 py-0"
+                >
+                  {unseen}
+                </Badge>
+              ) : null}
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>

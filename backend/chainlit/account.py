@@ -32,6 +32,14 @@ puts every one of them back to its default before anything is stored. The
 engine owns that rule so no application has to keep a list of which of its own
 fields are computed and clean them out of each save by hand.
 
+Its opposite is ``x-widget: "hidden"``: a leaf the page never draws but the
+store must keep -- the id a card is about, the run that produced a feed entry,
+whether it has been seen. The client carries it in the form and sends it back
+untouched, and the engine stores it like any other leaf. That is the whole
+difference from ``readOnly``, and it is why hidden wins when a schema says
+both: a hidden leaf reset to its default on every save would lose exactly the
+value it exists to hold.
+
 The engine is not the only writer of the row, either: an application may put a
 background arrival into the same document while a page is open on it. So a save
 is not a write of what the browser sent -- it is ``merge_account``, the leaves
@@ -603,6 +611,9 @@ def strip_readonly(value: S) -> S:
     ``readOnly`` on a nested Struct field resets that whole subtree; the walk
     goes into plain Struct fields and into the Struct elements of a list, which
     are the two shapes the page is built from.
+
+    A leaf that is also ``x-widget: "hidden"`` is kept, not reset: see
+    ``_is_readonly``.
     """
     node = msgspec_inspect.type_info(type(value))
     if not isinstance(node, msgspec_inspect.StructType):  # pragma: no cover - defensive
@@ -651,12 +662,22 @@ def _is_readonly(node: msgspec_inspect.Type) -> bool:
     ``msgspec.json.schema`` copies into the document the client renders. The
     loop only peels ``Metadata``: ``readOnly`` deeper inside -- on a list's
     item type, say -- describes that type, not this field.
+
+    ``x-widget: "hidden"`` anywhere on the same chain answers no. A hidden
+    leaf is one the application stores and the user never sees, and an
+    author who adds ``readOnly`` to it is saying "not editable", not
+    "derived": resetting it would drop the id or the flag it exists to keep,
+    on the first save, with nothing on screen to show it went.
     """
+    readonly = False
     while isinstance(node, msgspec_inspect.Metadata):
-        if (node.extra_json_schema or {}).get("readOnly"):
-            return True
+        extra = node.extra_json_schema or {}
+        if extra.get("x-widget") == "hidden":
+            return False
+        if extra.get("readOnly"):
+            readonly = True
         node = node.type
-    return False
+    return readonly
 
 
 def decode_stored(stored: Any, cls: Type[S]) -> S:

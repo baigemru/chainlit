@@ -23,6 +23,7 @@ import type { ResolvedField } from './resolve';
  * not keep.
  *
  * Only the switches register with react-hook-form. The rest of the element
+ * -- the `x-widget: "hidden"` leaves, which are not drawn at all, included --
  * still reaches `PUT /project/account` untouched, because `handleSubmit`
  * submits a clone of `_formValues` — seeded from `defaultValues` — rather than
  * a walk over the registered fields (react-hook-form 7.54.2,
@@ -127,8 +128,15 @@ const Cards = ({ field }: Props) => {
   const title = itemFields.find(
     (child) => child.kind === 'string' && child.widget === 'title'
   );
+  // `hidden` is the application's bookkeeping -- a card's id, a run, a
+  // "seen" -- and a card that printed it would show the user a number they
+  // would take for something that matters. Its value rides in the element.
   const rest = itemFields.filter(
-    (child) => child !== image && child !== title && !isNestedObject(child)
+    (child) =>
+      child !== image &&
+      child !== title &&
+      child.kind !== 'hidden' &&
+      !isNestedObject(child)
   );
 
   // Once per field, not once per card: the author needs the address, not one

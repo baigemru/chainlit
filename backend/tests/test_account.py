@@ -280,6 +280,66 @@ class TestStripReadonly:
         assert strip_readonly(once) is once
 
 
+HIDDEN = {"x-widget": "hidden"}
+
+
+class Entry(msgspec.Struct):
+    """A feed row: what the user reads, and what only the application reads."""
+
+    title: str = ""
+    run_id: Annotated[str, Meta(extra_json_schema=HIDDEN)] = ""
+    # Both keys, as an author who means "and nobody edits it" would write it.
+    pair_id: Annotated[str, Meta(extra_json_schema={**HIDDEN, "readOnly": True})] = ""
+    seen: Annotated[bool, Meta(extra_json_schema=HIDDEN)] = False
+
+
+class Watched(msgspec.Struct):
+    entries: List[Entry] = []
+    cursor: Annotated[str, Meta(extra_json_schema=HIDDEN)] = ""
+
+
+class TestHiddenLeaves:
+    """`x-widget: "hidden"` is stored and never drawn -- `readOnly`'s opposite.
+
+    The client keeps such a leaf in the form and sends it back; the engine's
+    half of the contract is not to throw it away on the way to the store.
+    """
+
+    ENTRY = Entry(title="Кружка", run_id="r-1", pair_id="859086919394", seen=True)
+
+    def test_a_hidden_leaf_is_not_reset_before_a_write(self):
+        account = Watched(entries=[self.ENTRY], cursor="c-9")
+
+        assert strip_readonly(account) is account
+
+    def test_hidden_wins_over_readonly_on_the_same_leaf(self):
+        """`readOnly` beside `hidden` says "nobody edits it", and a reset
+        would drop the very id the leaf is there to keep."""
+        kept = strip_readonly(Watched(entries=[self.ENTRY]))
+
+        assert kept.entries[0].pair_id == "859086919394"
+
+    def test_readonly_alone_still_resets(self):
+        """The exception is the hidden key, not the presence of any extra
+        schema: a derived leaf next to a hidden one is still derived."""
+        kept = strip_readonly(Derived(balance=5.0))
+
+        assert kept.balance is None
+
+    def test_the_marker_reaches_the_schema_the_client_draws_from(self):
+        defs = schema_of(Watched)["$defs"]
+
+        assert defs["Entry"]["properties"]["run_id"]["x-widget"] == "hidden"
+        assert defs["Watched"]["properties"]["cursor"]["x-widget"] == "hidden"
+
+    def test_a_stored_hidden_leaf_decodes_back(self):
+        stored = msgspec.to_builtins(Watched(entries=[self.ENTRY], cursor="c-9"))
+
+        assert decode_stored(stored, Watched) == Watched(
+            entries=[self.ENTRY], cursor="c-9"
+        )
+
+
 class TestDecodeStored:
     def test_an_empty_object_is_the_defaults(self):
         assert decode_stored({}, Account) == Account()

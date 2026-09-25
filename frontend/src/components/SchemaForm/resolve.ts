@@ -25,6 +25,7 @@ export type FieldKind =
   | 'link'
   | 'cards'
   | 'group'
+  | 'hidden'
   | 'unsupported';
 
 export type FieldWidget =
@@ -286,9 +287,18 @@ const buildField = (
     kind: 'unsupported'
   });
 
-  if (resolution.unsupported) return unsupported();
-
   const widget = widgetOf(schema);
+
+  // First, ahead of the refusal too: a hidden leaf is the application's own
+  // bookkeeping -- the id a card is about, whether an entry was seen -- and
+  // its value is carried back by the form whatever its type. Resolving it
+  // any further would only decide how to draw something that is not drawn,
+  // and an unrecognised type would be drawn anyway, as read-only JSON.
+  if (widget === 'hidden') {
+    return { ...base, kind: 'hidden' };
+  }
+
+  if (resolution.unsupported) return unsupported();
 
   if (widget === 'markdown') {
     return { ...base, kind: 'markdown' };
@@ -426,7 +436,12 @@ export const resolveForm = (schema: IJsonSchema): ResolvedForm => {
   for (const [name, node] of Object.entries(properties)) {
     if (!isSchema(node)) continue;
     const resolution = resolveSchema(node, defs);
-    if (isObjectSchema(resolution)) {
+    // A hidden Struct is not a section: a menu row that opens onto nothing
+    // is worse than no row. It stays a field, so its value is carried.
+    if (
+      isObjectSchema(resolution) &&
+      widgetOf(resolution.schema) !== 'hidden'
+    ) {
       tabs.push({
         name,
         title:
@@ -460,9 +475,10 @@ export const resolveForm = (schema: IJsonSchema): ResolvedForm => {
  * caption happened to carry the query — reads as a different form.
  */
 const matches = (field: ResolvedField, needle: string): boolean =>
-  field.title.toLowerCase().includes(needle) ||
-  (field.description ?? '').toLowerCase().includes(needle) ||
-  (field.fields ?? []).some((child) => matches(child, needle));
+  field.kind !== 'hidden' &&
+  (field.title.toLowerCase().includes(needle) ||
+    (field.description ?? '').toLowerCase().includes(needle) ||
+    (field.fields ?? []).some((child) => matches(child, needle)));
 
 /**
  * The fields of every section whose caption or helper text carries `query`.
@@ -495,3 +511,37 @@ export const searchFields = (
   }
   return groups;
 };
+
+/**
+ * Whether the user can change anything among `fields`.
+ *
+ * Asked of the section on screen, so the dialog can say "nothing to save
+ * here" instead of offering a Save that has nothing to commit -- a feed of
+ * read-outs under a Save button reads as a promise that something on it can
+ * be edited. Decided from the schema, not from the values: a card list with
+ * no cards today is still a list whose switches would be editable, and a
+ * bar that came and went with the data would move under the user's thumb.
+ *
+ * A card list counts only for its switches, the one control a card carries
+ * (see `Cards`); markdown and links are displays; `unsupported` is shown as
+ * JSON and sent back as it came; `hidden` is never shown at all.
+ */
+export const hasEditable = (fields: ResolvedField[]): boolean =>
+  fields.some((field) => {
+    if (field.readOnly) return false;
+    switch (field.kind) {
+      case 'group':
+        return hasEditable(field.fields ?? []);
+      case 'cards':
+        return (field.itemFields ?? []).some(
+          (child) => child.kind === 'boolean' && !child.readOnly
+        );
+      case 'markdown':
+      case 'link':
+      case 'hidden':
+      case 'unsupported':
+        return false;
+      default:
+        return true;
+    }
+  });

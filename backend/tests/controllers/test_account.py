@@ -217,7 +217,7 @@ def test_a_stale_stored_key_is_dropped_and_the_rest_survives(registered):
 
 
 def test_on_account_load_wins_over_the_store(registered):
-    async def load(user, account):
+    async def load(user, account, tab):
         assert user is not None
         assert user.identifier == "ada"
         return msgspec.structs.replace(account, notify=False, plan="pro")
@@ -239,7 +239,7 @@ def test_the_load_hook_is_handed_what_the_request_read(registered):
     with the values from before the save."""
     seen: List[Any] = []
 
-    async def load(user, account):
+    async def load(user, account, tab):
         seen.append(account)
         return account
 
@@ -258,7 +258,7 @@ def test_what_the_load_hook_returns_is_stored(registered):
     """Marking a feed seen as the page opens is a legitimate write on a GET,
     and it is a return value rather than a session of the app's own."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, feed=Feed(seen=True))
 
     config.code.on_account_load = load
@@ -277,7 +277,7 @@ def test_a_load_hook_that_changes_nothing_writes_nothing(registered):
     """An UPDATE on every page load would be a write nobody asked for, and
     the row is read on every hello."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return account
 
     config.code.on_account_load = load
@@ -295,7 +295,7 @@ def test_a_readonly_field_the_load_hook_filled_in_is_shown_but_not_stored(regist
     put a copy of a computed value in the database whose only job is to go
     stale."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, plan="pro", notify=False)
 
     config.code.on_account_load = load
@@ -314,7 +314,7 @@ def test_a_readonly_field_alone_is_not_a_change(registered):
     value the hook recomputes would look like a change on every load -- and a
     legacy row that still holds one would be rewritten on every load too."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, plan="enterprise")
 
     config.code.on_account_load = load
@@ -331,7 +331,7 @@ def test_a_readonly_leaf_inside_a_card_is_shown_but_not_stored(registered):
     """A card has no stored twin, so its derived leaf goes back to the field's
     default rather than to "what was there before"."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(
             account, feed=Feed(cards=[Card(title="Кружка", price=12.5)])
         )
@@ -349,7 +349,7 @@ def test_a_readonly_leaf_inside_a_card_is_shown_but_not_stored(registered):
 
 
 def test_a_load_hook_with_nowhere_to_store_still_draws_the_page(registered):
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, feed=Feed(seen=True))
 
     config.code.on_account_load = load
@@ -365,7 +365,7 @@ def test_a_load_hook_returning_none_is_a_500_naming_the_fix(registered):
     """ "Fall back to the store" has nothing left to mean: the hook is handed
     the stored values. A missing `return` would otherwise blank the page."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return None
 
     config.code.on_account_load = load
@@ -376,18 +376,65 @@ def test_a_load_hook_returning_none_is_a_500_naming_the_fix(registered):
     assert response.status_code == 500
 
 
-def test_a_one_argument_load_hook_is_refused_at_registration(registered):
-    """The retired signature. Caught at import rather than as a 500 on the
-    first page load."""
+def test_a_two_argument_load_hook_is_refused_at_registration(registered):
+    """The retired signature, from before the section was handed over.
+    Caught at import rather than as a 500 on the first page load."""
     import chainlit as cl
 
-    with pytest.raises(TypeError, match=r"takes \(user, account\)"):
+    with pytest.raises(TypeError, match=r"takes \(user, account, tab\)"):
 
         @cl.on_account_load
-        async def load(user):  # pragma: no cover - never registered
-            return None
+        async def load(user, account):  # pragma: no cover - never registered
+            return account
 
     assert config.code.on_account_load is None
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [("?tab=feed", "feed"), ("", None), ("?tab=", None)],
+    ids=["named", "absent", "empty"],
+)
+def test_the_load_hook_is_told_which_section_is_on_screen(registered, query, expected):
+    """What `?tab=` is for: an application that marks its feed seen must be
+    able to tell "the feed was opened" from "the page was opened". An empty
+    value names no section, and the hook hears the same `None` for it that
+    it hears for no value at all."""
+    tabs: List[Optional[str]] = []
+
+    async def load(user, account, tab):
+        tabs.append(tab)
+        return account
+
+    config.code.on_account_load = load
+    with _client(FakeUsers()) as client:
+        _sign_in(client)
+        response = client.get(f"/project/account{query}")
+
+    assert response.status_code == 200
+    assert tabs == [expected]
+
+
+def test_a_save_draws_its_answer_for_the_section_it_was_made_from(registered):
+    """The page a PUT answers with goes through the load hook like a GET's,
+    and it is drawn for the same section, or a hook that fills a section in
+    only when it is looked at would answer a save with that section blank."""
+    tabs: List[Optional[str]] = []
+
+    async def load(user, account, tab):
+        tabs.append(tab)
+        return account
+
+    config.code.on_account_load = load
+    with _client(FakeUsers()) as client:
+        _sign_in(client)
+        response = client.put(
+            "/project/account?tab=calculation",
+            json=_save({**DEFAULTS, "notify": False}),
+        )
+
+    assert response.status_code == 200
+    assert tabs == ["calculation"]
 
 
 # --- writing -----------------------------------------------------------------
@@ -447,7 +494,7 @@ def test_a_save_hook_that_raises_fails_the_request_and_stores_nothing(registered
 
 
 def test_a_load_hook_that_raises_is_a_500_not_the_stored_values(registered):
-    async def load(user, account):
+    async def load(user, account, tab):
         raise RuntimeError("no")
 
     config.code.on_account_load = load
@@ -524,7 +571,7 @@ def test_a_put_writes_once_when_the_load_hook_agrees_with_it(registered):
     """The PUT stores, and the page is then drawn by the same load path a GET
     uses. A second write there would be an UPDATE nobody asked for."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, plan="pro")
 
     config.code.on_account_load = load
@@ -543,7 +590,7 @@ def test_the_load_hook_after_a_put_sees_what_the_put_stored(registered):
     response has been sent."""
     seen: List[Any] = []
 
-    async def load(user, account):
+    async def load(user, account, tab):
         seen.append(account)
         return account
 
@@ -616,7 +663,7 @@ def test_the_answer_is_rebuilt_not_echoed(registered):
     """The app normalises what it was handed. A PUT that echoed its own body
     back would show the user a value the server does not actually hold."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return msgspec.structs.replace(account, notify=False, plan="pro")
 
     async def save(user, account):
@@ -680,7 +727,7 @@ def test_a_load_hook_returning_a_mapping_is_a_500(registered):
     a hook meaning to change one thing would write the defaults over
     everything the user had saved."""
 
-    async def load(user, account):
+    async def load(user, account, tab):
         return {"plan": "pro"}
 
     config.code.on_account_load = load
@@ -743,7 +790,7 @@ def test_a_write_that_lands_while_the_load_hook_runs_survives_it(registered):
     arrives in that second is still there afterwards."""
     users = FakeUsers({"notify": True, "feed": {"cards": [], "seen": False}})
 
-    async def load(user, account):
+    async def load(user, account, tab):
         users.stored = {
             **users.stored,
             "feed": {"cards": [{"title": "Замер", "price": 0.0}], "seen": False},

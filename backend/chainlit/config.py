@@ -571,9 +571,12 @@ class CodeSettings:
     # renders, the validator a save runs through and the storage shape at
     # once; the two hooks let the app fill in and accept the values itself.
     # `on_account_load` is handed the stored Struct the request's own session
-    # read, and what it returns is both the page and the next stored value.
+    # read and the section the page is drawn for, and what it returns is both
+    # the page and the next stored value.
     account: Optional[Type[Struct]] = None
-    on_account_load: Optional[Callable[[Optional["User"], Any], Awaitable[Any]]] = None
+    on_account_load: Optional[
+        Callable[[Optional["User"], Any, Optional[str]], Awaitable[Any]]
+    ] = None
     on_account_update: Optional[
         Callable[[Optional["User"], Any], Awaitable[Optional[str]]]
     ] = None

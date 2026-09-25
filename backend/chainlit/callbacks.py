@@ -414,15 +414,25 @@ def account(cls: Type[S]) -> Type[S]:
 
 
 def on_account_load(
-    func: Callable[[Optional[User], Any], Awaitable[Any]],
-) -> Callable[[Optional[User], Any], Awaitable[Any]]:
+    func: Callable[[Optional[User], Any, Optional[str]], Awaitable[Any]],
+) -> Callable[[Optional[User], Any, Optional[str]], Awaitable[Any]]:
     """Fill in the account page, from the values the engine has just read.
 
-    Called ``(user, account)``: ``account`` is an instance of the
+    Called ``(user, account, tab)``: ``account`` is an instance of the
     ``@cl.account`` Struct holding what is stored, read with the request's own
     session, so a hook never opens a second one -- and never sees the values
     from before a ``PUT`` the way a separate session would, since the
     request's session commits after the response is built.
+
+    ``tab`` is the section the page is being drawn for -- the Struct field
+    name the dialog's ``?tab=`` carries -- or ``None`` when the address names
+    none and the dialog opens on its first section. It is here because
+    "the page was opened" and "this section was looked at" are different
+    events: a hook that marks a feed seen on every load clears the count for
+    a user who came for their balance. The client asks again each time the
+    user picks a section, so the hook hears every one of them. The name is
+    whatever the address says, a stale one included: check it against your
+    own fields rather than trusting it.
 
     Return the Struct to show -- an *instance*, not a mapping of its values:
     what it returns is also what gets *stored*, the engine compares it with
@@ -441,12 +451,14 @@ def on_account_load(
     exception reach Litestar instead.
 
     Args:
-        func (Callable[[Optional[User], Any], Awaitable[Any]]): The load hook.
+        func (Callable[[Optional[User], Any, Optional[str]], Awaitable[Any]]):
+            The load hook.
 
     Returns:
-        Callable[[Optional[User], Any], Awaitable[Any]]: The decorated hook.
+        Callable[[Optional[User], Any, Optional[str]], Awaitable[Any]]: The
+            decorated hook.
     """
-    _assert_takes_user_and_account(func, "@cl.on_account_load")
+    _assert_arity(func, "@cl.on_account_load", "user", "account", "tab")
     config.code.on_account_load = func
     return func
 

@@ -31,8 +31,9 @@ vi.mock('@chainlit/react-client', () => ({
  *
  * The variant is a weight, so the assertions are about the classes the
  * theme keys off — an accented button, an outlined one, a pill — and about
- * where each kind of button lands: the commands are a row (two to a line on
- * a phone), the chips a wrapping line of questions under them.
+ * where each kind of button lands: the chips a line of questions first (one
+ * sideways strip on a phone), the commands a row under them (two to a line
+ * on a phone).
  */
 const action = (id: string, variant?: IAction['variant']): IAction =>
   ({ id, name: id, label: id, forId: 'm1', payload: {}, variant }) as any;
@@ -123,6 +124,34 @@ describe('action variants', () => {
     expect(chips.className).toContain('w-full');
   });
 
+  it('puts the chips before the commands', () => {
+    // A chip refines the answer just read; a command leaves it. Declared in
+    // the other order on purpose: the rows are the component's, not the
+    // application's list order.
+    const { container } = renderActions([
+      action('go', 'primary'),
+      action('again'),
+      action('weight', 'chip')
+    ]);
+
+    expect(
+      Array.from(container.querySelectorAll('[data-role]')).map((node) =>
+        node.getAttribute('data-role')
+      )
+    ).toEqual(['message-action-chips', 'message-actions']);
+  });
+
+  it('lets the chips wrap on a wide screen, with no fade', () => {
+    renderActions([action('weight', 'chip'), action('box', 'chip')]);
+
+    const chips = document.querySelector<HTMLElement>(
+      '[data-role="message-action-chips"]'
+    )!;
+    expect(chips.className).toContain('flex-wrap');
+    expect(chips.className).not.toContain('overflow-x-auto');
+    expect(chips.className).not.toContain('mask-image');
+  });
+
   it('draws no empty row when there are only chips', () => {
     renderActions([action('weight', 'chip')]);
 
@@ -155,6 +184,31 @@ describe('action layout on a phone', () => {
     expect(chips.className).not.toContain('grid-cols-2');
     expect(classesOf('weight')).not.toContain('w-full');
     expect(classesOf('a')).toContain('w-full');
+  });
+
+  it('puts the chips first here too, as one strip that scrolls sideways', () => {
+    setWidth(375);
+    const { container } = renderActions([
+      action('a', 'primary'),
+      action('weight', 'chip'),
+      action('box', 'chip')
+    ]);
+
+    expect(
+      Array.from(container.querySelectorAll('[data-role]')).map((node) =>
+        node.getAttribute('data-role')
+      )
+    ).toEqual(['message-action-chips', 'message-actions']);
+    const chips = document.querySelector<HTMLElement>(
+      '[data-role="message-action-chips"]'
+    )!;
+    expect(chips.className).toContain('flex-nowrap');
+    expect(chips.className).toContain('overflow-x-auto');
+    expect(chips.className).not.toContain('flex-wrap');
+    // The fade that says the strip goes on past the edge.
+    expect(chips.className).toContain(
+      '[mask-image:linear-gradient(90deg,#000_86%,transparent)]'
+    );
   });
 
   it('keeps the wide screen a wrapping row', () => {

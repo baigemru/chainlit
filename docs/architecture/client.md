@@ -392,9 +392,14 @@ button for it.
 **The row under a message.** `Messages/Message/Buttons/` draws the copy button, the
 feedback pair, the debug link and whatever `cl.Action`s name that message. The actions
 themselves are `Buttons/Actions/index.tsx`, which is the only thing there that knows a
-chip from a command: chips (`variant="chip"`) go in a wrapping line of their own — they
-are questions the user may tap, and a question does not belong in a row of offers —
-while the commands are a wrapping row on a wide screen and a two-column grid on a phone.
+chip from a command: chips (`variant="chip"`) go in a line of their own **above** the
+commands — they are questions the user may tap about the answer just read, a question
+does not belong in a row of offers, and a command leaves the answer while a chip
+refines it. On a wide screen the chips wrap; on a phone they are one strip that scrolls
+sideways (`flex-nowrap overflow-x-auto`), its right edge faded by an arbitrary-value
+`mask-image` class that Tailwind's scan of `src/` compiles like any other, because six
+wrapped chips were three lines of screen spent before the first command. The commands
+are a wrapping row on a wide screen and a two-column grid on a phone.
 A column of four turned the offer after an answer into a scroll, which is the moment the
 measured 24–45% of people act on.
 
@@ -427,8 +432,12 @@ used to live inside `if (currentChatProfile?.icon)`, so a profile that wrote a
 description and named no icon had it dropped on the floor — already wrong, and about to
 become an `icon` an app was forced to set and forbidden to show. The composer below it is pinned to the pill (`layout="pill"`): the empty
 screen is an invitation to type, and the card's toolbar row under an empty textarea reads
-as a form to fill in. That is the one caller that names an arrangement; the chat's own
-footer keeps taking whichever one its width earns.
+as a form to fill in. The chat's own footer (`chat/Footer.tsx`) names the pill too, on
+every width: the card's toolbar row took ~136px from the conversation for three buttons
+(attach, parent thread, panel chevron) the pill already carries on its one line, and with
+both callers on one arrangement moving from the welcome screen into a thread is no
+remount. Unset `layout` still means the viewport's answer, for a caller that wants the
+card.
 
 It is centred by `my-auto` and not by `justify-center`, and compensates for nothing: a
 flex parent that centres an item taller than itself overflows it at both ends, and the
@@ -524,7 +533,10 @@ select, a number an input or — with `x-widget: slider` — a range, `date`/`da
 native pickers, `list[str]` a tag input, `list[Literal]` a checkbox list) and reads the
 two `x-` extensions this fork puts in `Meta(extra_json_schema=…)`: `x-widget` picks the
 control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link`, and on a
-`list[Struct]` the `cards` grid, whose items read `image` and `title`) and
+`list[Struct]` the `cards` grid, whose items read `image` and `title`; `hidden` resolves to
+a kind of its own that neither `Field` nor a card draws and search does not find — the
+value rides in the form's values and goes back with every save, and a hidden Struct at the
+top is not made a section) and
 `x-enum-labels` names the options. A control the resolver does not recognise renders
 read-only rather than disappearing — the form has to keep submitting a field it cannot
 draw. Saving `PUT`s two objects — `{values, base}`, the form and the page it was filled
@@ -551,7 +563,13 @@ column (search box, the signed-in user, one row per section with the lucide icon
 section body for `SchemaMatches`, the matches across every section, bound to the same
 form; picking a section clears it. Under `useIsMobile` the column becomes a strip above
 the content: the search box and the sections as scrolling chips, and the dialog takes
-the whole screen. Two details are bugs, not taste: every menu row and chip is
+the whole screen. Save/Reset is also replaced, per section, by `account.nothingToSave`
+when the section on screen has nothing the user can change — `hasEditable` over the
+resolved fields: `readOnly`, `hidden`, `markdown`, `link` and `unsupported` do not count,
+a `cards` list counts only for a switch its elements declare — because a feed of
+read-outs under a Save button promises an edit that does not exist; it is decided from
+the schema, not the values, so it does not come and go with the data, and it is not
+applied while a search shows matches from every section. Two details are bugs, not taste: every menu row and chip is
 `type="button"` and the search box swallows Enter, because both sit inside the form the
 account is saved with and the default there is submit.
 
@@ -582,6 +600,17 @@ the scalars go under. Nothing writes one into a clean URL: without the parameter
 first section opens, and a name that matches none does the same. A change is a
 `replace`, so Back leaves the account rather than walking backwards through the sections
 the user looked at.
+
+The section also goes to the server: `GET`, `PUT` and action `POST`s carry `?tab=<name>`
+(nothing for `$leading`, which is the dialog's own name), and the hook
+`on_account_load(user, account, tab)` hears it — the application can then mark its feed
+seen when the feed is opened, not when the page is. A new section is a new SWR key, so
+picking one asks again; `keepPreviousData` keeps the form on screen while it is in flight
+instead of the placeholders, and `SchemaForm` adopts the page that arrives without taking
+a draft with it: while the form is dirty the draft's leaves are put back over the new page
+and `base` moves to it, so the save is still exactly the draft; a draft inside a list is
+the exception (positions are not identities — the old page is kept, draft and all, and the
+next save merges as usual), and the answer to a save is always adopted whole.
 
 **The badge.** `@cl.on_account_badge` makes the server push `account.badge` — after every
 `session.ready`, after a `GET /project/account` (the application marks things seen inside
@@ -642,7 +671,10 @@ than to a section of it, so it needs to know nothing about the schema — and fo
 reason it is `isActive` on `pathname === '/account'` whatever `?tab=` says. It sits under
 `<ThreadHistory/>`, outside that component's scrolling `SidebarContent`: the account is
 where the panel is left, not where it is entered, and a row over a list that scrolls for a
-year would be the first thing read every time.
+year would be the first thing read every time. Beside the face it writes the count out —
+a destructive `Badge` with `accountBadgeState`, pinned right with `ml-auto`, nothing for `0`
+or `undefined` — because this row is the one always on screen, and the dot says only that
+something is new while the number says whether it is worth the click.
 
 The avatar itself is `components/UserAvatar.tsx`, shared with `UserNav` — image, initial
 fallback, and the `accountBadgeState` dot positioned against a wrapper of its own rather
@@ -849,17 +881,19 @@ fallback, the description surviving either way and with no icon at all, the firs
 gone rather than standing empty, an absent key reading as on, and the `layout="pill"` the
 screen asks the composer for)
 and `chatProfilesListed.spec.tsx` (the selector gated on what is _offered_, while the open
-list still names the door the user is in). The account has six: `schemaFormResolve.spec.ts` drives
+list still names the door the user is in). The account has seven: `schemaFormResolve.spec.ts` drives
 the pure `resolveForm` against schemas `msgspec.json.schema` really emits,
 `schemaForm.spec.tsx` renders the controls it resolves, `schemaFormCards.spec.tsx` the
 `cards` grid (0/1/20 elements, the image, the title, the badges, a switch bound to
 `<field>.<index>.<name>`, and the card and section buttons reporting a `path`),
-`schemaFormSearch.spec.tsx` the `searchFields` walk and the matches it renders, and
+`schemaFormSearch.spec.tsx` the `searchFields` walk and the matches it renders,
+`schemaFormHidden.spec.tsx` the `hidden` kind (resolved, undrawn, sent back), `hasEditable`
+and a page arriving under a draft, and
 `accountDialog.spec.tsx`
 stubs every piece of the provider to pin what the dialog alone owns — that it is shut,
 and asks for nothing, on any other address; where the × and Esc lead on a direct open
 and on one from inside the app; the four fetch states; the menu, its icons and `?tab=`
-in both directions; the search box, including the Enter it refuses; and that a save puts
+in both directions, and on the wire; the nothing-to-save bar; the search box, including the Enter it refuses; and that a save puts
 the values back, re-renders from the response and raises exactly one toast either way.
 `accountActions.spec.tsx` pins the action round trip: the POST carries `{path, item}`,
 each of the three outcomes does its one thing (`open_thread` through the mocked handoff

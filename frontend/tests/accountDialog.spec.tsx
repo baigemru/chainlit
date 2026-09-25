@@ -28,6 +28,7 @@ const mockSuccess = vi.fn();
 const mockError = vi.fn();
 const mockNavigate = vi.fn();
 const mockSetSearchParams = vi.fn();
+const mockEditable = vi.fn();
 
 /** What `SchemaForm` was rendered with, read off the last render. */
 let formProps: Record<string, any> | null = null;
@@ -89,6 +90,10 @@ vi.mock('@/components/SchemaForm', () => ({
     onAction: formProps?.onAction,
     isSubmitting: false
   }),
+  // Whether the section on screen has anything to save is the form's
+  // reading of the schema (`hasEditable`, pinned in its own spec); here it
+  // is only an answer the layout acts on.
+  useSectionEditable: (name: string) => mockEditable(name),
   SchemaSection: ({ name }: { name: string }) => (
     <div data-testid="section">{name}</div>
   ),
@@ -192,6 +197,7 @@ beforeEach(() => {
       }
     ]
   };
+  mockEditable.mockReturnValue(true);
   mockUseAuth.mockReturnValue({ user: someone });
   mockUseConfig.mockReturnValue({ config: { ui: {}, chatProfiles: [] } });
   mockPut.mockResolvedValue({ json: async () => page({ message: 'Stored' }) });
@@ -235,6 +241,74 @@ describe('the account dialog', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(mockUseApi).toHaveBeenCalledWith('/project/account');
+  });
+
+  it('asks for the page of the section the address names', async () => {
+    // The application hears which section is open: "the feed was opened"
+    // and "the page was opened" are different news.
+    search = 'tab=feed';
+
+    await mount();
+
+    expect(mockUseApi).toHaveBeenCalledWith('/project/account?tab=feed');
+  });
+
+  it('asks for the general section as no section at all', async () => {
+    // `$leading` is the dialog's name for the top-level scalars, not a
+    // field the application declared.
+    search = 'tab=$leading';
+
+    await mount();
+
+    expect(mockUseApi).toHaveBeenCalledWith('/project/account');
+  });
+
+  it('saves from the section on screen', async () => {
+    search = 'tab=calculation';
+
+    await mount();
+    fireEvent.click(screen.getByText('stub_submit'));
+
+    await waitFor(() =>
+      expect(mockPut).toHaveBeenCalledWith('/project/account?tab=calculation', {
+        values: { a: 1 },
+        base: { a: 0 }
+      })
+    );
+  });
+
+  it('keeps the form on screen while the next section is in flight', async () => {
+    // A placeholder here would unmount the form, and a draft with it.
+    respond({ data: page(), isLoading: true });
+
+    await mount();
+
+    expect(screen.getByTestId('section')).toBeInTheDocument();
+    expect(document.querySelectorAll('.animate-pulse')).toHaveLength(0);
+  });
+
+  it('says there is nothing to save in a section with nothing to edit', async () => {
+    search = 'tab=watch';
+    mockEditable.mockImplementation((name: string) => name !== 'watch');
+
+    await mount();
+
+    expect(mockEditable).toHaveBeenCalledWith('watch');
+    expect(screen.getByText('account.nothingToSave')).toBeInTheDocument();
+    expect(screen.queryByText('stub_submit')).not.toBeInTheDocument();
+  });
+
+  it('offers Save again while searching, where matches span every section', async () => {
+    search = 'tab=watch';
+    mockEditable.mockImplementation((name: string) => name !== 'watch');
+
+    await mount();
+    fireEvent.change(screen.getByLabelText('account.search.placeholder'), {
+      target: { value: 'маржа' }
+    });
+
+    expect(screen.getByText('stub_submit')).toBeInTheDocument();
+    expect(screen.queryByText('account.nothingToSave')).not.toBeInTheDocument();
   });
 
   it('goes back when the dialog was reached from inside the app', async () => {
@@ -415,7 +489,7 @@ describe('the account dialog', () => {
     // Struct field, not an element of it.
     await waitFor(() =>
       expect(mockPost).toHaveBeenCalledWith(
-        '/project/account/actions/compare',
+        '/project/account/actions/compare?tab=watch',
         { path: 'watch', item: null }
       )
     );

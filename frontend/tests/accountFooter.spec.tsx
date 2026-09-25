@@ -10,7 +10,8 @@ import { SidebarProvider } from '@/components/ui/sidebar';
  *
  * What it owns is a claim about when it exists and where it goes: the same
  * two conditions the user menu's row answers to, the page itself rather than
- * one of its sections, and the badge the header's avatar already carries. The
+ * one of its sections, and the badge the header's avatar already carries --
+ * with the count written out, which the header leaves to its menu. The
  * router is real — `Link` and `useLocation` are the subject — and only the
  * config, the user and the pushed count are stood in for.
  */
@@ -149,15 +150,29 @@ describe('the account row at the foot of the sidebar', () => {
     expect(dot()).toBeInTheDocument();
   });
 
+  it('writes the count out beside the dot, inside the row', () => {
+    // The dot says something is new; the number says whether it is worth
+    // the click, on the one row that is always on screen.
+    mockBadge.mockReturnValue(3);
+
+    mount();
+
+    const count = screen.getByTestId('account-footer-count');
+    expect(count).toHaveTextContent('3');
+    expect(row()!.contains(count)).toBe(true);
+  });
+
   it('marks nothing for a count of zero or none at all', () => {
     mockBadge.mockReturnValue(0);
     const { unmount } = mount();
     expect(dot()).not.toBeInTheDocument();
+    expect(screen.queryByTestId('account-footer-count')).toBeNull();
     unmount();
 
     mockBadge.mockReturnValue(undefined);
     mount();
     expect(dot()).not.toBeInTheDocument();
+    expect(screen.queryByTestId('account-footer-count')).toBeNull();
   });
 
   it('renders nothing when the application declared no account page', () => {

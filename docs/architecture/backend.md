@@ -115,7 +115,7 @@ the `user` property _raises_. The GET answers the schema, the values and a `read
 values come from one function, `_render`, that all three routes go through: it decodes the
 stored object leniently (a key the Struct no longer declares, or a value that no longer
 converts, is dropped with a warning and the rest is kept) — or takes the defaults — and hands
-that instance to `on_account_load(user, account)`. The PUT converts the body strictly and
+that instance to `on_account_load(user, account, tab)`. The PUT converts the body strictly and
 passes msgspec's own message through as the 400 `detail` — "Expected `float` <= 100.0 - at
 `$.calculation.margin`" — because the path in it is the only field addressing the client has;
 then `on_account_update`, then the **merge** below, then `_render` again with what it stored as
@@ -129,7 +129,7 @@ not-configured state. `/account` itself stays a client-side route — no server 
 there, or the SPA loses the page.
 
 **The load hook is handed the values, and its return is stored.** `on_account_load(user,
-account)` receives what _this request's_ session read, so an application never opens a session
+account, tab)` receives what _this request's_ session read, so an application never opens a session
 of its own — which, after a `PUT`, answered with the values from before the save, because the
 request's session commits in `before_send`. What it returns is the page, and it is also the
 next stored value: the engine compares its return with what it handed over, both through
@@ -142,9 +142,20 @@ everything the user had saved; the way to change one thing is
 `msgspec.structs.replace(account, plan="pro")`. `None` is refused with a `TypeError`
 naming the fix: the hook is given the stored values, so "fall back to the store" has nothing
 left to mean, and a missing `return` would otherwise blank the page. `@cl.on_account_load`
-checks the arity at import (`inspect.signature(...).bind(None, None)`), so the retired
-one-argument hook is a `TypeError` where the application is read rather than a 500 on the first
-page load.
+checks the arity at import (`inspect.signature(...).bind(None, None, None)`), so the retired
+one- and two-argument hooks are a `TypeError` where the application is read rather than a 500
+on the first page load.
+
+**The hook is told which section is on screen.** All three routes take an optional
+`FromQuery` `tab`, the Struct field name the dialog's `?tab=` carries, and `_render` hands it
+through as the hook's third argument — `None` when the address names no section (the dialog then
+opens on its first) or names it empty. It exists because "the page was opened" and "this section
+was looked at" are different events: a hook that marks a feed seen on every load clears the
+count for a user who came for their balance. The client asks again whenever the user picks a
+section, so the hook hears each one; the name is passed through unchecked — which sections exist
+is the application's knowledge, and a stale `?tab=` from a shared link reaches the hook as it
+was written. The PUT and an action's `AccountRefresh` rebuild the page for the `tab` they were
+sent from; the action hook itself is not given it, because it is handed the element it sits on.
 
 **A save stores the user's edit, not the user's document.** `users.account` has a second
 writer: an application may put a background arrival — a measurement, a notification — into the
@@ -188,7 +199,11 @@ carried through `Meta(extra_json_schema=...)`: `x-enum-labels` maps an enum valu
 `x-widget` picks a control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link` —
 a `readOnly` string rendered as a button-styled anchor to the value, which is how an
 application puts «Платёжный кабинет» on the page pointing at its own `/billing/portal`
-redirect — and `cards`, `image`, `title` for a `list[Struct]` drawn as one card per element),
+redirect — `cards`, `image`, `title` for a `list[Struct]` drawn as one card per element, and
+`hidden` for a leaf the page never draws but the store keeps: a card's id, the run behind a feed
+entry, whether it was seen. The form carries a hidden leaf and sends it back untouched, and it is
+the opposite of `readOnly` on the server too — `strip_readonly` leaves it alone even when the
+same field also says `readOnly`, since resetting it would drop the value it exists to hold),
 and `x-actions` puts buttons on a card array or on a tab, `x-pinned: true` on a section field
 marks it for the pinned block in the left panel, and `x-key: true` on a field of a list's
 element names that element, which is what lets a save be merged into a list a background write

@@ -258,6 +258,7 @@
     "description": "Your settings for this application.",
     "notConfigured": "This application has not declared an account page.",
     "readonly": "These settings can be viewed but not changed here.",
+    "nothingToSave": "Nothing to save here — this section is read only.",
     "saved": "Saved",
     "unsupported": "This field cannot be edited here.",
     "actions": {

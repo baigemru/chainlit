@@ -30,7 +30,7 @@ from litestar.exceptions import (
     ValidationException,
 )
 from litestar.handlers.base import BaseRouteHandler
-from litestar.params import FromPath, SkipValidation
+from litestar.params import FromPath, FromQuery, SkipValidation
 from litestar.status_codes import HTTP_428_PRECONDITION_REQUIRED
 from litestar.types import Empty
 
@@ -90,11 +90,21 @@ class AccountController(Controller):
         request: AuthedRequest,
         sessions: NamedDependency[UserSessions],
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
+        tab: FromQuery[Optional[str]] = None,
     ) -> AccountPage:
-        """The form, the values behind it, and whether it can be saved."""
+        """The form, the values behind it, and whether it can be saved.
+
+        ``tab`` is the section the dialog is showing, handed through to
+        ``on_account_load``. A query parameter and not a path segment: the
+        page is one document whichever section is on screen, and the
+        section only tells the application which part of it was looked at.
+        The client asks again when the user picks another section -- that
+        second ``GET`` is how an application hears that a feed was opened,
+        rather than guessing it from the page being opened at all.
+        """
         cls = _registered()
         identity = caller(request)
-        account = await _render(cls, identity, user_service)
+        account = await _render(cls, identity, user_service, tab=tab)
         page = build_page(account, readonly=_readonly(user_service))
         # After the values, not before: the application marks things seen
         # inside ``on_account_load``, so the count computed ahead of it is
@@ -113,6 +123,7 @@ class AccountController(Controller):
         request: AuthedRequest,
         data: AccountSave,
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
+        tab: FromQuery[Optional[str]] = None,
     ) -> AccountPage:
         """Validate, hand to the app, merge onto the row, and answer with it.
 
@@ -138,6 +149,9 @@ class AccountController(Controller):
         application's reading of what *this user* asked for, and handing it
         the merged document would let it rewrite, as if the user had asked,
         whatever another writer had just put there.
+
+        ``tab`` is the section the save was made from; the page that answers
+        is drawn for it, as the ``GET`` that follows a section change is.
         """
         cls = _registered()
         code = chainlit.config.config.code
@@ -185,7 +199,7 @@ class AccountController(Controller):
         # session that has just written it, so the read could only answer with
         # this value.
         return build_page(
-            await _render(cls, identity, user_service, baseline=stored),
+            await _render(cls, identity, user_service, baseline=stored, tab=tab),
             readonly=readonly,
             message=message,
         )
@@ -198,6 +212,7 @@ class AccountController(Controller):
         data: AccountActionCall,
         transit: NamedDependency[TransitStore],
         user_service: SkipValidation[NamedDependency[Optional[UserService]]] = None,
+        tab: FromQuery[Optional[str]] = None,
     ) -> AccountActionResponse:
         """Run the hook a button on the page names, and say what follows.
 
@@ -216,6 +231,10 @@ class AccountController(Controller):
         in. Read with ``_stored`` and not ``locked_account`` -- see
         ``_store_action_values`` for what that trade costs and why it is the
         right way round.
+
+        ``tab`` only reaches the load hook, when a ``Refresh`` rebuilds the
+        page: the action hook is handed the element it sits on, which says
+        more than the section it is in.
         """
         cls = _registered()
         hook = chainlit.config.config.code.account_actions.get(name)
@@ -255,7 +274,9 @@ class AccountController(Controller):
             return AccountActionResponse(
                 outcome=PageOutcome(
                     page=build_page(
-                        await _render(cls, identity, user_service, baseline=baseline),
+                        await _render(
+                            cls, identity, user_service, baseline=baseline, tab=tab
+                        ),
                         readonly=_readonly(user_service),
                     ),
                     message=outcome.message,
@@ -307,6 +328,7 @@ async def _render(
     user_service: Optional[UserService],
     *,
     baseline: Optional[msgspec.Struct] = None,
+    tab: Optional[str] = None,
 ) -> msgspec.Struct:
     """The values to show, and the write the load hook may have asked for.
 
@@ -331,7 +353,10 @@ async def _render(
     derived leaves filled in.
 
     ``baseline`` short-circuits the read for a caller that has just written
-    the values itself and so already knows them.
+    the values itself and so already knows them. ``tab`` is passed through
+    untouched: which sections exist is the application's knowledge, and an
+    engine that dropped a name it did not recognise would have to keep a
+    second list of them.
     """
     code = chainlit.config.config.code
     if baseline is None:
@@ -340,7 +365,9 @@ async def _render(
         return baseline
 
     account = as_account(
-        await call_hook(code.on_account_load, identity, baseline),
+        # ``or None``: an empty ``?tab=`` names no section, and a hook should
+        # not have to know that the query string has two spellings of that.
+        await call_hook(code.on_account_load, identity, baseline, tab or None),
         cls,
         hook="@cl.on_account_load",
     )

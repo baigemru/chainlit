@@ -39,6 +39,11 @@ const Field = ({ field }: Props) => {
   const name = field.path.join('.');
   const off = readonly || field.readOnly;
 
+  // Not registered, not drawn. The value still goes back on the save: a
+  // submit is a clone of the form's values, seeded from what the page was
+  // filled with, not a walk over the fields that registered (see `Cards`).
+  if (field.kind === 'hidden') return null;
+
   // Outside the Controller below: a card list owns one Controller per switch
   // it draws, and a Controller around all of them would register the array
   // itself as a field.

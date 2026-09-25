@@ -271,3 +271,35 @@ def test_a_list_of_scalars_is_one_value() -> None:
         "b",
         "c",
     ]
+
+
+# --------------------------------------------------------------------------
+# Hidden leaves
+# --------------------------------------------------------------------------
+
+
+class Hidden(msgspec.Struct):
+    title: str = ""
+    seen: Annotated[bool, Meta(extra_json_schema={"x-widget": "hidden"})] = False
+
+
+class HiddenFeed(msgspec.Struct):
+    entries: List[Hidden] = []
+    note: str = ""
+
+
+def test_a_hidden_leaf_the_application_wrote_survives_a_save_from_an_older_page() -> (
+    None
+):
+    """`seen` is the application's, written by the load hook of a later
+    request while this page was open; the form carried the old value back
+    untouched because it never drew it. Unchanged between `base` and
+    `posted` is exactly "not the user's edit", so the store keeps its own."""
+    shown = HiddenFeed(entries=[Hidden(title="Кружка", seen=False)])
+    posted = HiddenFeed(entries=[Hidden(title="Кружка", seen=False)], note="ok")
+    current = HiddenFeed(entries=[Hidden(title="Кружка", seen=True)])
+
+    merged = merge_account(shown, posted, current)
+
+    assert merged.entries[0].seen is True
+    assert merged.note == "ok"

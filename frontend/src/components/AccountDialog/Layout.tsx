@@ -13,7 +13,8 @@ import {
   SchemaMatches,
   SchemaSection,
   SchemaSubmit,
-  useSchemaForm
+  useSchemaForm,
+  useSectionEditable
 } from '@/components/SchemaForm';
 import { ActionButtons } from '@/components/SchemaForm/Cards';
 import { useTranslation } from '@/components/i18n/Translator';
@@ -72,6 +73,7 @@ export default function AccountLayout() {
   const wanted = searchParams.get('tab');
   const active = sections.find((row) => row.name === wanted) ?? sections[0];
   const trimmed = query.trim();
+  const editable = useSectionEditable(active?.name);
 
   const choose = (name: string) => {
     // A section the user picked is a section they want to read: leaving the
@@ -205,6 +207,13 @@ export default function AccountLayout() {
         <div className="border-t px-6 py-3">
           {readonly ? (
             <Alert variant="info">{t('account.readonly')}</Alert>
+          ) : !trimmed && !editable ? (
+            // Per section, unlike the line above, which is about the page: a
+            // feed of read-outs under "Save" promises that something on it
+            // can be changed. Not while searching -- the matches come from
+            // every section, and a draft left in another one is still saved
+            // from here.
+            <Alert variant="info">{t('account.nothingToSave')}</Alert>
           ) : (
             <SchemaSubmit />
           )}

@@ -21,11 +21,17 @@ import msgspec
 
 from chainlit.context import context
 from chainlit.logger import logger
-from chainlit.persistence.records import ElementRecord, StepRecord, ThreadPatch
+from chainlit.persistence.records import (
+    STEP_ACTIONS_KEY,
+    ElementRecord,
+    StepRecord,
+    ThreadPatch,
+)
 from chainlit.persistence.storage.disposition import content_disposition, element_mime
 from chainlit.persistence.writer import (
     DeleteElement,
     DeleteStep,
+    PatchStep,
     PatchThread,
     SaveStep,
     SessionWriter,
@@ -33,18 +39,21 @@ from chainlit.persistence.writer import (
 from chainlit.ws.sidebar import SIDEBAR_META_KEY, sidebar_meta
 
 if TYPE_CHECKING:
-    from chainlit.ws.session import Session
+    from chainlit.ws.session import Session, TranscriptEntry
 
 __all__ = [
     "ENGINE_METADATA_KEYS",
+    "STEP_ACTIONS_KEY",
     "delete_element",
     "delete_step",
     "drop_elements",
     "open_thread",
     "patch_sidebar",
+    "save_actions",
     "save_element",
     "save_step",
     "split_engine_metadata",
+    "split_step_actions",
     "writer_of",
 ]
 
@@ -99,6 +108,39 @@ def save_step(step: Mapping[str, Any]) -> None:
         return
     record = msgspec.convert(_stripped(step), StepRecord)
     writer.submit(SaveStep(record))
+
+
+def save_actions(entries: Sequence["TranscriptEntry"]) -> None:
+    """Write down the buttons of each step whose row of buttons changed.
+
+    The whole row, under one key, as one merge: two buttons are two
+    elements of one list, and a list patched element by element across two
+    tabs is a list nobody wrote. An empty row deletes the key rather than
+    storing ``[]``, so a message whose buttons were all taken away reads
+    back exactly as one that never had any.
+    """
+    writer = writer_of()
+    if writer is None:
+        return
+    for entry in entries:
+        row = [msgspec.to_builtins(action) for action in entry.actions]
+        writer.submit(PatchStep(entry.step.id, {STEP_ACTIONS_KEY: row or None}))
+
+
+def split_step_actions(
+    metadata: Optional[Mapping[str, Any]],
+) -> tuple[list[Any], Optional[dict[str, Any]]]:
+    """A stored step's metadata as ``(its buttons, the application's rest)``.
+
+    The step-level twin of ``split_engine_metadata``, and every reader of a
+    stored step goes through it: the replay takes the first half, and the
+    hooks, the snapshot and a shared link see only the second.
+    """
+    if not metadata or STEP_ACTIONS_KEY not in metadata:
+        return [], dict(metadata) if metadata is not None else None
+    rest = {k: v for k, v in metadata.items() if k != STEP_ACTIONS_KEY}
+    row = metadata[STEP_ACTIONS_KEY]
+    return (list(row) if isinstance(row, list) else []), rest
 
 
 def delete_step(step_id: str) -> None:

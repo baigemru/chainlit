@@ -366,12 +366,12 @@ var, and that is how it knows which conversation it is in. An application also h
 engine never launched — a route of its own, a webhook a background service calls back on, a
 scheduled job — and `host.py` is the whole of what that code may reach.
 
-| call                                                                                                           | what it answers                                                                                                                                                                                                                  |
-| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `await cl.deliver_to_thread(thread_id, content, *, author=None, id=None, metadata=None, user_identifier=None)` | Where a message goes when the chat may or may not be open. Returns `"live"` or `"stored"`.                                                                                                                                       |
-| `await cl.refresh_account_badge(user)`                                                                         | The context-free half of `emitter.refresh_account_badge()`: recount and push to every session of that user.                                                                                                                      |
-| `cl.persistence()` / `cl.uow()`                                                                                | The engine's database wiring, and one unit of work over it (`unit.threads`, `unit.steps`, `unit.elements`, `unit.users`, `unit.feedbacks`), so an application writes beside the engine's rows rather than through a second pool. |
-| `cl.element_file_url(thread_id, element_id)`                                                                   | The blob route an application has to link to. It is a route, so it is the engine's to name.                                                                                                                                      |
+| call                                                                                                                         | what it answers                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `await cl.deliver_to_thread(thread_id, content, *, author=None, id=None, metadata=None, user_identifier=None, actions=None)` | Where a message goes when the chat may or may not be open, with its buttons. Returns `"live"` or `"stored"`.                                                                                                                     |
+| `await cl.refresh_account_badge(user)`                                                                                       | The context-free half of `emitter.refresh_account_badge()`: recount and push to every session of that user.                                                                                                                      |
+| `cl.persistence()` / `cl.uow()`                                                                                              | The engine's database wiring, and one unit of work over it (`unit.threads`, `unit.steps`, `unit.elements`, `unit.users`, `unit.feedbacks`), so an application writes beside the engine's rows rather than through a second pool. |
+| `cl.element_file_url(thread_id, element_id)`                                                                                 | The blob route an application has to link to. It is a route, so it is the engine's to name.                                                                                                                                      |
 
 `deliver_to_thread` is the one with a decision in it, and the decision is transport state the
 application has no business reading. The registry holds a session on this thread → the message
@@ -385,7 +385,10 @@ history; then the step, then `threads.touch` so it sorts as of now. Neither a se
 persistence is a `RuntimeError`, not a silent drop — the caller has somebody waiting for that
 result. Whether a repeat is the same message is the caller's question and `id` is the answer: the
 step is upserted, so a webhook that mints a deterministic id is delivered once however many times
-it arrives.
+it arrives. `actions` take whichever road the message takes: `Message(actions=…)` on the live one,
+and on the stored one the row carries them under `steps.metadata["__actions"]` (each with
+`forId` = the step id), so the next resume draws them — a result delivered into a closed tab
+with its "what next" dropped is a result the person can read and not act on.
 
 The runner is reached through a module-level handle set in `ApplicationRunner.__init__`
 (`chainlit.runner.current_runner`), which is **not** exported: an application holding the runner
@@ -503,8 +506,8 @@ but `task.indicator{running:false}` → `on_ready` launches `on_chat_start` as t
 **Reload or reconnect (KEPT).** `hello{threadId:T}` where `T` is held by this user → `claim` =
 `KEPT` → session marked connected, its reaper cancelled → `on_arrival` returns on the first
 line (this decides nothing) → `session.ready{restored:true}` queued at the front, ahead of the
-frames the old socket never took → `restore` replays transcript, elements, a live ask with
-**what is left** of its deadline → `on_ready` starts nothing. `pageLoad` decides only how much
+frames the old socket never took → `restore` replays transcript, elements, each step's
+buttons after it (`action.add`, in feed order), a live ask with **what is left** of its deadline → `on_ready` starts nothing. `pageLoad` decides only how much
 the replay rebuilds. **The hooks do not run again**: a session survives F5 whole, `user_session`
 and all, and `on_chat_start` / `on_chat_resume` fire only when there is no live session — a
 fresh chat, or a resume after the reaper.
@@ -518,8 +521,8 @@ produces an error frame — the thread does not exist, or is someone else's, and
 `hide_resume_deleted`, the panel's rows split out of `detail.elements` (see below), state and
 profile from metadata, transcript loaded, `session.sidebar` rebuilt from `metadata["__sidebar"]`
 plus those rows, `first_interaction = "resume"`, `resumed_thread_id = T`, `chat_started = True`,
-`writer.open_gate()` → `session.ready` → `restore` sends `thread.resume` as a snapshot, then the
-panel's elements and `sidebar.state` → `on_ready` launches `on_chat_resume` followed by
+`writer.open_gate()` → `session.ready` → `restore` sends `thread.resume` as a snapshot, then
+every step's buttons as `action.add`, then the panel's elements and `sidebar.state` → `on_ready` launches `on_chat_resume` followed by
 `on_thread_ready` in its own slot (the second runs even if the first raised).
 
 **The element panel across a cold resume.** Restoring the panel is the engine's job; an
@@ -534,6 +537,29 @@ counter) and minus the `preview` slot (a borrowed element of the feed) — and
 `ws/sidebar.state_from_meta` reads it back: a slot keeps only the ids it has rows for, an empty
 slot is dropped, a row nothing names is ignored, `rev` starts at 0. Only the cold path rebuilds;
 a `KEPT` session keeps its live model, so an F5 is unchanged.
+
+**A message's buttons across a reload and a resume.** The client keeps actions in memory only,
+so a row of buttons under a message survives neither an F5 nor a resume unless the server gives
+it back. `TranscriptEntry.actions` holds them in the session: `Emitter.add_action` files the
+button under the transcript entry its `forId` names (a button re-sent under another step
+_moves_), `remove_action` takes it out, `delete_step` drops it with the entry — and each returns
+the entries it changed, which `Action.send`/`Action.remove` hand to `persist.save_actions`. That
+writes the entry's whole row under `steps.metadata["__actions"]` (`STEP_ACTIONS_KEY`) as one
+`PatchStep` — a merge that touches no other key; an empty row deletes the key. The column is
+written **whole** by every other save of the step, and `Message.update()` saves the
+application's metadata as it stands, so `upsert_step` carries `__actions` over when the incoming
+object does not name it (`_metadata_keeping_actions`); one that does — the stored road of
+`deliver_to_thread` — wins. No migration: the key rides the existing JSONB column and deleting
+the step deletes it. On the way back `_transcript_of` takes the key out of each step into
+`entry.actions` (`_stored_actions`: `forId` forced to the step the row was read from, and a row the wire refuses dropped with a warning rather than failing the resume), and `_thread_dict`
+strips it from what the hooks and the snapshot see; `GET /project/thread/{id}` and the share
+route strip it too (`without_step_actions`) — a shared link must not hand out every button's
+payload. `restore` sends a step's buttons after its step on the replay branch and after the
+snapshot on the resume branch, then the live ask's `restore_actions` minus any id already sent.
+An ask's own buttons never enter the row: `AskActionMessage` sends them before
+`send_ask_user` puts the question in the transcript, so the step is not there to hold them, and
+they come back only with the question. A click (`call_action`) changes nothing here — the button
+stays until the application removes it, as it does on the live screen.
 
 **Thread held by another user.** `claim` = `CREATED` and the claim names the tenant, so nothing
 is requested: the session is minted on a thread of its own, the database is never consulted,
@@ -666,7 +692,8 @@ thread. A thread holds one session, but a successor can start on it while its pr
 writer is still draining (the window between `release`'s discard and its `aclose` — wider now
 that `session.clear` schedules the release instead of awaiting it), so `WriterRegistry` keeps a
 _set_ per thread and FIFO stays a per-writer promise. It queues
-`SaveStep`, `DeleteStep`, `SaveElement`, `DeleteElement`, `PatchThread`; the consumer takes up
+`SaveStep`, `PatchStep` (a metadata merge into a written step — the buttons), `DeleteStep`,
+`SaveElement`, `DeleteElement`, `PatchThread`; the consumer takes up
 to `BATCH_LIMIT = 256` ops per transaction and replays op-by-op if the batch fails.
 `hold_until_interaction=True` keeps ops (and _un-started_ uploads) in an ordered held list;
 `open_gate(prelude)` releases them behind the `PatchThread` that names and attributes the row.
@@ -768,6 +795,12 @@ not a handler parameter. On an excluded route the middleware never ran, so `requ
 `assert_session_owner` answers 404, never 403, so a stranger holding a session id cannot learn
 that it is live. Providers and token exchanges live in `oauth_providers.py`; state rides in a
 3-minute `oauth_state` cookie. `POST /auth/header` and the Azure AD hybrid callback are not ported.
+`POST /login` logs an exception out of the application's callback (`password_auth_callback`, or
+the direct grant's provider and `oauth_callback`) on the `chainlit` logger with its traceback and
+re-raises it: Litestar logs an unhandled exception only under `LoggingConfig(log_exceptions=
+"always")` or in debug, and its default is `"debug"`, so the 500 used to leave nothing in a
+production log. An `HTTPException` is an answer and passes unlogged. The OAuth redirect
+callback already logged its own.
 
 ---
 

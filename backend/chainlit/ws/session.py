@@ -234,10 +234,18 @@ class TranscriptEntry:
     The transcript is what a reconnecting client is shown before anything
     else. It is kept in send order, because that is the order it has to be
     replayed in.
+
+    ``actions`` are the buttons under the step, in the order they were
+    added. Held here rather than only sent because the client keeps them in
+    memory and nowhere else: a reload used to bring the message back and
+    leave the row of buttons under it on the floor. An ask's own buttons are
+    not among them -- they belong to the question and come back with it
+    (``PendingAsk.restore_actions``), or not at all once it is answered.
     """
 
     step: StepPayload
     elements: List[Element] = field(default_factory=list)
+    actions: List[Action] = field(default_factory=list)
 
 
 class Session:

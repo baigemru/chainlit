@@ -224,3 +224,85 @@ def test_without_a_session_or_a_database_it_refuses_rather_than_drops(
 
     assert raised, "the refusal never happened"
     assert "no live session" in raised[0]
+
+
+def test_a_stored_delivery_keeps_its_buttons_for_the_next_resume(
+    plugin: ChainlitPlugin,  # noqa: F811 - the imported fixture
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The result lands in a closed tab with its "what next" under it.
+
+    Without them the person reopens the chat to a result they can read and
+    not act on -- the buttons were a frame, and there was no socket to send
+    it on. Written into the row, filed under the step they belong to, which
+    is where the resume reads a message's buttons from.
+    """
+    seed_user(db_url, ALICE)
+    again = cl.Action(name="again", label="Again", id="again")
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.deliver_to_thread(
+            ORPHAN,
+            "the run finished",
+            id=STEP,
+            user_identifier=ALICE,
+            metadata={"anchor": "none"},
+            actions=[again],
+        )
+        await cl.Message(content=DONE).send()
+
+    test_config.code.on_message = on_message
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            open_session(ws)
+            run_turn(ws, "go")
+
+    detail = thread_detail(db_url, ORPHAN)
+    assert detail is not None
+    [step] = detail.steps
+    assert isinstance(step.metadata, dict)
+    assert step.metadata["anchor"] == "none"
+    assert step.metadata["__actions"] == [
+        {"id": "again", "name": "again", "label": "Again", "forId": STEP}
+    ]
+    assert again.forId == STEP
+
+
+def test_a_live_delivery_puts_its_buttons_under_it(
+    plugin: ChainlitPlugin,  # noqa: F811 - the imported fixture
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    seed_user(db_url, ALICE)
+
+    async def on_message(msg: cl.Message) -> None:
+        here = cl.context.session.thread_id
+        assert here is not None
+        await cl.deliver_to_thread(
+            here, "the run finished", actions=[cl.Action(name="again", id="again")]
+        )
+        await cl.Message(content=DONE).send()
+
+    test_config.code.on_message = on_message
+
+    with create_test_client(plugins=[plugin]) as client:
+        login(client, auth, ALICE)
+        with client.websocket_connect("/ws") as ws:
+            open_session(ws)
+            frames = run_turn(ws, "go")
+
+    [delivered] = [
+        f["step"]["id"]
+        for f in frames
+        if f["t"] == "step.upsert" and f["step"].get("output") == "the run finished"
+    ]
+    assert [
+        (f["action"]["id"], f["action"]["forId"])
+        for f in frames
+        if f["t"] == "action.add"
+    ] == [("again", delivered)]

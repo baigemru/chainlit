@@ -210,8 +210,11 @@ async def restore(
        what came before it;
     2. attachments with their step, deduplicated -- an element the server
        holds live and has also written down must not go twice;
-    3. the buttons before the form -- a form that arrives first is a form
-       with no buttons;
+    3. the buttons, after the steps they hang under and in the order of
+       the feed -- a message's row of buttons lives in the client's memory
+       only, and a reload used to bring the message back without it; the
+       ask's own buttons last among them, before the form -- a form that
+       arrives first is a form with no buttons;
     4. the form, carrying what is *left* of its deadline, never a fresh one;
     5. the element panel, whole, with the elements it names ahead of it --
        nothing else in the replay mentions them.
@@ -253,12 +256,20 @@ async def restore(
         # the thread's own frame: a parent is said of a thread that exists.
         session.send(ThreadParent(parent_thread_id=session.parent_thread_id))
 
+    sent_actions: Set[str] = set()
     if snapshot is not None:
         # The session has just resumed a stored thread and the client's feed
         # is whatever it had before: a snapshot *replaces* it, the way the
         # client understands ``thread.resume``. The transcript replay below
         # would say the same thing one step at a time.
         session.send(resume_frame(msgspec.convert(snapshot, ThreadPayload)))
+        # The snapshot carries no buttons -- a step's are taken out of its
+        # metadata before the snapshot is built -- so they follow it, the
+        # same rows the transcript was loaded with.
+        for entry in entries:
+            for action in entry.actions:
+                sent_actions.add(action.id)
+                session.send(ActionAdd(action=action))
     else:
         sent_elements: Set[str] = set()
         for entry in entries:
@@ -268,6 +279,9 @@ async def restore(
                     continue
                 sent_elements.add(element.id)
                 session.send(ElementUpsert(element=element))
+            for action in entry.actions:
+                sent_actions.add(action.id)
+                session.send(ActionAdd(action=action))
 
     # Read here, not above: everything before this may have awaited, and an
     # answer is free to have landed in any of those awaits. Restoring a
@@ -276,7 +290,8 @@ async def restore(
     ask = session.pending_ask
     if ask is not None and ask.is_live:
         for action in ask.restore_actions:
-            session.send(ActionAdd(action=action))
+            if action.id not in sent_actions:
+                session.send(ActionAdd(action=action))
         if ask.restore_element is not None and fresh_page_load:
             # A transport blip keeps the element the client is still
             # holding; only a reload has lost it.

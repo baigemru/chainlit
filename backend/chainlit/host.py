@@ -30,11 +30,12 @@ fork has not made.
 from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
 from chainlit.runner import current_runner
 
 if TYPE_CHECKING:
+    from chainlit.action import Action
     from chainlit.persistence.config import Persistence, UnitOfWork
 
 __all__ = [
@@ -53,6 +54,7 @@ async def deliver_to_thread(
     id: Optional[str] = None,
     metadata: Optional[Mapping[str, Any]] = None,
     user_identifier: Optional[str] = None,
+    actions: Optional[Sequence["Action"]] = None,
 ) -> str:
     """Put a message in a conversation from outside any session.
 
@@ -73,7 +75,9 @@ async def deliver_to_thread(
     so the second delivery replaces the first instead of doubling it.
     ``metadata`` reaches the row and the client verbatim -- ``{"anchor":
     "none"}`` is how a result that arrives mid-conversation lands without
-    dragging the view away from what the person is reading.
+    dragging the view away from what the person is reading. ``actions`` go
+    under the message on either road: on screen now, or with the row, to be
+    drawn when the thread is next opened.
 
     Returns ``"live"`` or ``"stored"``, for a caller that logs which road it
     took. Raises ``RuntimeError`` when there is neither a session nor
@@ -86,6 +90,7 @@ async def deliver_to_thread(
         id (Optional[str]): A stable step id, for a delivery that may repeat.
         metadata (Optional[Mapping[str, Any]]): Stored and sent as given.
         user_identifier (Optional[str]): The thread's owner, when the caller knows it.
+        actions (Optional[Sequence[Action]]): Buttons under the message.
 
     Returns:
         str: ``"live"`` if a session was told, ``"stored"`` if a row was written.
@@ -97,6 +102,7 @@ async def deliver_to_thread(
         id=id,
         metadata=metadata,
         user_identifier=user_identifier,
+        actions=actions,
     )
 
 

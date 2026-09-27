@@ -22,6 +22,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import pytest
@@ -1527,6 +1528,180 @@ async def test_live_a_cold_resume_gets_the_panel_back(
     [later] = [f for f in after if f["t"] == "sidebar.state"]
     assert [slot["id"] for slot in later["slots"]] == ["cards", "later"]
     assert later["rev"] > restored.get("rev", 0)
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: the buttons under a message, across a reload and a resume
+# --------------------------------------------------------------------------
+
+BUTTONS_MARK = "the turn is over"
+
+
+def _buttons_app(test_config: Any, resumed: List[Dict[str, Any]]) -> None:
+    """A turn that leaves one button of two under its answer.
+
+    ``again`` stays; ``other`` is taken away; and the answer is edited after
+    the buttons went out, which is the save that writes the application's
+    metadata whole over the step's row. A second message is sent with a
+    button and then deleted -- its button must go with it.
+    """
+
+    async def on_message(msg: cl.Message) -> None:
+        again = cl.Action(name="again", payload={"n": 1}, label="Again", id="again")
+        other = cl.Action(name="other", label="Other", id="other")
+        answer = cl.Message(content="result", actions=[again, other])
+        await answer.send()
+        await other.remove()
+        answer.content = "result, edited"
+        answer.metadata = {"anchor": "none"}
+        await answer.update()
+
+        doomed = cl.Message(
+            content="gone", actions=[cl.Action(name="gone", label="Gone", id="gone")]
+        )
+        await doomed.send()
+        await doomed.remove()
+        await cl.Message(content=BUTTONS_MARK).send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        resumed.append(thread)
+
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+
+async def _run_buttons_turn(sock: ClientConnection) -> str:
+    """Speak once and read to the marker; returns the answer's step id."""
+    await sock.send(user_message("go"))
+    frames: List[Dict[str, Any]] = []
+    for _ in range(60):
+        frames.append(json.loads(await asyncio.wait_for(sock.recv(), 10)))
+        step = frames[-1].get("step") or {}
+        if frames[-1]["t"] == "step.upsert" and step.get("output") == BUTTONS_MARK:
+            break
+    else:  # pragma: no cover
+        raise AssertionError([f["t"] for f in frames])
+    [answer] = [
+        f["step"]["id"]
+        for f in frames
+        if f["t"] == "step.upsert" and f["step"].get("output") == "result"
+    ]
+    return answer
+
+
+def _buttons_in(replay: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    return [
+        (f["action"]["id"], f["action"]["forId"])
+        for f in replay
+        if f["t"] == "action.add"
+    ]
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_reload_gets_the_message_buttons_back(
+    ws_impl: str,
+    test_config: Any,
+    frontend_dir: Path,  # noqa: F811
+) -> None:
+    """F5 under an answer with a row of buttons: the row comes back.
+
+    The session survives the socket, so this is the transcript replay, not
+    storage -- and the transcript used to hold the message and not the
+    buttons, which lived only in the browser's memory. Here the socket
+    really closes, the handler unwinds, and the reload is handed the
+    message and then its one remaining button, filed under it.
+    """
+    _buttons_app(test_config, [])
+    plugin = ChainlitPlugin(test_config, frontend_dir=frontend_dir, auth=None)
+
+    async with live_server(Litestar(plugins=[plugin]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url) as first:
+            opening = await open_live(first, pageLoad=True, threadId=None)
+            thread_id = next(f for f in opening if f["t"] == "session.ready")[
+                "threadId"
+            ]
+            answer_id = await _run_buttons_turn(first)
+
+        await asyncio.sleep(0.2)
+        async with connect(url) as second:
+            replay = await open_live(second, pageLoad=True, threadId=thread_id)
+
+    assert _buttons_in(replay) == [("again", answer_id)]
+    order = [
+        (f["t"], (f.get("step") or f.get("action") or {}).get("id")) for f in replay
+    ]
+    assert order.index(("step.upsert", answer_id)) < order.index(
+        ("action.add", "again")
+    )
+    assert order.index(("action.add", "again")) < order.index(("task.indicator", None))
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_cold_resume_gets_the_message_buttons_back(
+    ws_impl: str,
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The conversation is reopened after the session is gone: rows only.
+
+    The buttons are read back out of the step's row, after the snapshot,
+    and nowhere else: not inside ``thread.resume`` and not in the dict the
+    hook is handed. The edit of the answer went through a save that writes
+    the metadata column whole, and the button survived it; the one taken
+    away and the one under a deleted message did not.
+    """
+    plugin = make_plugin()
+    resumed: List[Dict[str, Any]] = []
+    _buttons_app(test_config, resumed)
+
+    await asyncio.to_thread(seed_user, db_url, ALICE)
+    cookie = {"Cookie": f"{auth.key}={auth.create_token(ALICE)}"}
+
+    async with live_server(Litestar(plugins=[plugin]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url, additional_headers=cookie) as first:
+            opening = await open_live(first, pageLoad=True, threadId=None)
+            thread_id = opening[0]["threadId"]
+            answer_id = await _run_buttons_turn(first)
+            plugin.runner.session_timeout = 0.05
+
+        await _reaped(plugin, thread_id)
+        detail = await asyncio.to_thread(
+            wait_for_thread,
+            db_url,
+            thread_id,
+            lambda d: any(s.output == BUTTONS_MARK for s in d.steps),
+        )
+        [stored] = [s for s in detail.steps if s.id == answer_id]
+        assert stored.output == "result, edited"
+        assert isinstance(stored.metadata, dict)
+        assert stored.metadata["anchor"] == "none"
+        assert [a["id"] for a in stored.metadata["__actions"]] == ["again"]
+
+        async with connect(url, additional_headers=cookie) as second:
+            replay = await open_live(second, pageLoad=True, threadId=thread_id)
+
+    assert [f for f in replay if f["t"] == "error"] == [], [f["t"] for f in replay]
+    assert _buttons_in(replay) == [("again", answer_id)]
+    [button] = [f["action"] for f in replay if f["t"] == "action.add"]
+    assert (button["name"], button["label"], button["payload"]) == (
+        "again",
+        "Again",
+        {"n": 1},
+    )
+    order = [f["t"] for f in replay]
+    assert order.index("thread.resume") < order.index("action.add")
+    assert order.index("action.add") < order.index("task.indicator")
+
+    [snapshot] = [f for f in replay if f["t"] == "thread.resume"]
+    for step in snapshot["thread"]["steps"]:
+        assert "__actions" not in step.get("metadata", {})
+    assert len(resumed) == 1
+    for step in resumed[0]["steps"]:
+        assert "__actions" not in step.get("metadata", {})
 
 
 # --------------------------------------------------------------------------

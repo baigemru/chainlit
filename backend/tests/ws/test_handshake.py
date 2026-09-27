@@ -16,7 +16,12 @@ import uuid
 from typing import Any, List, Optional, Sequence
 
 from chainlit.protocol.codec import encode_server
-from chainlit.protocol.payloads import AskActionSpec, Step as StepPayload, TextElement
+from chainlit.protocol.payloads import (
+    Action as ActionPayload,
+    AskActionSpec,
+    Step as StepPayload,
+    TextElement,
+)
 from chainlit.protocol.server import (
     AskStart,
     ElementUpsert,
@@ -303,14 +308,78 @@ async def test_the_buttons_arrive_before_the_form() -> None:
     """A form that arrives first is a form with no buttons."""
     session = make("s1")
     pending = ask(session)
-    pending.restore_actions = [
-        {"id": "a1", "name": "yes", "payload": {}},  # type: ignore[list-item]
-    ]
+    pending.restore_actions = [ActionPayload(id="a1", name="yes")]
 
     await restore(session)
 
     sent = tags(session)
     assert sent.index("action.add") < sent.index("ask.start")
+
+
+def _labelled(session: Session) -> List[str]:
+    """Tags with the id they are about, so an order can name its frames."""
+    out: List[str] = []
+    for item in session.outbound.pending_frames:
+        frame = json.loads(encode_server(item))
+        about = (frame.get("step") or frame.get("action") or {}).get("id")
+        out.append(f"{frame['t']}:{about}" if about else frame["t"])
+    return out
+
+
+async def test_a_messages_buttons_follow_it_in_the_feed() -> None:
+    """The row goes back under the message it was sent under, in feed order.
+
+    It used to not go back at all: the transcript held the message and the
+    buttons lived only in the browser, so an F5 kept the answer and lost
+    every "what next" under it.
+    """
+    session = make("s1")
+    session.transcript = [
+        TranscriptEntry(
+            step=StepPayload(id="m1"),
+            actions=[ActionPayload(id="a1", name="again", for_id="m1")],
+        ),
+        TranscriptEntry(
+            step=StepPayload(id="m2"),
+            actions=[ActionPayload(id="a2", name="more", for_id="m2")],
+        ),
+    ]
+
+    await restore(session)
+
+    sent = _labelled(session)
+    assert sent.index("step.upsert:m1") < sent.index("action.add:a1")
+    assert sent.index("action.add:a1") < sent.index("step.upsert:m2")
+    assert sent.index("step.upsert:m2") < sent.index("action.add:a2")
+
+
+async def test_after_a_snapshot_the_buttons_follow_it() -> None:
+    """A resume's snapshot carries no buttons, so they come right after it."""
+    session = make("s1")
+    session.transcript = [
+        TranscriptEntry(
+            step=StepPayload(id="m1"),
+            actions=[ActionPayload(id="a1", name="again", for_id="m1")],
+        )
+    ]
+
+    await restore(session, resumed_thread={"id": "t1", "steps": [{"id": "m1"}]})
+
+    sent = tags(session)
+    assert sent.count("step.upsert") == 0
+    assert sent.index("thread.resume") < sent.index("action.add")
+    assert sent.index("action.add") < sent.index("task.indicator")
+
+
+async def test_a_button_the_feed_and_the_form_both_hold_goes_out_once() -> None:
+    session = make("s1")
+    button = ActionPayload(id="a1", name="yes", for_id="q1")
+    session.transcript = [TranscriptEntry(step=StepPayload(id="q1"), actions=[button])]
+    ask(session).restore_actions = [button]
+
+    await restore(session)
+
+    assert tags(session).count("action.add") == 1
 
 
 async def test_an_attachment_the_server_holds_twice_goes_out_once() -> None:

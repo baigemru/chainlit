@@ -55,6 +55,7 @@ from litestar.datastructures import Cookie
 from litestar.di import NamedDependency, Provide
 from litestar.exceptions import (
     ClientException,
+    HTTPException,
     ImproperlyConfiguredException,
     NotAuthorizedException,
     NotFoundException,
@@ -481,18 +482,36 @@ class AuthController(Controller):
         deliberately not caught: the login page reads the ``detail`` off the
         error response to decide what to do next.
         """
-        if config.code.password_auth_callback:
-            user = await config.code.password_auth_callback(
-                data.username, data.password
-            )
-        elif (provider := get_direct_grant_provider()) and config.code.oauth_callback:
-            token = await provider.get_token_with_password(data.username, data.password)
-            raw_user_data, default_user = await provider.get_user_info(token)
-            user = await config.code.oauth_callback(
-                provider.id, token, raw_user_data, default_user
-            )
-        else:
-            raise ClientException(detail="No auth_callback defined")
+        try:
+            if config.code.password_auth_callback:
+                user = await config.code.password_auth_callback(
+                    data.username, data.password
+                )
+            elif (
+                provider := get_direct_grant_provider()
+            ) and config.code.oauth_callback:
+                token = await provider.get_token_with_password(
+                    data.username, data.password
+                )
+                raw_user_data, default_user = await provider.get_user_info(token)
+                user = await config.code.oauth_callback(
+                    provider.id, token, raw_user_data, default_user
+                )
+            else:
+                raise ClientException(detail="No auth_callback defined")
+        except HTTPException:
+            # A refusal with a status is an answer, not a failure: the login
+            # page reads its ``detail``, and a wrong password is not news.
+            raise
+        except Exception:
+            # Logged here because nobody else will. Litestar logs an
+            # unhandled exception only with ``log_exceptions="always"`` or in
+            # debug, and its default is ``"debug"`` -- so a callback that
+            # fell over on its database in the first second after a restart
+            # answered 500 and left nothing in the container's log. Re-raised
+            # unchanged: the status is still the server's to give.
+            logger.exception("The login callback failed")
+            raise
 
         return await self._authenticate(security, user_service, user)
 

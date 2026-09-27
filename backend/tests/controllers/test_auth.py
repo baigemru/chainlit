@@ -14,12 +14,15 @@ write is committed even though the response is a redirect). That the upsert
 itself is durable is ``tests/persistence/test_user_upsert.py``.
 """
 
+import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import jwt as pyjwt
 import pytest
 from litestar.di import Provide
+from litestar.exceptions import NotAuthorizedException
 from litestar.testing import create_test_client
 
 from chainlit.config import IdpShortcut, config
@@ -846,6 +849,74 @@ def test_login_prefers_an_explicit_password_callback(
 
     assert response.status_code == 200
     assert issued(response)
+
+
+@contextmanager
+def recorded(name: str) -> Iterator[List[logging.LogRecord]]:
+    """The records one logger emits, caught on the logger itself.
+
+    Not ``caplog``: the app's startup runs Litestar's ``dictConfig``, which
+    replaces the root handlers ``caplog`` hangs on -- so the handler goes on
+    after the client is up, on the logger under test.
+    """
+    records: List[logging.LogRecord] = []
+
+    class Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Keep(level=logging.DEBUG)
+    target = logging.getLogger(name)
+    target.addHandler(handler)
+    try:
+        yield records
+    finally:
+        target.removeHandler(handler)
+
+
+def test_a_login_callback_that_falls_over_is_logged_with_its_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A 500 on ``/login`` used to leave nothing in the log.
+
+    Litestar logs an unhandled exception only under ``log_exceptions=
+    "always"`` or in debug, and its default is ``"debug"``: a callback that
+    failed on its database right after a restart answered 500 and the
+    container's log said nothing. The status stays the server's; the
+    traceback is what is new.
+    """
+
+    async def password_auth(username, password):
+        raise ConnectionError("the database is not up yet")
+
+    monkeypatch.setattr(config.code, "password_auth_callback", password_auth)
+
+    with client() as c, recorded("chainlit") as records:
+        response = c.post("/login", files=_form())
+
+    assert response.status_code == 500
+    assert issued(response) is None
+    [record] = records
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], ConnectionError)
+
+
+def test_a_login_refused_with_a_status_is_not_logged_as_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A wrong password is an answer, not an incident."""
+
+    async def password_auth(username, password):
+        raise NotAuthorizedException(detail="credentialssignin")
+
+    monkeypatch.setattr(config.code, "password_auth_callback", password_auth)
+
+    with client() as c, recorded("chainlit") as records:
+        response = c.post("/login", files=_form())
+
+    assert response.status_code == 401
+    assert records == []
 
 
 def test_login_without_any_callback_is_a_400():

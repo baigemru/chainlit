@@ -78,6 +78,7 @@ from chainlit.controllers.sessions import LiveSession, SessionRegistry
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
 from chainlit.persistence.records import (
+    STEP_ACTIONS_KEY,
     ElementRecord,
     FeedbackRecord,
     ThreadDetail,
@@ -312,6 +313,26 @@ def hide_resume_deleted(
     thread.steps = [step for step in thread.steps if step.id not in doomed]
     thread.elements = [
         element for element in thread.elements if element.for_id not in doomed
+    ]
+    return thread
+
+
+def without_step_actions(thread: ThreadDetail) -> ThreadDetail:
+    """The thread with each step's stored buttons taken out of its metadata.
+
+    They are the engine's record of what the websocket replays, not part of
+    the step: a read of the thread has no socket to put them on, and a
+    shared link would otherwise hand every button's payload to whoever holds
+    the link.
+    """
+    thread.steps = [
+        msgspec.structs.replace(
+            step,
+            metadata={k: v for k, v in step.metadata.items() if k != STEP_ACTIONS_KEY},
+        )
+        if isinstance(step.metadata, dict) and STEP_ACTIONS_KEY in step.metadata
+        else step
+        for step in thread.steps
     ]
     return thread
 
@@ -763,7 +784,7 @@ class ProjectController(Controller):
         thread = await threads.get_detail(str(thread_id))
         if thread is None:
             raise NotFoundException("Thread not found")
-        return hide_resume_deleted(thread, sessions)
+        return without_step_actions(hide_resume_deleted(thread, sessions))
 
     @get("/project/share/{thread_id:uuid}", opt={"exclude_from_auth": True})
     async def get_shared_thread(
@@ -788,7 +809,7 @@ class ProjectController(Controller):
         if thread is None or not thread.metadata.get("is_shared"):
             raise NotFoundException("Thread not found")
 
-        thread = hide_resume_deleted(thread, sessions)
+        thread = without_step_actions(hide_resume_deleted(thread, sessions))
         thread.metadata = public_metadata(thread.metadata)
         # After the filter, not before: an element about to be dropped is not
         # worth a rewrite, and the rewrite must not resurrect one.

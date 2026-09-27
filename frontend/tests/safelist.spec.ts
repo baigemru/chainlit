@@ -54,6 +54,8 @@ const EXPECTED = [
   'tabular-nums',
   'line-through',
   'shrink-0',
+  'border-dashed',
+  'border-dotted',
   // The breakpoints a host element may design for.
   'sm:grid-cols-2',
   'md:grid-cols-3',

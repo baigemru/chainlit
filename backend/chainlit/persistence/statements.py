@@ -56,6 +56,7 @@ from chainlit.persistence.models import (
 from chainlit.persistence.records import (
     MAX_PAGE_SIZE,
     MIN_PAGE_SIZE,
+    STEP_ACTIONS_KEY,
     PageCursor,
     ThreadQuery,
 )
@@ -80,9 +81,14 @@ def upsert_step(values: Mapping[str, Any]) -> Insert:
       because it skips NULLs: the first write of a step often has no stored
       ``start`` to compare against, and the incoming value must not be
       thrown away for it;
-    * ``type`` refuses a placeholder over a real type.
+    * ``type`` refuses a placeholder over a real type;
+    * ``metadata`` keeps the stored buttons (``STEP_ACTIONS_KEY``) when the
+      incoming object does not name them. ``Message.update()`` saves the
+      application's metadata as it stands, and that dict has never heard of
+      the buttons sent under the message -- written straight through, the
+      first edit of a message would erase them from every later resume.
 
-    Both stay even though the writer serialises one session's writes: two
+    All three stay even though the writer serialises one session's writes: two
     tabs on one thread are two writers, and their steps still race.
     """
     statement = insert(STEPS).values(**values)
@@ -99,6 +105,10 @@ def upsert_step(values: Mapping[str, Any]) -> Insert:
                 (excluded["type"] == PLACEHOLDER_STEP_TYPE, STEPS.c["type"]),
                 else_=excluded["type"],
             )
+        elif column == "metadata":
+            assignments[column] = _metadata_keeping_actions(
+                excluded[column], STEPS.c[column]
+            )
         else:
             assignments[column] = excluded[column]
 
@@ -108,6 +118,28 @@ def upsert_step(values: Mapping[str, Any]) -> Insert:
         return statement.on_conflict_do_nothing(index_elements=[STEPS.c["id"]])
     return statement.on_conflict_do_update(
         index_elements=[STEPS.c["id"]], set_=assignments
+    )
+
+
+def _metadata_keeping_actions(incoming: Any, stored: Any) -> Any:
+    """The incoming metadata, with the stored buttons carried over if it has none.
+
+    An incoming object that does name the key wins as it is: that is a
+    writer that knows the buttons (``deliver_to_thread``'s stored road).
+    """
+    return case(
+        (
+            and_(
+                stored.op("?")(STEP_ACTIONS_KEY),
+                ~func.coalesce(incoming.op("?")(STEP_ACTIONS_KEY), false()),
+            ),
+            func.coalesce(incoming, cast(literal("{}"), JSONB)).op("||")(
+                func.jsonb_build_object(
+                    STEP_ACTIONS_KEY, stored.op("->")(STEP_ACTIONS_KEY)
+                )
+            ),
+        ),
+        else_=incoming,
     )
 
 
@@ -205,6 +237,22 @@ def merge_thread_metadata(
         values["updatedAt"] = updated_at
 
     return THREADS.update().where(THREADS.c["id"] == thread_id).values(**values)
+
+
+def merge_step_metadata(step_id: UUID, patch: Mapping[str, Any]) -> Update:
+    """Merge a metadata patch into one step, the way threads are merged.
+
+    The write behind a step's buttons. Nothing but the named keys is
+    touched, so the application's metadata beside them survives, and a step
+    that was never written matches no row: a button sent under a step that
+    is not in the database has nothing to be stored with.
+    """
+    column = STEPS.c["metadata"]
+    return (
+        STEPS.update()
+        .where(STEPS.c["id"] == step_id)
+        .values(metadata=_merged_metadata(column, patch))
+    )
 
 
 def _merged_metadata(column: Any, patch: Mapping[str, Any]) -> Any:

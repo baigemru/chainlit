@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Sequence
 
 import msgspec
 
@@ -171,11 +171,44 @@ class Emitter:
 
     # --------------------------------------------------------------- actions
 
-    def add_action(self, action: Mapping[str, Any]) -> None:
-        self.session.send(ActionAdd(action=_as_action(action)))
+    def add_action(self, action: Mapping[str, Any]) -> List[TranscriptEntry]:
+        """Show a button under the step it names, and remember it there.
 
-    def remove_action(self, action_id: str) -> None:
+        Returns the transcript entries whose buttons changed -- the caller
+        writes those down (``persist.save_actions``). An action re-sent under
+        another step moves: it leaves the first one's row, the way the
+        client's upsert by id moves it on screen.
+
+        A step the transcript does not hold keeps nothing. That is the ask's
+        case: ``AskActionMessage`` sends its buttons before the question is
+        remembered, so they are never the step's -- they come back with the
+        question (``PendingAsk.restore_actions``) and are removed when it
+        ends, and a stored one would outlive the ask as a button wired to
+        nothing.
+        """
+        payload = _as_action(action)
+        touched = self._forget_action(payload.id)
+        if payload.for_id and (entry := self._entry(payload.for_id)) is not None:
+            entry.actions.append(payload)
+            if entry not in touched:
+                touched.append(entry)
+        self.session.send(ActionAdd(action=payload))
+        return touched
+
+    def remove_action(self, action_id: str) -> List[TranscriptEntry]:
+        """Take a button off the screen and out of the step that held it."""
+        touched = self._forget_action(action_id)
         self.session.send(ActionRemove(id=action_id))
+        return touched
+
+    def _forget_action(self, action_id: str) -> List[TranscriptEntry]:
+        touched: List[TranscriptEntry] = []
+        for entry in self.session.transcript:
+            kept = [a for a in entry.actions if a.id != action_id]
+            if len(kept) != len(entry.actions):
+                entry.actions[:] = kept
+                touched.append(entry)
+        return touched
 
     # ------------------------------------------------------------------ asks
 

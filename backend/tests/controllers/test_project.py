@@ -615,6 +615,36 @@ async def test_a_shared_thread_does_not_carry_the_sessions_own_metadata(
     assert response.json()["metadata"] == {"is_shared": True, "topic": "public"}
 
 
+async def test_a_threads_stored_buttons_stay_out_of_both_reads(
+    client, auth, persistence: Persistence
+) -> None:
+    """A step's buttons are the websocket's to replay, not part of the step.
+
+    On a shared link they would hand every button's payload to whoever holds
+    the link; on the author's read there is no socket to put them on.
+    """
+    thread_id = await make_thread(
+        persistence, owner=ALICE, metadata={"is_shared": True}
+    )
+    await make_step(
+        persistence,
+        thread_id,
+        output="result",
+        metadata={
+            "anchor": "none",
+            "__actions": [{"id": "a1", "name": "go", "payload": {"secret": "x"}}],
+        },
+    )
+
+    shared = (await client.get(f"/project/share/{thread_id}")).json()
+    login(client, auth, ALICE)
+    own = (await client.get(f"/project/thread/{thread_id}")).json()
+
+    for body in (shared, own):
+        [step] = body["steps"]
+        assert step["metadata"] == {"anchor": "none"}
+
+
 async def test_a_shared_thread_hands_out_share_urls_for_its_blobs(
     client, persistence: Persistence
 ) -> None:

@@ -159,7 +159,10 @@ const mount = (
   count: number,
   overrides: Partial<Omit<Parameters<typeof SchemaForm>[0], 'children'>> = {}
 ) => {
-  const onSubmit = vi.fn(() => Promise.resolve());
+  // The server stored what it was sent.
+  const onSubmit = vi.fn((sent: Record<string, unknown>) =>
+    Promise.resolve<Record<string, unknown>>(sent)
+  );
   const onAction = vi.fn(() => Promise.resolve());
   const utils = render(
     <SchemaForm

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { optionLabel } from './EnumSelect';
 import Field from './Field';
 import { useSchemaForm } from './index';
-import type { ResolvedField } from './resolve';
+import { type ResolvedField, isCardControl } from './resolve';
 
 /**
  * A `list[Struct]` the application marked `x-widget: cards`.
@@ -228,7 +228,7 @@ const Cards = ({ field }: Props) => {
                 if (
                   child.kind === 'markdown' ||
                   child.kind === 'link' ||
-                  (child.kind === 'boolean' && !child.readOnly)
+                  isCardControl(child)
                 ) {
                   return <Field key={child.name} field={bind(child)} />;
                 }

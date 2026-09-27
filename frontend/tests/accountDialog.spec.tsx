@@ -40,6 +40,8 @@ let location: { pathname: string; key: string } = {
 };
 let search = '';
 let mobile = false;
+/** Whether the form holds a draft, as `useSchemaForm` reports it. */
+let dirty = false;
 
 vi.mock('@chainlit/react-client', () => ({
   ChainlitContext: createContext<any>({}),
@@ -76,8 +78,10 @@ vi.mock('sonner', () => ({
   }
 }));
 
-vi.mock('@/components/SchemaForm', () => ({
-  LEADING: '$leading',
+vi.mock('@/components/SchemaForm', async () => ({
+  // The real resolver: which section is on screen is one rule the layout and
+  // the request share, and a stub of it would test neither.
+  ...(await vi.importActual<object>('@/components/SchemaForm/resolve')),
   default: (props: Record<string, any>) => {
     formProps = props;
     return <form className={props.className}>{props.children}</form>;
@@ -88,7 +92,8 @@ vi.mock('@/components/SchemaForm', () => ({
     form: resolved,
     readonly: !!formProps?.readonly,
     onAction: formProps?.onAction,
-    isSubmitting: false
+    isSubmitting: false,
+    isDirty: dirty
   }),
   // Whether the section on screen has anything to save is the form's
   // reading of the schema (`hasEditable`, pinned in its own spec); here it
@@ -179,6 +184,7 @@ beforeEach(() => {
   location = { pathname: '/account', key: 'k1' };
   search = '';
   mobile = false;
+  dirty = false;
   resolved = {
     sections: [{ name: 'notify', title: 'Notify' }],
     tabs: [
@@ -263,6 +269,95 @@ describe('the account dialog', () => {
     expect(mockUseApi).toHaveBeenCalledWith('/project/account');
   });
 
+  describe('names the section on screen, not the raw address', () => {
+    // `/project/settings` carries the schema, so the section the layout will
+    // draw is known before the first page is: an application that heard
+    // `None` or a stale name would have to repeat the dialog's rule for
+    // which section opens first.
+    const TABS_FIRST = {
+      $ref: '#/$defs/Account',
+      $defs: {
+        Account: {
+          type: 'object',
+          properties: {
+            calculation: { $ref: '#/$defs/Calc' },
+            feed: { $ref: '#/$defs/Feed' }
+          }
+        },
+        Calc: {
+          type: 'object',
+          properties: { margin: { type: 'number' } }
+        },
+        Feed: {
+          type: 'object',
+          properties: { cursor: { type: 'string' } }
+        }
+      }
+    };
+    const withScalars = {
+      ...TABS_FIRST,
+      $defs: {
+        ...TABS_FIRST.$defs,
+        Account: {
+          type: 'object',
+          properties: {
+            notify: { type: 'boolean' },
+            ...TABS_FIRST.$defs.Account.properties
+          }
+        }
+      }
+    };
+    const configured = (schema: object) =>
+      mockUseConfig.mockReturnValue({
+        config: { ui: { account: { enabled: true, schema } }, chatProfiles: [] }
+      });
+
+    it('asks for the first section by name when the address names none', async () => {
+      configured(TABS_FIRST);
+
+      await mount();
+
+      expect(mockUseApi).toHaveBeenCalledWith(
+        '/project/account?tab=calculation'
+      );
+    });
+
+    it('asks for the first section when ?tab= names a dropped one', async () => {
+      configured(TABS_FIRST);
+      search = 'tab=gone';
+
+      await mount();
+
+      expect(mockUseApi).toHaveBeenCalledWith(
+        '/project/account?tab=calculation'
+      );
+      expect(mockUseApi).not.toHaveBeenCalledWith('/project/account?tab=gone');
+    });
+
+    it('asks for no section when the first one is the general one', async () => {
+      configured(withScalars);
+      search = 'tab=gone';
+
+      await mount();
+
+      expect(mockUseApi).toHaveBeenCalledWith('/project/account');
+    });
+
+    it('saves and acts from that section too', async () => {
+      configured(TABS_FIRST);
+
+      await mount();
+      fireEvent.click(screen.getByText('stub_submit'));
+
+      await waitFor(() =>
+        expect(mockPut).toHaveBeenCalledWith(
+          '/project/account?tab=calculation',
+          expect.anything()
+        )
+      );
+    });
+  });
+
   it('saves from the section on screen', async () => {
     search = 'tab=calculation';
 
@@ -296,6 +391,20 @@ describe('the account dialog', () => {
     expect(mockEditable).toHaveBeenCalledWith('watch');
     expect(screen.getByText('account.nothingToSave')).toBeInTheDocument();
     expect(screen.queryByText('stub_submit')).not.toBeInTheDocument();
+  });
+
+  it('offers Save over a draft left in another section', async () => {
+    // The form keeps a draft across sections; "nothing to save" over it
+    // would send the user away from unsaved work, and the dialog's close
+    // would take it with them.
+    search = 'tab=watch';
+    mockEditable.mockImplementation((name: string) => name !== 'watch');
+    dirty = true;
+
+    await mount();
+
+    expect(screen.getByText('stub_submit')).toBeInTheDocument();
+    expect(screen.queryByText('account.nothingToSave')).not.toBeInTheDocument();
   });
 
   it('offers Save again while searching, where matches span every section', async () => {
@@ -546,6 +655,20 @@ describe('the account dialog', () => {
     expect(mockError).not.toHaveBeenCalled();
   });
 
+  it('hands the stored values back to the form', async () => {
+    // Through the promise, not only through SWR: an answer equal to the
+    // cached page re-renders nothing, and the form would never hear it.
+    mockPut.mockResolvedValue({
+      json: async () => page({ values: { notify: false } })
+    });
+
+    await mount();
+
+    await expect(formProps?.onSubmit({ a: 1 }, { a: 0 })).resolves.toEqual({
+      notify: false
+    });
+  });
+
   it('falls back to the saved translation when the app said nothing', async () => {
     mockPut.mockResolvedValue({ json: async () => page() });
 
@@ -617,7 +740,7 @@ describe('the account dialog', () => {
       'Мои товары'
     ]);
     expect(document.querySelector('.w-60')).toBeNull();
-    expect(document.querySelector('.overflow-x-auto')).not.toBeNull();
+    expect(document.querySelector('.chip-strip')).not.toBeNull();
     // The user block is the left column's; the strip is the search box and
     // the chips.
     expect(screen.queryByText('someone@example.com')).not.toBeInTheDocument();

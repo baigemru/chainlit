@@ -174,7 +174,10 @@ const VALUES = () => ({
 const mount = (
   overrides: Partial<Omit<Parameters<typeof SchemaForm>[0], 'children'>> = {}
 ) => {
-  const onSubmit = vi.fn(() => Promise.resolve());
+  // The server stored what it was sent.
+  const onSubmit = vi.fn((sent: Record<string, unknown>) =>
+    Promise.resolve<Record<string, unknown>>(sent)
+  );
   const utils = render(
     <SchemaForm
       schema={SCHEMA}
@@ -462,7 +465,9 @@ describe('SchemaForm', () => {
   });
 
   it('gives the Save button back when onSubmit rejects', async () => {
-    const onSubmit = vi.fn(() => Promise.reject(new Error('nope')));
+    const onSubmit = vi.fn(() =>
+      Promise.reject<Record<string, unknown>>(new Error('nope'))
+    );
     // react-hook-form's `handleSubmit` rethrows after clearing `isSubmitting`,
     // and React drops the promise its submit handler returns: a refusal the
     // form does not catch leaves the page with an unhandled rejection.

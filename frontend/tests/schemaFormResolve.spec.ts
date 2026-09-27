@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import type { IJsonSchema } from '@chainlit/react-client';
 
-import { resolveForm } from '@/components/SchemaForm/resolve';
+import {
+  LEADING,
+  type ResolvedField,
+  type ResolvedForm,
+  isCardControl,
+  resolveForm,
+  sectionFields,
+  visibleSection
+} from '@/components/SchemaForm/resolve';
 
 /**
  * The fixture is `msgspec.json.schema` output as generated on 19.09.2026 by
@@ -701,5 +709,71 @@ describe('resolveForm', () => {
     // The title survives even when nothing else does: the page still has to
     // say which field it is refusing to draw.
     expect(sections[0].title).toBe('Странное');
+  });
+});
+
+describe('which section is on screen', () => {
+  const tabsOnly: ResolvedForm = {
+    sections: [],
+    tabs: [
+      { name: 'calculation', title: 'Расчёт', fields: [] },
+      { name: 'feed', title: 'Лента', fields: [] }
+    ]
+  };
+
+  it('is the one the address names, when the form has it', () => {
+    expect(visibleSection(resolveForm(ACCOUNT), 'calc')).toBe('calc');
+    expect(visibleSection(tabsOnly, 'feed')).toBe('feed');
+  });
+
+  it('is the general section first, for no name or a dropped one', () => {
+    expect(visibleSection(resolveForm(ACCOUNT), null)).toBe(LEADING);
+    expect(visibleSection(resolveForm(ACCOUNT), 'gone')).toBe(LEADING);
+  });
+
+  it('is the first tab when there are no top-level scalars', () => {
+    expect(visibleSection(tabsOnly, null)).toBe('calculation');
+    // No scalars, so no general section to name either.
+    expect(visibleSection(tabsOnly, LEADING)).toBe('calculation');
+  });
+
+  it('is nothing in a form with no sections', () => {
+    expect(visibleSection({ sections: [], tabs: [] }, 'calc')).toBeUndefined();
+  });
+});
+
+describe('sectionFields', () => {
+  it('reads the scalars under the general name and a tab under its own', () => {
+    const form = resolveForm(ACCOUNT);
+
+    expect(sectionFields(form, LEADING)).toBe(form.sections);
+    expect(sectionFields(form, 'calc')).toBe(
+      form.tabs.find((tab) => tab.name === 'calc')!.fields
+    );
+  });
+
+  it('has no fields for a name no section carries', () => {
+    expect(sectionFields(resolveForm(ACCOUNT), 'gone')).toEqual([]);
+    expect(sectionFields(resolveForm(ACCOUNT), undefined)).toEqual([]);
+  });
+});
+
+describe('isCardControl', () => {
+  const leaf = (over: Partial<ResolvedField>): ResolvedField =>
+    ({
+      name: 'x',
+      path: ['x'],
+      title: 'X',
+      kind: 'string',
+      ...over
+    }) as ResolvedField;
+
+  it('is a switch the user may flip, and nothing else', () => {
+    expect(isCardControl(leaf({ kind: 'boolean' }))).toBe(true);
+    expect(isCardControl(leaf({ kind: 'boolean', readOnly: true }))).toBe(
+      false
+    );
+    expect(isCardControl(leaf({ kind: 'string' }))).toBe(false);
+    expect(isCardControl(leaf({ kind: 'hidden' }))).toBe(false);
   });
 });

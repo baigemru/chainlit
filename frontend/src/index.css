@@ -160,6 +160,33 @@ code {
   }
 }
 
+/* A row of chips that scrolls sideways on a phone: the answer's chips under
+   a message and the account's sections. One class so the two do not drift
+   apart again -- they had, one fading its edge and hiding the scrollbar, the
+   other doing neither. The fade is a mask, not an overlay, so it needs no
+   colour of its own and holds on any background; `padding-right` lets the
+   last chip scroll clear of it, or the end of the strip is always half
+   faded; the children must not shrink, or a nowrap strip squeezes chips
+   instead of scrolling them. */
+@layer utilities {
+  .chip-strip {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-right: 2rem;
+    scrollbar-width: none;
+    mask-image: linear-gradient(90deg, #000 86%, transparent);
+  }
+
+  .chip-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chip-strip > * {
+    flex-shrink: 0;
+  }
+}
+
 /* Stop icon - customizable via --stop-icon-* CSS variables.
    Override in theme.json or custom CSS to change shape, color, or animation. */
 .stop-icon {

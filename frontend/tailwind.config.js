@@ -140,10 +140,12 @@ export default {
     // panel. None of these appear in the app's own source, so none of them
     // would exist for a host element without this. The border styles join
     // them: a host draws its chips dashed, and `border-dashed` exists today
-    // only because `CollapsedTranscript` happens to use it.
+    // only because `CollapsedTranscript` happens to use it. `cursor-*` and
+    // `select-none` are here for the same reason: a host's clickable chip
+    // kept its pointer only while some app component used the class.
     {
       pattern:
-        /^(border-(?:solid|dashed|dotted)|hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
+        /^(cursor-(?:pointer|default|not-allowed|wait)|select-none|border-(?:solid|dashed|dotted)|hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
     },
     // The same layout vocabulary at the two breakpoints a host element can
     // actually design for. Deliberately a subset of the group above: every

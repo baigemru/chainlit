@@ -16,13 +16,17 @@ import { type ResolvedField, isCardControl } from './resolve';
 /**
  * A `list[Struct]` the application marked `x-widget: cards`.
  *
- * A card is a read-out of one element plus the single control the contract
- * allows on it — the boolean switch. Everything else is displayed, not edited:
- * the list is the application's, the page never adds or removes an element,
- * and an input over a value the user cannot commit is a promise the route does
- * not keep.
+ * A card is a read-out of one element plus the two controls the contract
+ * allows on it — the boolean switch, and a string the application marked
+ * `x-widget: "input"` (a price the user names when the source has none).
+ * Everything else is displayed, not edited: the list is the application's,
+ * the page never adds or removes an element, and an input over a value the
+ * user cannot commit is a promise the route does not keep. The opt-in is
+ * per leaf and explicit because a stored read-out (a brand, an article) is
+ * a string too, and drawing every string as a box would promise edits the
+ * application never reads.
  *
- * Only the switches register with react-hook-form. The rest of the element
+ * Only the controls register with react-hook-form. The rest of the element
  * -- the `x-widget: "hidden"` leaves, which are not drawn at all, included --
  * still reaches `PUT /project/account` untouched, because `handleSubmit`
  * submits a clone of `_formValues` — seeded from `defaultValues` — rather than
@@ -222,9 +226,9 @@ const Cards = ({ field }: Props) => {
                 <span className="font-medium leading-tight">{heading}</span>
               ) : null}
               {rest.map((child) => {
-                // The three kinds a card shares with the rest of the form are
-                // drawn by the form, not copied here: one implementation of a
-                // switch, of a link and of a Markdown block.
+                // The kinds a card shares with the rest of the form are drawn
+                // by the form, not copied here: one implementation of a
+                // switch, of a text box, of a link and of a Markdown block.
                 if (
                   child.kind === 'markdown' ||
                   child.kind === 'link' ||

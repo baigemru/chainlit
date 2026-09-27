@@ -537,7 +537,8 @@ select, a number an input or — with `x-widget: slider` — a range, `date`/`da
 native pickers, `list[str]` a tag input, `list[Literal]` a checkbox list) and reads the
 two `x-` extensions this fork puts in `Meta(extra_json_schema=…)`: `x-widget` picks the
 control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link`, and on a
-`list[Struct]` the `cards` grid, whose items read `image` and `title`; `hidden` resolves to
+`list[Struct]` the `cards` grid, whose items read `image`, `title` and `input` — the one
+string a card lets the user edit, next to its switch; `hidden` resolves to
 a kind of its own that neither `Field` nor a card draws and search does not find — the
 value rides in the form's values and goes back with every save, and a hidden Struct at the
 top is not made a section) and
@@ -580,7 +581,8 @@ the user can change and **the form holds no draft** (`useSchemaForm().isDirty`, 
 own flag; the form keeps a draft across sections, it is saved from any of them, and the
 line over it would send the user away from unsaved work) — `hasEditable` over the
 resolved fields: `readOnly`, `hidden`, `markdown`, `link` and `unsupported` do not count,
-a `cards` list counts only for a switch its elements declare — because a feed of
+a `cards` list counts only for a switch or an `x-widget: input` string its elements
+declare — because a feed of
 read-outs under a Save button promises an edit that does not exist; it is decided from
 the schema, not the values, so it does not come and go with the data, and it is not
 applied while a search shows matches from every section. Two details are bugs, not taste: every menu row and chip is
@@ -910,8 +912,9 @@ and `chatProfilesListed.spec.tsx` (the selector gated on what is _offered_, whil
 list still names the door the user is in). The account has seven: `schemaFormResolve.spec.ts` drives
 the pure `resolveForm` against schemas `msgspec.json.schema` really emits,
 `schemaForm.spec.tsx` renders the controls it resolves, `schemaFormCards.spec.tsx` the
-`cards` grid (0/1/20 elements, the image, the title, the badges, a switch bound to
-`<field>.<index>.<name>`, and the card and section buttons reporting a `path`),
+`cards` grid (0/1/20 elements, the image, the title, the badges, a switch and an `input`
+string bound to `<field>.<index>.<name>`, and the card and section buttons reporting a
+`path`),
 `schemaFormSearch.spec.tsx` the `searchFields` walk and the matches it renders,
 `schemaFormHidden.spec.tsx` the `hidden` kind (resolved, undrawn, sent back), `hasEditable`
 and a page arriving under a draft, and

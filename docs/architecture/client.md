@@ -396,9 +396,12 @@ chip from a command: chips (`variant="chip"`) go in a line of their own **above*
 commands — they are questions the user may tap about the answer just read, a question
 does not belong in a row of offers, and a command leaves the answer while a chip
 refines it. On a wide screen the chips wrap; on a phone they are one strip that scrolls
-sideways (`flex-nowrap overflow-x-auto`), its right edge faded by an arbitrary-value
-`mask-image` class that Tailwind's scan of `src/` compiles like any other, because six
-wrapped chips were three lines of screen spent before the first command. The commands
+sideways — `.chip-strip` in `frontend/src/index.css` (`@layer utilities`: nowrap,
+`overflow-x: auto`, no scrollbar, the right edge faded by a `mask-image`, children that do
+not shrink), the same class the account dialog's section chips use — because six wrapped
+chips were three lines of screen spent before the first command. The rule is pinned
+against the stylesheet itself in `actionVariants.spec.tsx`: jsdom applies no CSS, and a
+class that exists only in a `className` draws nothing. The commands
 are a wrapping row on a wide screen and a two-column grid on a phone.
 A column of four turned the offer after an answer into a scroll, which is the moment the
 measured 24–45% of people act on.
@@ -430,14 +433,15 @@ opens with, and an app that says who is talking in words does not need the face 
 repeating it. The picture and the words are two independent questions now: everything
 used to live inside `if (currentChatProfile?.icon)`, so a profile that wrote a
 description and named no icon had it dropped on the floor — already wrong, and about to
-become an `icon` an app was forced to set and forbidden to show. The composer below it is pinned to the pill (`layout="pill"`): the empty
-screen is an invitation to type, and the card's toolbar row under an empty textarea reads
-as a form to fill in. The chat's own footer (`chat/Footer.tsx`) names the pill too, on
-every width: the card's toolbar row took ~136px from the conversation for three buttons
-(attach, parent thread, panel chevron) the pill already carries on its one line, and with
-both callers on one arrangement moving from the welcome screen into a thread is no
-remount. Unset `layout` still means the viewport's answer, for a caller that wants the
-card.
+become an `icon` an app was forced to set and forbidden to show. The composer
+(`chat/MessageComposer`) has **one arrangement**, the pill — textarea, attach, parent
+thread, panel chevron and send on one line — on every width, under the welcome screen and
+in the chat's footer alike. The card with a toolbar row under the textarea, once the
+desktop default, is gone with its `layout` prop: both callers had come to ask for the pill
+(the row took ~136px from the conversation for three buttons the pill carries beside the
+text, and on an empty screen it read as a form to fill in), and a prop kept for a caller
+that wants the card back was a promise to nobody. The draft's re-inject runs on mount
+only — the route moving from `/` to `/thread/<id>` is the one remount left.
 
 It is centred by `my-auto` and not by `justify-center`, and compensates for nothing: a
 flex parent that centres an item taller than itself overflows it at both ends, and the
@@ -551,6 +555,13 @@ in it (`at $.calculation.margin`) is the only field addressing the form has. Tha
 goes out through a copy of the context client with `onError` cleared, the way `useApi`
 silences it for reads, so one failure raises one toast.
 
+The answer is adopted **from the save's own promise**: `onSubmit` resolves with the
+stored `values`, and `SchemaForm` does `base = answer; reset(answer)` right after the
+`await`. It used to wait for the answer to arrive as a new `values` prop, marking "the
+next page is the answer" in a ref — but `mutate(page, false)` with a page deep-equal to
+the cache hands back SWR's memoised snapshot and re-renders nothing, so a Save on a clean
+form left the mark set, and the next section change reset over the draft typed after it.
+
 **The layout is the dialog's, the form is a provider.** `SchemaForm` draws no strip of
 its own any more: it owns the resolved schema, react-hook-form, submit, reset and the
 action wiring, and publishes them through RHF's `FormProvider` plus `useSchemaForm()`.
@@ -563,8 +574,11 @@ column (search box, the signed-in user, one row per section with the lucide icon
 section body for `SchemaMatches`, the matches across every section, bound to the same
 form; picking a section clears it. Under `useIsMobile` the column becomes a strip above
 the content: the search box and the sections as scrolling chips, and the dialog takes
-the whole screen. Save/Reset is also replaced, per section, by `account.nothingToSave`
-when the section on screen has nothing the user can change — `hasEditable` over the
+the whole screen (the chips are a `.chip-strip`, like an answer's). Save/Reset is also
+replaced, per section, by `account.nothingToSave` when the section on screen has nothing
+the user can change and **the form holds no draft** (`useSchemaForm().isDirty`, react-hook-form's
+own flag; the form keeps a draft across sections, it is saved from any of them, and the
+line over it would send the user away from unsaved work) — `hasEditable` over the
 resolved fields: `readOnly`, `hidden`, `markdown`, `link` and `unsupported` do not count,
 a `cards` list counts only for a switch its elements declare — because a feed of
 read-outs under a Save button promises an edit that does not exist; it is decided from
@@ -602,15 +616,27 @@ first section opens, and a name that matches none does the same. A change is a
 the user looked at.
 
 The section also goes to the server: `GET`, `PUT` and action `POST`s carry `?tab=<name>`
-(nothing for `$leading`, which is the dialog's own name), and the hook
+for the section **on screen** — not the raw address: without `?tab=`, or with a name the
+application has since dropped, the dialog shows the first section, and that is the name
+sent. One rule, `visibleSection(form, wanted)` in `SchemaForm/resolve.ts`, serves the
+layout and the request, resolved from the schema `/project/settings` already carries so
+even the first request names it (only a config not yet loaded leaves the raw address to
+speak). Nothing goes for `$leading`, which is the dialog's own name; so `None` means the
+general section, not "the first one, whichever that is". The hook
 `on_account_load(user, account, tab)` hears it — the application can then mark its feed
 seen when the feed is opened, not when the page is. A new section is a new SWR key, so
 picking one asks again; `keepPreviousData` keeps the form on screen while it is in flight
 instead of the placeholders, and `SchemaForm` adopts the page that arrives without taking
 a draft with it: while the form is dirty the draft's leaves are put back over the new page
-and `base` moves to it, so the save is still exactly the draft; a draft inside a list is
-the exception (positions are not identities — the old page is kept, draft and all, and the
-next save merges as usual), and the answer to a save is always adopted whole.
+and `base` moves to it, so the save is still exactly the draft. Leaf by leaf, not
+react-hook-form's `keepDirtyValues`, which keeps the whole dirty section — a hidden leaf
+beside the draft would get its old value back and be saved as the user's edit. A draft
+inside a list is followed there only when the new page carries that list unchanged
+(deep-equal to the one the form was filled from), where positions still name the same
+cards; a list that changed is the exception (positions are not identities — the old page
+is kept, draft and all, and the next save merges as usual), which still drops an action's
+`page` answer that rebuilt the list under a card-switch draft. The answer to a save is
+adopted whole, in `submit` (above).
 
 **The badge.** `@cl.on_account_badge` makes the server push `account.badge` — after every
 `session.ready`, after a `GET /project/account` (the application marks things seen inside

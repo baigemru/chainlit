@@ -32,6 +32,8 @@ const schema = {
   }
 };
 
+type Page = Record<string, unknown>;
+
 const Harness = ({
   onSubmit,
   next
@@ -39,7 +41,7 @@ const Harness = ({
   onSubmit: (
     values: Record<string, unknown>,
     base: Record<string, unknown>
-  ) => void;
+  ) => Promise<Record<string, unknown>>;
   /** A page that arrives while the form is open, as a revalidation would. */
   next?: Record<string, unknown>;
 }) => {
@@ -59,7 +61,9 @@ const Harness = ({
 
 describe('a save from the account form', () => {
   it('carries the page it was filled from beside the edited values', async () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<[Page, Page], Promise<Page>>((values) =>
+      Promise.resolve(values)
+    );
     render(<Harness onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByDisplayValue('11.0'), {
@@ -74,7 +78,9 @@ describe('a save from the account form', () => {
   });
 
   it('reports the page it adopted, not the one it was handed first', async () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<[Page, Page], Promise<Page>>((values) =>
+      Promise.resolve(values)
+    );
     const { rerender } = render(<Harness onSubmit={onSubmit} />);
     rerender(<Harness onSubmit={onSubmit} next={{ rate: '13.0' }} />);
 

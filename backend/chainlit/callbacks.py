@@ -425,14 +425,13 @@ def on_account_load(
     request's session commits after the response is built.
 
     ``tab`` is the section the page is being drawn for -- the Struct field
-    name the dialog's ``?tab=`` carries -- or ``None`` when the address names
-    none and the dialog opens on its first section. It is here because
-    "the page was opened" and "this section was looked at" are different
-    events: a hook that marks a feed seen on every load clears the count for
-    a user who came for their balance. The client asks again each time the
-    user picks a section, so the hook hears every one of them. The name is
-    whatever the address says, a stale one included: check it against your
-    own fields rather than trusting it.
+    name of the section the dialog actually shows, resolved from the schema
+    (an unknown ``?tab=`` falls back to the first section before it is sent)
+    -- or ``None`` for the general section. It is here because "the page was
+    opened" and "this section was looked at" are different events: a hook
+    that marks a feed seen on every load clears the count for a user who
+    came for their balance. The client asks again each time the user picks a
+    section, so the hook hears every one of them.
 
     Return the Struct to show -- an *instance*, not a mapping of its values:
     what it returns is also what gets *stored*, the engine compares it with

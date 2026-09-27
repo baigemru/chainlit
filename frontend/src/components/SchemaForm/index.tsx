@@ -1,3 +1,5 @@
+import get from 'lodash/get';
+import isEqual from 'lodash/isEqual';
 import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import {
   FieldValues,
@@ -19,10 +21,19 @@ import {
   ResolvedForm,
   hasEditable,
   resolveForm,
-  searchFields
+  searchFields,
+  sectionFields
 } from './resolve';
 
-export { LEADING, hasEditable, resolveForm, searchFields } from './resolve';
+export {
+  LEADING,
+  hasEditable,
+  isCardControl,
+  resolveForm,
+  searchFields,
+  sectionFields,
+  visibleSection
+} from './resolve';
 export type {
   FieldKind,
   FieldWidget,
@@ -37,15 +48,20 @@ export interface SchemaFormProps {
   values: Record<string, unknown>;
   readonly?: boolean;
   /**
-   * Resolves when the server accepted; rejects (with the server's detail)
-   * otherwise. `base` is the page these values were filled from, which the
-   * save carries so the engine can store the difference rather than the
-   * document.
+   * Resolves with the values the server stored when it accepted; rejects
+   * (with the server's detail) otherwise. `base` is the page these values
+   * were filled from, which the save carries so the engine can store the
+   * difference rather than the document.
+   *
+   * The answer comes back through the promise, not only through `values`:
+   * an answer equal to what the fetch layer already holds is no new prop at
+   * all (SWR hands back the memoised snapshot), and the form would never
+   * hear that its draft was committed.
    */
   onSubmit: (
     values: Record<string, unknown>,
     base: Record<string, unknown>
-  ) => Promise<void> | void;
+  ) => Promise<Record<string, unknown>>;
   /** A button from `x-actions` was pressed; `item` is the card's current form value, or null for a tab action. */
   onAction?: ActionHandler;
   /** The layout: sections, matches and the Save/Reset row, in the caller's order. */
@@ -59,6 +75,12 @@ interface SchemaFormState {
   readonly: boolean;
   onAction?: ActionHandler;
   isSubmitting: boolean;
+  /**
+   * A draft is open somewhere in the form, on screen or not. The layout
+   * needs it where a section has nothing to edit: the draft left in another
+   * section is still saved from there.
+   */
+  isDirty: boolean;
 }
 
 const SchemaFormContext = createContext<SchemaFormState | null>(null);
@@ -83,23 +105,30 @@ export const useSchemaForm = (): SchemaFormState => {
 
 /**
  * The leaves of react-hook-form's `dirtyFields`, as paths -- or `null` when
- * one of them runs through a list.
+ * one of them runs through a list that changed between `before` and `after`.
  *
  * `null` is the refusal the adoption below needs: a list is addressed by
  * position, a page that arrives may have added or removed an element, and a
  * draft put back at `feed.entries.3.seen` would land on whichever card is
- * third now. Exported for the spec; nothing else needs it.
+ * third now. A list the new page carries unchanged is the case where the
+ * positions still name the same cards, so a draft in it goes back like any
+ * other -- and a page that arrived for another reason is not dropped over
+ * it. Exported for the spec; nothing else needs it.
  */
 export const draftLeaves = (
   dirty: unknown,
+  before: unknown,
+  after: unknown,
   path: string[] = []
 ): string[][] | null => {
   if (dirty === true) return [path];
-  if (Array.isArray(dirty)) return null;
+  if (Array.isArray(dirty) && !isEqual(get(before, path), get(after, path))) {
+    return null;
+  }
   if (typeof dirty !== 'object' || dirty === null) return [];
   const leaves: string[][] = [];
   for (const [key, child] of Object.entries(dirty)) {
-    const found = draftLeaves(child, [...path, key]);
+    const found = draftLeaves(child, before, after, [...path, key]);
     if (found === null) return null;
     leaves.push(...found);
   }
@@ -154,13 +183,6 @@ const SchemaForm = ({
   // do it.
   const base = useRef(values);
 
-  // Set while a save is out, and consumed by the first page that arrives
-  // after it: that page is the answer to the save and is adopted whole.
-  // Consumed rather than cleared when the save resolves, because the
-  // response lands in SWR and reaches this component on a render of its own,
-  // which may come after the `await` below has already returned.
-  const saving = useRef(false);
-
   // A new page is adopted: `reset(values)` moves `defaultValues` too, which
   // is what makes the Reset button below mean "the last accepted values".
   //
@@ -170,16 +192,17 @@ const SchemaForm = ({
   // section they just left. So the draft's leaves are put back on top of
   // the new page, and `base` moves with it: the save is the difference
   // between the two, and that difference is exactly the draft. A draft
-  // inside a list is the exception (see `draftLeaves`): the old page is
-  // kept, with the draft, and the next save merges onto the store as usual.
+  // inside a list the new page changed is the exception (see `draftLeaves`):
+  // the old page is kept, with the draft, and the next save merges onto the
+  // store as usual.
+  // The answer to a save is not adopted here but in `submit`, which has it.
   useEffect(() => {
-    if (saving.current || !isDirty) {
-      saving.current = false;
+    if (!isDirty) {
       base.current = values;
       reset(values);
       return;
     }
-    const leaves = draftLeaves(dirtyFields);
+    const leaves = draftLeaves(dirtyFields, base.current, values);
     if (leaves === null) return;
     const draft = leaves.map((path) => {
       const name = path.join('.');
@@ -194,14 +217,16 @@ const SchemaForm = ({
   }, [values, reset]);
 
   const submit = handleSubmit(async (data) => {
-    saving.current = true;
     try {
-      await onSubmit(data as Record<string, unknown>, base.current);
+      const answer = await onSubmit(
+        data as Record<string, unknown>,
+        base.current
+      );
+      // Adopted whole, draft or not: the load hook may have normalised what
+      // was saved, and the form shows what is stored, not what was typed.
+      base.current = answer;
+      reset(answer);
     } catch {
-      // No page follows a refusal, so nothing would consume the mark, and
-      // the next arrival -- a section change -- would reset over the draft
-      // the user is about to fix.
-      saving.current = false;
       // The page owns the toast; here a refusal only has to give the button
       // back. Letting it escape would reach the browser as an unhandled
       // rejection, because `handleSubmit` rethrows after clearing
@@ -210,8 +235,14 @@ const SchemaForm = ({
   });
 
   const state = useMemo(
-    () => ({ form, readonly: readonly === true, onAction, isSubmitting }),
-    [form, readonly, onAction, isSubmitting]
+    () => ({
+      form,
+      readonly: readonly === true,
+      onAction,
+      isSubmitting,
+      isDirty
+    }),
+    [form, readonly, onAction, isSubmitting, isDirty]
   );
 
   return (
@@ -238,21 +269,11 @@ const SchemaForm = ({
  */
 export const SchemaSection = ({ name }: { name: string }) => {
   const { form } = useSchemaForm();
-  const fields =
-    name === LEADING
-      ? form.sections
-      : form.tabs.find((tab) => tab.name === name)?.fields;
-  if (!fields?.length) return null;
+  const fields = sectionFields(form, name);
+  if (!fields.length) return null;
   return <div className="flex flex-col gap-4">{fields.map(renderField)}</div>;
 };
 
-/**
- * What `query` found, across every section, grouped and in declaration order.
- *
- * The matches are the real fields, bound to the same form by their own paths,
- * so editing one and saving works exactly as it does in its section. Anything
- * else would be a second copy of the form with its own idea of the values.
- */
 /**
  * Whether the section `name` has anything the user can change.
  *
@@ -262,15 +283,16 @@ export const SchemaSection = ({ name }: { name: string }) => {
  */
 export const useSectionEditable = (name: string | undefined): boolean => {
   const { form } = useSchemaForm();
-  return useMemo(() => {
-    const fields =
-      name === LEADING
-        ? form.sections
-        : form.tabs.find((tab) => tab.name === name)?.fields;
-    return hasEditable(fields ?? []);
-  }, [form, name]);
+  return useMemo(() => hasEditable(sectionFields(form, name)), [form, name]);
 };
 
+/**
+ * What `query` found, across every section, grouped and in declaration order.
+ *
+ * The matches are the real fields, bound to the same form by their own paths,
+ * so editing one and saving works exactly as it does in its section. Anything
+ * else would be a second copy of the form with its own idea of the values.
+ */
 export const SchemaMatches = ({ query }: { query: string }) => {
   const { form } = useSchemaForm();
   const groups = useMemo(() => searchFields(form, query), [form, query]);

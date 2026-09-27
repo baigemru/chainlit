@@ -138,10 +138,12 @@ export default {
     // `tabular-nums` is what makes a column of prices line up; `sticky` plus
     // an inset and a `z-*` is how a table header survives a scroll inside a
     // panel. None of these appear in the app's own source, so none of them
-    // would exist for a host element without this.
+    // would exist for a host element without this. The border styles join
+    // them: a host draws its chips dashed, and `border-dashed` exists today
+    // only because `CollapsedTranscript` happens to use it.
     {
       pattern:
-        /^(hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
+        /^(border-(?:solid|dashed|dotted)|hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
     },
     // The same layout vocabulary at the two breakpoints a host element can
     // actually design for. Deliberately a subset of the group above: every

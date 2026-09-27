@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { IJsonSchema } from '@chainlit/react-client';
@@ -10,7 +16,8 @@ import SchemaForm, {
   draftLeaves,
   hasEditable,
   resolveForm,
-  searchFields
+  searchFields,
+  useSchemaForm
 } from '@/components/SchemaForm';
 
 /**
@@ -34,6 +41,12 @@ vi.mock('@/components/i18n/Translator', () => ({
 beforeAll(() => {
   Element.prototype.hasPointerCapture = vi.fn(() => false);
   Element.prototype.scrollIntoView = vi.fn();
+  // Radix's switch measures itself; jsdom has no observer to measure with.
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
 });
 
 /**
@@ -214,12 +227,25 @@ describe('hasEditable', () => {
   });
 });
 
-const mount = (section: string, values: Record<string, unknown> = VALUES) => {
-  const onSubmit = vi.fn(() => Promise.resolve());
+/** What the form tells the layout, drawn where a spec can read it. */
+const DirtyProbe = () => (
+  <span data-testid="dirty">{String(useSchemaForm().isDirty)}</span>
+);
+
+const mount = (
+  section: string,
+  values: Record<string, unknown> = VALUES,
+  schema: IJsonSchema = SCHEMA
+) => {
+  // The server stored what it was sent, unless a spec says otherwise.
+  const onSubmit = vi.fn((sent: Record<string, unknown>) =>
+    Promise.resolve<Record<string, unknown>>(sent)
+  );
   const view = (next: Record<string, unknown>) => (
-    <SchemaForm schema={SCHEMA} values={next} onSubmit={onSubmit}>
+    <SchemaForm schema={schema} values={next} onSubmit={onSubmit}>
       <SchemaSection name={section} />
       <SchemaSubmit />
+      <DirtyProbe />
     </SchemaForm>
   );
   const utils = render(view(values));
@@ -228,6 +254,17 @@ const mount = (section: string, values: Record<string, unknown> = VALUES) => {
     arrive: (next: Record<string, unknown>) => utils.rerender(view(next)),
     ...utils
   };
+};
+
+/**
+ * Until the save has resolved and the form has done what it does after it:
+ * a draft typed while the answer is still out is what the answer overwrites.
+ */
+const settled = async (onSubmit: ReturnType<typeof vi.fn>) => {
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    await Promise.resolve(onSubmit.mock.results[0].value).catch(() => {});
+  });
 };
 
 const save = () =>
@@ -313,34 +350,218 @@ describe('a page that arrives under a draft', () => {
     expect(screen.getByLabelText('Маржа')).toHaveValue(42);
   });
 
-  it('adopts the answer to a save whole, a draft or not', async () => {
+  it('adopts the answer to a save whole, with no page arriving', async () => {
     // The load hook may normalise what was saved; the form shows what is
-    // stored, not what was typed.
-    const { onSubmit, arrive } = mount('calc');
+    // stored, not what was typed. And it hears the answer from the save
+    // itself: the dialog's SWR cache re-renders nothing for an answer equal
+    // to what it holds.
+    const { onSubmit } = mount('calc');
+    onSubmit.mockResolvedValueOnce({ ...VALUES, calc: { margin: 30 } });
 
     fireEvent.change(screen.getByLabelText('Маржа'), {
       target: { value: '35' }
     });
     save();
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    arrive({ ...VALUES, calc: { margin: 30 } });
 
-    expect(screen.getByLabelText('Маржа')).toHaveValue(30);
+    await waitFor(() => expect(screen.getByLabelText('Маржа')).toHaveValue(30));
+    expect(screen.getByTestId('dirty')).toHaveTextContent('false');
+  });
+
+  it('keeps a draft typed after a save that changed nothing', async () => {
+    // Save on a clean form: the answer is the page already held. The form
+    // used to mark "the next page is the answer" and wait for one; none came,
+    // and the section change after it reset over this draft.
+    const { onSubmit, arrive } = mount('calc');
+
+    save();
+    await settled(onSubmit);
+    fireEvent.change(screen.getByLabelText('Маржа'), {
+      target: { value: '35' }
+    });
+    // After a submit react-hook-form re-validates on change, which is
+    // asynchronous: the draft is the form's only once that has run, and a
+    // section change is a click away, not the same tick.
+    await waitFor(() =>
+      expect(screen.getByTestId('dirty')).toHaveTextContent('true')
+    );
+    arrive(later);
+
+    expect(screen.getByLabelText('Маржа')).toHaveValue(35);
+  });
+
+  it('keeps the draft over a page that arrives after a refused save', async () => {
+    // A refusal answers with no page, so nothing about the next arrival is
+    // "the answer": it is a section change under a draft the user is about
+    // to fix.
+    const { onSubmit, arrive } = mount('calc');
+    onSubmit.mockRejectedValueOnce(new Error('Bad Request'));
+
+    fireEvent.change(screen.getByLabelText('Маржа'), {
+      target: { value: '35' }
+    });
+    save();
+    await settled(onSubmit);
+    arrive(later);
+
+    expect(screen.getByLabelText('Маржа')).toHaveValue(35);
+    expect(screen.getByTestId('dirty')).toHaveTextContent('true');
+  });
+
+  it('reports a draft to the layout, and none once it is saved', async () => {
+    mount('calc');
+    expect(screen.getByTestId('dirty')).toHaveTextContent('false');
+
+    fireEvent.change(screen.getByLabelText('Маржа'), {
+      target: { value: '35' }
+    });
+    expect(screen.getByTestId('dirty')).toHaveTextContent('true');
+
+    save();
+    await waitFor(() =>
+      expect(screen.getByTestId('dirty')).toHaveTextContent('false')
+    );
+  });
+});
+
+describe('a page that arrives under a draft, leaf by leaf', () => {
+  // Siblings of the draft in the same section: what separates putting the
+  // draft's leaves back from react-hook-form's `keepDirtyValues`. That one
+  // keeps the whole dirty section (`set(values, "calc", old subtree)` in
+  // `_reset`), and only a leaf registered on screen escapes it through the
+  // `setValue` that runs first -- a hidden leaf, which never registers, gets
+  // its old value back, and the save sends that as the user's edit over what
+  // the application wrote since.
+  const WITH_SIBLINGS: IJsonSchema = {
+    ...SCHEMA,
+    $defs: {
+      ...SCHEMA.$defs,
+      Calc: {
+        ...SCHEMA.$defs!.Calc,
+        properties: {
+          margin: { title: 'Маржа', type: 'number', default: 20 },
+          rate: { title: 'Курс', type: 'string', default: '' },
+          rev: {
+            title: 'Ревизия',
+            'x-widget': 'hidden',
+            type: 'string',
+            default: ''
+          } as IJsonSchema
+        }
+      }
+    }
+  };
+  const before = { ...VALUES, calc: { margin: 20, rate: '11.0', rev: 'r-1' } };
+
+  it('takes the new siblings, drawn or hidden, and keeps the drafted leaf', async () => {
+    const { onSubmit, arrive } = mount('calc', before, WITH_SIBLINGS);
+
+    fireEvent.change(screen.getByLabelText('Маржа'), {
+      target: { value: '35' }
+    });
+    const next = { ...before, calc: { margin: 20, rate: '12.5', rev: 'r-2' } };
+    arrive(next);
+
+    expect(screen.getByLabelText('Маржа')).toHaveValue(35);
+    expect(screen.getByLabelText('Курс')).toHaveValue('12.5');
+    save();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [values, base] = onSubmit.mock.calls[0] as unknown as [
+      Record<string, any>,
+      Record<string, any>
+    ];
+    expect(values.calc).toEqual({ margin: 35, rate: '12.5', rev: 'r-2' });
+    expect(base).toBe(next);
+  });
+});
+
+describe('a page that arrives under a draft in a list', () => {
+  // The feed's entries with a switch on them: the one control a card draws.
+  const WITH_SWITCH: IJsonSchema = {
+    ...SCHEMA,
+    $defs: {
+      ...SCHEMA.$defs,
+      Entry: {
+        ...SCHEMA.$defs!.Entry,
+        properties: {
+          ...SCHEMA.$defs!.Entry.properties,
+          watch: { title: 'Следить', type: 'boolean', default: false }
+        }
+      }
+    }
+  };
+  const entry = { ...VALUES.feed.entries[0], watch: false };
+  const before = { ...VALUES, feed: { ...VALUES.feed, entries: [entry] } };
+  const flip = () => fireEvent.click(screen.getByRole('switch'));
+
+  it('adopts a page whose list is unchanged, and keeps the draft in it', () => {
+    // Positions still name the same cards, so the draft goes back by them
+    // and the page -- an action's answer, a section change -- is not
+    // dropped over it.
+    const { arrive } = mount('feed', before, WITH_SWITCH);
+    flip();
+    const next = { ...before, feed: { ...before.feed, cursor: 'c-10' } };
+
+    arrive(next);
+
+    expect(screen.getByRole('switch')).toBeChecked();
+    // The page was adopted: a Reset now goes back to it, not to `before`.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'common.actions.reset' })
+    );
+    expect(screen.getByRole('switch')).not.toBeChecked();
+    expect(screen.getByTestId('dirty')).toHaveTextContent('false');
+  });
+
+  it('keeps the old page when the list under the draft changed', async () => {
+    const { onSubmit, arrive } = mount('feed', before, WITH_SWITCH);
+    flip();
+
+    // A new card at the top: `entries.0` is someone else now.
+    arrive({
+      ...before,
+      feed: {
+        ...before.feed,
+        entries: [{ ...entry, title: 'Чайник', run_id: 'r-8' }, entry]
+      }
+    });
+
+    expect(screen.getAllByRole('switch')).toHaveLength(1);
+    expect(screen.getByRole('switch')).toBeChecked();
+    save();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [, base] = onSubmit.mock.calls[0] as unknown as [
+      Record<string, any>,
+      Record<string, any>
+    ];
+    expect(base).toBe(before);
   });
 });
 
 describe('draftLeaves', () => {
+  const dirty = {
+    calc: { margin: true },
+    feed: { entries: [false, { watch: true }] }
+  };
+  const page = { feed: { entries: [{ id: 'a' }, { id: 'b' }] } };
+
   it('lists the leaves of the dirty state as paths', () => {
     expect(
-      draftLeaves({ calc: { margin: true }, notify: true, feed: {} })
+      draftLeaves({ calc: { margin: true }, notify: true, feed: {} }, {}, {})
     ).toEqual([['calc', 'margin'], ['notify']]);
   });
 
-  it('refuses a draft inside a list, whose positions are not identities', () => {
+  it('follows a draft into a list the new page carries unchanged', () => {
+    expect(draftLeaves(dirty, page, structuredClone(page))).toEqual([
+      ['calc', 'margin'],
+      ['feed', 'entries', '1', 'watch']
+    ]);
+  });
+
+  it('refuses a draft inside a list that changed, whose positions are not identities', () => {
     expect(
-      draftLeaves({
-        calc: { margin: true },
-        feed: { entries: [false, { watch: true }] }
+      draftLeaves(dirty, page, {
+        feed: { entries: [{ id: 'c' }, { id: 'a' }, { id: 'b' }] }
       })
     ).toBeNull();
   });

@@ -137,11 +137,7 @@ export default function WelcomeScreen(props: Props) {
       )}
     >
       {logo}
-      {/* One line, pinned: the entry screen is an invitation to type, and
-          the card's toolbar row under an empty textarea reads as a form to
-          fill in. The chat below keeps whichever arrangement its width
-          earns. */}
-      <MessageComposer {...props} layout="pill" />
+      <MessageComposer {...props} />
       {composerHint ? (
         <div className="composer-hint max-w-full -mt-2">
           {/* The same register as the watermark: small, muted, one

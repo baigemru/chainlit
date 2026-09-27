@@ -340,6 +340,17 @@ class StepService(
         await self.execute(statements.ensure_thread(values["threadId"], now()))
         await self.execute(statements.upsert_step(values))
 
+    async def patch_metadata(self, step_id: str, patch: Dict[str, Any]) -> None:
+        """Merge ``patch`` into the step's metadata; a key mapped to ``None`` goes.
+
+        Not a ``save``: a save writes the metadata column whole, and the one
+        caller -- a step's buttons changing -- knows its own key and nothing
+        about the application's keys beside it.
+        """
+        identifier = to_uuid(step_id)
+        assert identifier is not None
+        await self.execute(statements.merge_step_metadata(identifier, patch))
+
     async def fetch(self, step_id: str) -> Optional[StepRecord]:
         identifier = to_uuid(step_id)
         assert identifier is not None

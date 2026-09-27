@@ -14,7 +14,8 @@ import {
   SchemaSection,
   SchemaSubmit,
   useSchemaForm,
-  useSectionEditable
+  useSectionEditable,
+  visibleSection
 } from '@/components/SchemaForm';
 import { ActionButtons } from '@/components/SchemaForm/Cards';
 import { useTranslation } from '@/components/i18n/Translator';
@@ -42,7 +43,7 @@ interface Section {
  * and what the user typed into the search box.
  */
 export default function AccountLayout() {
-  const { form, readonly, onAction } = useSchemaForm();
+  const { form, readonly, onAction, isDirty } = useSchemaForm();
   const { user } = useAuth();
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -68,10 +69,10 @@ export default function AccountLayout() {
     return rows;
   }, [form, t]);
 
-  // `?tab=` may name a section the application has since renamed or dropped;
-  // the dialog opens on the first one rather than on nothing.
-  const wanted = searchParams.get('tab');
-  const active = sections.find((row) => row.name === wanted) ?? sections[0];
+  // The same rule the dialog sends to the server by (`visibleSection`), so
+  // the section drawn and the section the application hears are one.
+  const shown = visibleSection(form, searchParams.get('tab'));
+  const active = sections.find((row) => row.name === shown);
   const trimmed = query.trim();
   const editable = useSectionEditable(active?.name);
 
@@ -139,7 +140,7 @@ export default function AccountLayout() {
         // which is positioned against the dialog, not against this column.
         <div className="flex flex-col gap-2 border-b p-3 pr-12">
           {searchBox}
-          <div className="flex gap-2 overflow-x-auto whitespace-nowrap">
+          <div className="chip-strip gap-2 whitespace-nowrap">
             {sections.map((section) =>
               row(
                 section,
@@ -207,12 +208,13 @@ export default function AccountLayout() {
         <div className="border-t px-6 py-3">
           {readonly ? (
             <Alert variant="info">{t('account.readonly')}</Alert>
-          ) : !trimmed && !editable ? (
+          ) : !trimmed && !editable && !isDirty ? (
             // Per section, unlike the line above, which is about the page: a
             // feed of read-outs under "Save" promises that something on it
             // can be changed. Not while searching -- the matches come from
-            // every section, and a draft left in another one is still saved
-            // from here.
+            // every section -- and not over a draft: the form keeps one across
+            // sections, it is still saved from here, and "nothing to save"
+            // over it would send the user away from unsaved work.
             <Alert variant="info">{t('account.nothingToSave')}</Alert>
           ) : (
             <SchemaSubmit />

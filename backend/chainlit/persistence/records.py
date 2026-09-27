@@ -22,6 +22,14 @@ from msgspec import UNSET, Meta, Struct, UnsetType
 MIN_PAGE_SIZE = 1
 MAX_PAGE_SIZE = 100
 
+# The key a step's buttons live under in ``steps.metadata``. The engine's,
+# not the application's: the application's own ``metadata`` is written over
+# whole by every save of the step, so this one key is carried across that
+# write by ``upsert_step`` and changed only by ``merge_step_metadata``. It is
+# taken back out before a read reaches the hooks, the snapshot or a shared
+# link -- the buttons travel as ``action.add`` frames, not inside the step.
+STEP_ACTIONS_KEY = "__actions"
+
 
 class FeedbackRecord(
     Struct, rename="camel", omit_defaults=True, kw_only=True, frozen=True

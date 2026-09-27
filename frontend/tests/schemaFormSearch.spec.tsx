@@ -109,7 +109,13 @@ const names = (query: string) =>
     group.fields.map((field) => field.name)
   ]);
 
-const mount = (query: string, onSubmit = vi.fn(() => Promise.resolve())) => {
+// The server stored what it was sent.
+const stores = () =>
+  vi.fn((sent: Record<string, unknown>) =>
+    Promise.resolve<Record<string, unknown>>(sent)
+  );
+
+const mount = (query: string, onSubmit = stores()) => {
   const utils = render(
     <SchemaForm schema={SCHEMA} values={VALUES()} onSubmit={onSubmit}>
       <SchemaMatches query={query} />

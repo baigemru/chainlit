@@ -1,5 +1,8 @@
 import { render } from '@testing-library/react';
 import { MessageContext, defaultMessageContext } from 'contexts/MessageContext';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createContext } from 'react';
 import { RecoilRoot, atom } from 'recoil';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IAction } from '@chainlit/react-client';
 
 import MessageActions from '@/components/chat/Messages/Message/Buttons/Actions';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 // The package's atoms have to be built by the same `recoil` the `RecoilRoot`
 // here comes from; the built bundle carries its own copy, and an atom from
@@ -148,8 +153,7 @@ describe('action variants', () => {
       '[data-role="message-action-chips"]'
     )!;
     expect(chips.className).toContain('flex-wrap');
-    expect(chips.className).not.toContain('overflow-x-auto');
-    expect(chips.className).not.toContain('mask-image');
+    expect(chips.className).not.toContain('chip-strip');
   });
 
   it('draws no empty row when there are only chips', () => {
@@ -202,13 +206,26 @@ describe('action layout on a phone', () => {
     const chips = document.querySelector<HTMLElement>(
       '[data-role="message-action-chips"]'
     )!;
-    expect(chips.className).toContain('flex-nowrap');
-    expect(chips.className).toContain('overflow-x-auto');
+    // The one strip class the account's sections use too; what it draws
+    // is pinned below, against the stylesheet.
+    expect(chips.className).toContain('chip-strip');
     expect(chips.className).not.toContain('flex-wrap');
-    // The fade that says the strip goes on past the edge.
-    expect(chips.className).toContain(
-      '[mask-image:linear-gradient(90deg,#000_86%,transparent)]'
+  });
+
+  it('draws the strip as one line that scrolls, fades at its edge and does not squeeze', () => {
+    // jsdom applies no stylesheet, so the rule is read where it is written:
+    // a class that only exists in a component's `className` draws nothing.
+    const css = readFileSync(resolve(HERE, '../src/index.css'), 'utf8');
+    const rule = (selector: string) =>
+      css.split(`${selector} {`)[1]?.split('}')[0].replace(/\s+/g, ' ') ?? '';
+
+    expect(rule('.chip-strip')).toContain('flex-wrap: nowrap');
+    expect(rule('.chip-strip')).toContain('overflow-x: auto');
+    expect(rule('.chip-strip')).toContain('scrollbar-width: none');
+    expect(rule('.chip-strip')).toContain(
+      'mask-image: linear-gradient(90deg, #000 86%, transparent)'
     );
+    expect(rule('.chip-strip > *')).toContain('flex-shrink: 0');
   });
 
   it('keeps the wide screen a wrapping row', () => {

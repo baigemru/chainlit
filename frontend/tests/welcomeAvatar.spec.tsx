@@ -19,7 +19,6 @@ import WelcomeScreen from '@/components/chat/WelcomeScreen';
 
 const mockUseConfig = vi.fn();
 const mockUseChatSession = vi.fn();
-const mockComposerLayout = vi.fn();
 
 vi.mock('@chainlit/react-client', () => ({
   MOBILE_BREAKPOINT: 768,
@@ -31,13 +30,9 @@ vi.mock('@chainlit/react-client', () => ({
   useConfig: () => mockUseConfig()
 }));
 
-// The composer's own arrangement is `composerCompact.spec.tsx`'s subject;
-// what this file claims is which one the screen asks for.
+// The composer is `composerCompact.spec.tsx`'s subject.
 vi.mock('@/components/chat/MessageComposer', () => ({
-  default: ({ layout }: { layout?: string }) => {
-    mockComposerLayout(layout);
-    return <div>composer</div>;
-  }
+  default: () => <div>composer</div>
 }));
 vi.mock('@/components/chat/Starters', () => ({
   default: () => <div>starters</div>
@@ -171,15 +166,5 @@ describe('the welcome screen’s avatar', () => {
     render(<WelcomeScreen {...props} />);
 
     expect(screen.getByText('logo')).toBeInTheDocument();
-  });
-});
-
-describe('the welcome screen’s composer', () => {
-  it('asks for the pill whatever the viewport is', () => {
-    withConfig({}, [PROFILE], 'Entry');
-
-    render(<WelcomeScreen {...props} />);
-
-    expect(mockComposerLayout).toHaveBeenCalledWith('pill');
   });
 });

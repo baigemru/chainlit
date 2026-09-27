@@ -513,6 +513,49 @@ export const searchFields = (
 };
 
 /**
+ * Whether a card draws `child` as a control: a switch, the one thing a card
+ * lets the user change. `Cards` draws by it and `hasEditable` counts by it,
+ * so a card that grows a second control changes both or neither.
+ */
+export const isCardControl = (child: ResolvedField): boolean =>
+  child.kind === 'boolean' && !child.readOnly;
+
+/**
+ * The fields of the section `name`: `LEADING` for the top-level scalars,
+ * otherwise the tab of that name. An unknown name has no fields.
+ */
+export const sectionFields = (
+  form: ResolvedForm,
+  name: string | null | undefined
+): ResolvedField[] =>
+  (name === LEADING
+    ? form.sections
+    : form.tabs.find((tab) => tab.name === name)?.fields) ?? [];
+
+/**
+ * The section on screen for an address that asked for `wanted`: that one if
+ * the form has it, else the first -- `?tab=` may name a section the
+ * application has since renamed or dropped, and the dialog opens on
+ * something rather than on nothing. `undefined` only for a form with no
+ * sections at all.
+ *
+ * One rule for the two readers that must agree on it: the layout, which
+ * draws the section, and the dialog, which tells the server which one is
+ * open. With two, the application heard a stale name, or none, for the
+ * section the user was looking at.
+ */
+export const visibleSection = (
+  form: ResolvedForm,
+  wanted: string | null | undefined
+): string | undefined => {
+  const names = [
+    ...(form.sections.length > 0 ? [LEADING] : []),
+    ...form.tabs.map((tab) => tab.name)
+  ];
+  return names.find((name) => name === wanted) ?? names[0];
+};
+
+/**
  * Whether the user can change anything among `fields`.
  *
  * Asked of the section on screen, so the dialog can say "nothing to save
@@ -533,9 +576,7 @@ export const hasEditable = (fields: ResolvedField[]): boolean =>
       case 'group':
         return hasEditable(field.fields ?? []);
       case 'cards':
-        return (field.itemFields ?? []).some(
-          (child) => child.kind === 'boolean' && !child.readOnly
-        );
+        return (field.itemFields ?? []).some(isCardControl);
       case 'markdown':
       case 'link':
       case 'hidden':

@@ -14,7 +14,11 @@ import {
 } from '@chainlit/react-client';
 
 import Alert from '@/components/Alert';
-import SchemaForm, { LEADING } from '@/components/SchemaForm';
+import SchemaForm, {
+  LEADING,
+  resolveForm,
+  visibleSection
+} from '@/components/SchemaForm';
 import { useTranslation } from '@/components/i18n/Translator';
 import {
   Dialog,
@@ -75,7 +79,21 @@ function AccountBody({ onClose }: { onClose: () => void }) {
   // that the user went on to the feed. The general section is the dialog's
   // own name for the Struct's top-level scalars, not a field the
   // application declared, so it goes out as no section at all.
-  const tab = searchParams.get('tab');
+  //
+  // The section the layout will draw, not the raw `?tab=`: without the
+  // parameter, or with a name the application has since dropped, the dialog
+  // shows the first section, and an application that heard `None` or the
+  // stale name would have to repeat the dialog's ordering rule to know which
+  // one that is. Resolved from the schema `/project/settings` already
+  // carries, so even the first request names it; only a config that has not
+  // arrived yet leaves the address to speak for itself.
+  const accountSchema = config?.ui?.account?.schema;
+  const accountForm = useMemo(
+    () => (accountSchema ? resolveForm(accountSchema) : null),
+    [accountSchema]
+  );
+  const wanted = searchParams.get('tab');
+  const tab = accountForm ? visibleSection(accountForm, wanted) : wanted;
   const query = tab && tab !== LEADING ? `?tab=${encodeURIComponent(tab)}` : '';
 
   // `keepPreviousData`: while the next section's page is in flight the form
@@ -124,6 +142,9 @@ function AccountBody({ onClose }: { onClose: () => void }) {
       // revalidation would only ask it to repeat itself.
       mutate(page, false);
       toast.success(page.message || t('account.saved'));
+      // The form adopts it from here, not from the cache: an answer equal to
+      // the cached page re-renders nothing.
+      return page.values;
     } catch (err) {
       const failure = err as { detail?: string; message?: string };
       toast.error(failure.detail || failure.message);

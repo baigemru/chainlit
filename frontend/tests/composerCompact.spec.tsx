@@ -74,10 +74,7 @@ vi.mock('react-i18next', () => ({
 
 const noop = () => undefined;
 
-const renderComposer = (
-  attachments: IAttachment[] = [],
-  layout?: 'full' | 'pill'
-) =>
+const renderComposer = (attachments: IAttachment[] = []) =>
   render(
     <RecoilRoot
       initializeState={({ set }) => set(attachmentsState, attachments)}
@@ -87,7 +84,6 @@ const renderComposer = (
         onFileUpload={noop}
         onFileUploadError={noop}
         autoScrollRef={{ current: true }}
-        layout={layout}
       />
     </RecoilRoot>
   );
@@ -104,7 +100,7 @@ beforeEach(() => {
   mockParentThreadId.mockReturnValue(undefined);
 });
 
-describe('MessageComposer, compact on a phone', () => {
+describe('MessageComposer, one pill on every width', () => {
   it('drops the card height and puts the controls on the textarea row', () => {
     mockUseIsMobile.mockReturnValue(true);
 
@@ -143,32 +139,6 @@ describe('MessageComposer, compact on a phone', () => {
     // Above, not inside: the row stays one line tall whatever is attached.
     expect(composer().firstElementChild!.contains(attachments!)).toBe(true);
     expect(submit().parentElement!.contains(attachments!)).toBe(false);
-  });
-
-  it('carries the draft across the switch between the two layouts', () => {
-    // `useIsMobile` answers false until its effect lands, so a phone renders
-    // the desktop branch once and then flips — and the two branches hang the
-    // textarea off different parents, which remounts it. Without a re-inject
-    // the visible draft is wiped while the composer's own `value` keeps it:
-    // an enabled send button over an empty-looking box, sending text nobody
-    // can see. A drag across 768px does the same.
-    mockUseIsMobile.mockReturnValue(false);
-
-    const { rerender } = renderComposer();
-    fireEvent.change(input(), { target: { value: 'draft' } });
-    mockUseIsMobile.mockReturnValue(true);
-    rerender(
-      <RecoilRoot>
-        <MessageComposer
-          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
-          onFileUpload={noop}
-          onFileUploadError={noop}
-          autoScrollRef={{ current: true }}
-        />
-      </RecoilRoot>
-    );
-
-    expect((input() as HTMLTextAreaElement).value).toBe('draft');
   });
 
   it('keeps the chevron in the left slot whatever else is there', () => {
@@ -233,107 +203,19 @@ describe('MessageComposer, compact on a phone', () => {
     expect(chevron()!.getAttribute('aria-hidden')).toBeNull();
     expect(chevron()!.getAttribute('aria-label')).toBe('Open the side panel');
   });
-
-  it('puts the chevron on the desktop card as well', () => {
-    mockUseIsMobile.mockReturnValue(false);
-
-    renderComposer();
-
-    expect(chevron()).not.toBeNull();
-    // In the toolbar row, not next to the send button.
-    expect(chevron()!.parentElement!.contains(submit())).toBe(false);
-  });
-
-  it('leaves the desktop card alone', () => {
-    mockUseIsMobile.mockReturnValue(false);
-
-    renderComposer();
-
-    expect(composer().className).toContain('min-h-24');
-    // The toolbar row is its own row under the textarea.
-    expect(submit().parentElement!.contains(input())).toBe(false);
-    expect(submit().className).toContain('h-8');
-    expect(submit().className).toContain('w-8');
-    expect(submit().className).not.toContain('h-10');
-  });
 });
 
-describe('MessageComposer, the layout a caller names', () => {
-  it('draws the pill on a wide screen when asked for one', () => {
-    // The welcome screen's case: a desktop viewport, and one line anyway.
+describe('MessageComposer on a wide screen', () => {
+  it('draws the same pill as on a phone', () => {
+    // No card with a toolbar row: the welcome screen and the chat's footer
+    // both wanted the pill, and nothing else draws a composer.
     mockUseIsMobile.mockReturnValue(false);
 
-    renderComposer([], 'pill');
+    renderComposer();
 
     expect(composer().className).not.toContain('min-h-24');
     expect(submit().parentElement!.contains(input())).toBe(true);
     expect(submit().className).toContain('h-10');
-  });
-
-  it('draws the card on a phone when asked for one', () => {
-    // The other direction, which nothing ships today: what is under test is
-    // that the prop decides and the viewport does not get a vote, because a
-    // prop that only ever agreed with `useIsMobile` would be untested.
-    mockUseIsMobile.mockReturnValue(true);
-
-    renderComposer([], 'full');
-
-    expect(composer().className).toContain('min-h-24');
-    expect(submit().parentElement!.contains(input())).toBe(false);
-    expect(submit().className).toContain('h-8');
-  });
-
-  it('keeps the draft across a width change it was told to ignore', () => {
-    // The re-inject effect used to be keyed on `useIsMobile`. With the
-    // arrangement pinned, a drag across 768px remounts nothing — and an
-    // effect still keyed on the width would push the Recoil draft back into
-    // a textarea the user is in the middle of editing.
-    mockUseIsMobile.mockReturnValue(false);
-
-    const { rerender } = renderComposer([], 'pill');
-    fireEvent.change(input(), { target: { value: 'half a question' } });
-    mockUseIsMobile.mockReturnValue(true);
-    rerender(
-      <RecoilRoot>
-        <MessageComposer
-          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
-          onFileUpload={noop}
-          onFileUploadError={noop}
-          autoScrollRef={{ current: true }}
-          layout="pill"
-        />
-      </RecoilRoot>
-    );
-
-    expect((input() as HTMLTextAreaElement).value).toBe('half a question');
-    expect(composer().className).not.toContain('min-h-24');
-  });
-
-  it('carries the draft when the named layout is the thing that changes', () => {
-    mockUseIsMobile.mockReturnValue(false);
-
-    const { rerender } = renderComposer([], 'full');
-    fireEvent.change(input(), { target: { value: 'draft' } });
-    rerender(
-      <RecoilRoot>
-        <MessageComposer
-          fileSpec={{ maxSizeMb: 500, maxFiles: 20, accept: {} }}
-          onFileUpload={noop}
-          onFileUploadError={noop}
-          autoScrollRef={{ current: true }}
-          layout="pill"
-        />
-      </RecoilRoot>
-    );
-
-    expect((input() as HTMLTextAreaElement).value).toBe('draft');
-  });
-
-  it('leaves the viewport in charge when no layout is named', () => {
-    mockUseIsMobile.mockReturnValue(true);
-
-    renderComposer();
-
-    expect(composer().className).not.toContain('min-h-24');
+    expect(chevron()!.parentElement!.contains(submit())).toBe(true);
   });
 });

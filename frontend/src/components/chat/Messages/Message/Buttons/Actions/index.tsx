@@ -41,15 +41,9 @@ export default function MessageActions({ actions }: Props) {
           data-role="message-action-chips"
           className={cn(
             'flex gap-1 w-full',
-            isMobile
-              ? // The fade is a mask, not an overlay, so it needs no colour
-                // of its own and holds on any background. `pr-8` lets the
-                // last chip scroll clear of it; without that the end of the
-                // strip would always be half faded. The children must not
-                // shrink, or a nowrap strip squeezes chips instead of
-                // scrolling them.
-                'flex-nowrap overflow-x-auto pr-8 [scrollbar-width:none] [&>*]:shrink-0 [mask-image:linear-gradient(90deg,#000_86%,transparent)]'
-              : 'flex-wrap'
+            // `chip-strip` (index.css): the account's sections scroll the
+            // same way.
+            isMobile ? 'chip-strip' : 'flex-wrap'
           )}
         >
           {chips.map((a) => (

@@ -4,12 +4,17 @@ A plain dataclass: the wire shape is ``chainlit.protocol.payloads.Action``
 and the emitter converts ``to_dict()`` into it, so the class only has to
 produce that dict. ``forId`` is spelled the way the wire spells it because
 the runner rebuilds an ``Action`` straight from the clicked payload.
+
+A button outlives the page it was drawn on: ``send`` and ``remove`` write
+the step's row of buttons down as well as sending the frame, and the replay
+puts them back after the steps.
 """
 
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Literal, Mapping, Optional
 
+from chainlit import persist
 from chainlit.context import context
 
 
@@ -47,11 +52,18 @@ class Action:
         return cls(**{k: v for k, v in action.items() if k in _FIELDS})
 
     async def send(self, for_id: str) -> None:
+        """Show the button under ``for_id`` -- and keep it there.
+
+        Kept in the session's transcript and in the step's row, so a reload
+        and a resume from storage both put it back. It stays until the
+        application removes it: a click runs the callback and changes
+        nothing here, which is what the live screen does too.
+        """
         self.forId = for_id
-        context.emitter.add_action(self.to_dict())
+        persist.save_actions(context.emitter.add_action(self.to_dict()))
 
     async def remove(self) -> None:
-        context.emitter.remove_action(self.id)
+        persist.save_actions(context.emitter.remove_action(self.id))
 
 
 _FIELDS = frozenset(Action.__dataclass_fields__)

@@ -113,6 +113,14 @@ class SaveStep:
 
 
 @dataclass(slots=True)
+class PatchStep:
+    """Merge a metadata patch into a step that is already written."""
+
+    step_id: str
+    metadata: Dict[str, Any]
+
+
+@dataclass(slots=True)
 class DeleteStep:
     step_id: str
 
@@ -136,7 +144,7 @@ class PatchThread:
     patch: ThreadPatch = field(default_factory=ThreadPatch)
 
 
-Op = Union[SaveStep, DeleteStep, SaveElement, DeleteElement, PatchThread]
+Op = Union[SaveStep, PatchStep, DeleteStep, SaveElement, DeleteElement, PatchThread]
 
 
 @dataclass(slots=True)
@@ -594,6 +602,8 @@ class SessionWriter:
         """Apply one op, and hand back the object keys it orphaned."""
         if isinstance(op, SaveStep):
             await uow.steps.save(op.record)
+        elif isinstance(op, PatchStep):
+            await uow.steps.patch_metadata(op.step_id, op.metadata)
         elif isinstance(op, DeleteStep):
             return await uow.steps.remove(op.step_id)
         elif isinstance(op, SaveElement):

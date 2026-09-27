@@ -35,24 +35,24 @@ interface Props {
   onFileUpload: (payload: File[]) => void;
   onFileUploadError: (error: string) => void;
   autoScrollRef: MutableRefObject<boolean>;
-  /**
-   * Which of the two arrangements to draw, overriding the viewport. Both
-   * callers in this package name the pill: the welcome screen, where an
-   * empty page reads it as an invitation to type, and the chat's footer,
-   * where the card's toolbar row was height taken from the conversation for
-   * three buttons the pill already carries on its one line. Unset still
-   * means the viewport's answer -- the pill on a phone, the card on a
-   * desktop -- for a caller that wants the toolbar row back.
-   */
-  layout?: 'full' | 'pill';
 }
 
+/**
+ * The composer: one pill, the textarea and its three controls on one line,
+ * on every width.
+ *
+ * There used to be a second arrangement, a card with a toolbar row under the
+ * textarea, which the desktop got by default. Both screens that draw a
+ * composer -- the welcome screen and the chat's footer -- came to ask for the
+ * pill instead: the row spent ~136px of permanent height on three buttons
+ * the pill carries beside the text, and on an empty page it read as a form
+ * to fill in. With no caller left for it, the card went too.
+ */
 export default function MessageComposer({
   fileSpec,
   onFileUpload,
   onFileUploadError,
-  autoScrollRef,
-  layout
+  autoScrollRef
 }: Props) {
   const inputRef = useRef<InputMethods>(null);
   // Above this component, not inside it: the composer is remounted by the
@@ -69,10 +69,6 @@ export default function MessageComposer({
   const disabled = _disabled || !!attachments.find((a) => !a.uploaded);
 
   const isMobile = useIsMobile();
-  // Everything below asks this and not `isMobile`: the arrangement is what
-  // the classes, the row and the draft's survival all turn on, and the
-  // viewport is only its default answer.
-  const pill = layout ? layout === 'pill' : isMobile;
 
   let promptValue = '';
   try {
@@ -172,24 +168,15 @@ export default function MessageComposer({
   ]);
 
   // The textarea keeps its own copy of the draft (`Input` owns the value it
-  // renders, and the composition state with it), so every remount brings it
-  // back empty while `value` — now the Recoil draft — still holds the text:
-  // an enabled send button over an empty-looking box, sending something
-  // nobody can see. Two things remount it. The layouts hang it off different
-  // parents, and `useIsMobile` answers false for one render on a phone, so
-  // the first load on a phone switches and a drag across 768px does it
-  // again; and the route moving from `/` to `/thread/<id>` swaps the whole
-  // page element. The mount run of this effect covers the second — which is
-  // why it must stay keyed on the layout alone and not be guarded on a
-  // change: `value` in the deps would re-inject on every keystroke.
-  //
-  // Keyed on `pill` rather than on `isMobile`, because `pill` is what decides
-  // which parent the textarea hangs off: a caller that pins the arrangement
-  // makes a width change no remount at all, and must not be re-injected for
-  // one.
+  // renders, and the composition state with it), so a remount brings it back
+  // empty while `value` — the Recoil draft — still holds the text: an enabled
+  // send button over an empty-looking box, sending something nobody can see.
+  // The route moving from `/` to `/thread/<id>` swaps the whole page element
+  // and remounts it. On mount only: `value` in the deps would re-inject on
+  // every keystroke.
   useEffect(() => {
     if (value) inputRef.current?.setValueExtern(value);
-  }, [pill]);
+  }, []);
 
   useEffect(() => {
     if (inputRef.current && promptValue && !promptUsed) {
@@ -205,10 +192,6 @@ export default function MessageComposer({
     }
   }, [promptValue, promptUsed]);
 
-  // The same three controls, arranged twice. In the pill they share one row
-  // with the textarea — Telegram's — because the card spends ~136px of
-  // permanent height on a toolbar row of its own, which a phone does not
-  // have to spend and an empty welcome screen has no reason to.
   const uploadButton = (
     <UploadButton
       disabled={disabled}
@@ -232,53 +215,35 @@ export default function MessageComposer({
     <SubmitButton
       onSubmit={submit}
       canSend={!disabled && (!!value.trim() || attachments.length > 0)}
-      // 40px in the pill: the card's 32px is below every tap-target floor,
-      // and the pill is the arrangement a thumb meets.
-      className={pill ? 'h-10 w-10' : undefined}
+      // 40px: the button's own 32px is below every tap-target floor, and a
+      // thumb meets this pill on a phone.
+      className="h-10 w-10"
     />
   );
 
   return (
     <div
       id="message-composer"
-      className={
-        pill
-          ? 'bg-accent dark:bg-card rounded-3xl p-1.5 pl-2 w-full flex flex-col'
-          : 'bg-accent dark:bg-card rounded-3xl p-3 px-4 w-full min-h-24 flex flex-col'
-      }
+      className="bg-accent dark:bg-card rounded-3xl p-1.5 pl-2 w-full flex flex-col"
     >
       {attachments.length > 0 ? (
         <div className="mb-1">
           <Attachments />
         </div>
       ) : null}
-      {pill ? (
-        // `items-end`, not `items-center`: once the textarea grows past one
-        // line the buttons must stay on the pill's bottom edge, next to the
-        // line being typed.
-        <div className="flex items-end gap-1">
-          {uploadButton}
-          <OpenParentThreadButton />
-          {/* Last in the left slot, after whichever of the two above render:
-              the panel is the one control here that is always available, and
-              it must not shift the buttons whose position people learn. */}
-          <ComposerChevron />
-          {textarea}
-          {submitButton}
-        </div>
-      ) : (
-        <>
-          {textarea}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center -ml-1.5">
-              {uploadButton}
-              <OpenParentThreadButton />
-              <ComposerChevron />
-            </div>
-            <div className="flex items-center gap-1">{submitButton}</div>
-          </div>
-        </>
-      )}
+      {/* `items-end`, not `items-center`: once the textarea grows past one
+          line the buttons must stay on the pill's bottom edge, next to the
+          line being typed. */}
+      <div className="flex items-end gap-1">
+        {uploadButton}
+        <OpenParentThreadButton />
+        {/* Last in the left slot, after whichever of the two above render:
+            the panel is the one control here that is always available, and
+            it must not shift the buttons whose position people learn. */}
+        <ComposerChevron />
+        {textarea}
+        {submitButton}
+      </div>
     </div>
   );
 }

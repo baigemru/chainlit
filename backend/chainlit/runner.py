@@ -39,6 +39,7 @@ from chainlit.persistence.writer import (
     WriterRegistry,
 )
 from chainlit.protocol.payloads import (
+    Action as ActionPayload,
     AskTextReply,
     AskTextSpec,
     Element,
@@ -52,6 +53,7 @@ from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
 from chainlit.ws.sidebar import SIDEBAR_META_KEY, state_from_meta
 
 if TYPE_CHECKING:
+    from chainlit.action import Action
     from chainlit.persistence.config import Persistence
     from chainlit.protocol.client import Hello
     from chainlit.transit_store import TransitStore
@@ -933,6 +935,7 @@ class ApplicationRunner:
         id: Optional[str] = None,
         metadata: Optional[Mapping[str, Any]] = None,
         user_identifier: Optional[str] = None,
+        actions: Optional[Sequence["Action"]] = None,
     ) -> str:
         """Put a message in a conversation from outside any session.
 
@@ -961,6 +964,12 @@ class ApplicationRunner:
         message to go, and answering "delivered" to that is how a person ends
         up waiting for a result that was dropped.
 
+        ``actions`` take either road with the message: sent under it on the
+        live one, written into the row on the stored one, which is where the
+        next resume reads a step's buttons from. A result delivered into a
+        closed tab with its "what next" buttons dropped is a result the
+        person reads and cannot act on.
+
         What it does not do is decide whether the message should be sent
         twice. A caller retrying a webhook owns that question and the answer
         is its own: pass a deterministic ``id`` and the row is upserted
@@ -976,6 +985,7 @@ class ApplicationRunner:
                 author=author or self.config.ui.name,
                 id=id,
                 metadata=dict(metadata) if metadata is not None else None,
+                actions=list(actions) if actions else None,
             ).send()
             return "live"
 
@@ -987,8 +997,23 @@ class ApplicationRunner:
             )
 
         moment = utc_now()
+        step_id = id or str(uuid.uuid4())
+        stored_metadata = dict(metadata) if metadata is not None else {}
+        if actions:
+            # Named in the incoming metadata, so the upsert writes this row
+            # of buttons over whatever a first delivery of the same id left.
+            stored_metadata[persist.STEP_ACTIONS_KEY] = [
+                msgspec.to_builtins(
+                    msgspec.convert(
+                        {**action.to_dict(), "forId": step_id}, ActionPayload
+                    )
+                )
+                for action in actions
+            ]
+            for action in actions:
+                action.forId = step_id
         record = StepRecord(
-            id=id or str(uuid.uuid4()),
+            id=step_id,
             type="assistant_message",
             thread_id=thread_id,
             name=author or self.config.ui.name,
@@ -996,7 +1021,7 @@ class ApplicationRunner:
             created_at=moment,
             start=moment,
             end=moment,
-            metadata=dict(metadata) if metadata is not None else {},
+            metadata=stored_metadata,
         )
         await isolated(self._store_delivery(thread_id, record, user_identifier))
         return "stored"
@@ -1065,8 +1090,17 @@ def _transcript_of(detail: ThreadDetail) -> list[TranscriptEntry]:
             continue
         # NULL columns come back as None, and the wire structs would rather
         # have the field absent than null -- absent means their default.
-        step = msgspec.convert(_present(msgspec.to_builtins(record)), Step)
-        entry = TranscriptEntry(step=step)
+        stored = _present(msgspec.to_builtins(record))
+        # The buttons leave the metadata here and travel beside the step,
+        # as the ``action.add`` frames they were sent as.
+        actions, metadata = persist.split_step_actions(stored.get("metadata"))
+        if metadata is not None:
+            stored["metadata"] = metadata
+        step = msgspec.convert(stored, Step)
+        entry = TranscriptEntry(
+            step=step,
+            actions=_stored_actions(actions, step.id),
+        )
         by_step[step.id] = entry
         entries.append(entry)
     for element in detail.elements:
@@ -1074,6 +1108,26 @@ def _transcript_of(detail: ThreadDetail) -> list[TranscriptEntry]:
         if payload.for_id and payload.for_id in by_step:
             by_step[payload.for_id].elements.append(payload)
     return entries
+
+
+def _stored_actions(rows: Sequence[Any], step_id: str) -> list[ActionPayload]:
+    """A step's stored buttons as the wire has them, skipping any it refuses.
+
+    Skipped rather than raised: this runs inside the resume, and one button
+    the wire no longer accepts -- a variant retired since it was written --
+    must not cost the person the whole conversation. ``forId`` is the step
+    the row was read from, whatever the stored copy says: the client files a
+    button by it, and a copy that lost it would be a button under nothing.
+    """
+    buttons: list[ActionPayload] = []
+    for row in rows:
+        try:
+            button = msgspec.convert(row, ActionPayload)
+        except msgspec.ValidationError:
+            logger.warning("Dropping a stored button of step %s: %r", step_id, row)
+            continue
+        buttons.append(msgspec.structs.replace(button, for_id=step_id))
+    return buttons
 
 
 def _present(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1085,8 +1139,14 @@ def _thread_dict(detail: ThreadDetail) -> dict[str, Any]:
 
     Nulls stripped throughout: the same dict is the ``thread.resume``
     snapshot, and the wire structs want an absent field, not a null one.
+    A step's buttons are taken out of its metadata: the hooks never had
+    them, and the replay sends them as frames of their own.
     """
-    return _without_nulls(msgspec.to_builtins(detail))
+    thread = _without_nulls(msgspec.to_builtins(detail))
+    for step in thread.get("steps", ()):
+        if "metadata" in step:
+            _, step["metadata"] = persist.split_step_actions(step["metadata"])
+    return thread
 
 
 def _without_nulls(value: Any) -> Any:

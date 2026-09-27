@@ -34,7 +34,8 @@ export type FieldWidget =
   | 'password'
   | 'radio'
   | 'image'
-  | 'title';
+  | 'title'
+  | 'input';
 
 export interface ResolvedField {
   name: string;
@@ -348,14 +349,15 @@ const buildField = (
       ...base,
       kind: 'string',
       format: typeof schema.format === 'string' ? schema.format : undefined,
-      // `image` and `title` mean something only inside a card; outside one the
-      // card component never sees them and Field falls back to a text box,
-      // which is what a string field is.
+      // `image`, `title` and `input` mean something only inside a card;
+      // outside one the card component never sees them and Field falls back
+      // to a text box, which is what a string field is.
       widget:
         widget === 'textarea' ||
         widget === 'password' ||
         widget === 'image' ||
-        widget === 'title'
+        widget === 'title' ||
+        widget === 'input'
           ? widget
           : undefined
     };
@@ -518,7 +520,9 @@ export const searchFields = (
  * so a card that grows a second control changes both or neither.
  */
 export const isCardControl = (child: ResolvedField): boolean =>
-  child.kind === 'boolean' && !child.readOnly;
+  !child.readOnly &&
+  (child.kind === 'boolean' ||
+    (child.kind === 'string' && child.widget === 'input'));
 
 /**
  * The fields of the section `name`: `LEADING` for the top-level scalars,

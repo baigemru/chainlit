@@ -87,6 +87,12 @@ const SCHEMA: IJsonSchema = {
         image: { 'x-widget': 'image', type: 'string', default: '' },
         title: { 'x-widget': 'title', type: 'string', default: '' },
         price: { title: 'Цена', type: 'string', default: '' },
+        note: {
+          title: 'Заметка',
+          'x-widget': 'input',
+          type: 'string',
+          default: ''
+        },
         watch: { title: 'Следить', type: 'boolean', default: false },
         seen: {
           title: 'Видели',
@@ -125,6 +131,7 @@ const item = (index: number) => ({
   image: `https://example.test/${index}.jpg`,
   title: `Товар ${index}`,
   price: `${index}00 ₽`,
+  note: `заметка ${index}`,
   watch: false,
   seen: index === 0,
   tags: ['1688', 'опт'],
@@ -244,6 +251,25 @@ describe('SchemaForm cards', () => {
     expect(onSubmit.mock.calls[0][0]).toEqual({
       watch: {
         items: [item(0), { ...item(1), watch: true }]
+      }
+    });
+  });
+
+  it('binds a string marked `x-widget: input` and leaves the other strings as read-outs', async () => {
+    const { onSubmit } = mount(2);
+    const boxes = screen.getAllByLabelText('Заметка');
+    expect(boxes).toHaveLength(2);
+    // `price` has no widget: a read-out, not a box — the label is text only.
+    expect(screen.queryAllByLabelText('Цена')).toHaveLength(0);
+    expect(screen.getByText('100 ₽')).toBeInTheDocument();
+
+    fireEvent.change(boxes[1], { target: { value: '1 500 ₽' } });
+    fireEvent.click(screen.getByText('account.actions.save'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      watch: {
+        items: [item(0), { ...item(1), note: '1 500 ₽' }]
       }
     });
   });

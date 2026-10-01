@@ -83,8 +83,27 @@ describe('action variants', () => {
     renderActions([action('secondary', 'secondary')]);
 
     const classes = classesOf('secondary');
-    expect(classes).toContain('border-input');
+    // Outlined, with the line the text-sized step gives an outline.
+    expect(classes).toContain('border-muted-foreground/40');
     expect(classes).not.toContain('bg-primary');
+  });
+
+  it('sizes the commands by their text, the chip by its own classes', () => {
+    // The mockup's `.b`: a two-word label sat afloat in shadcn's 36px box.
+    renderActions([
+      action('go', 'primary'),
+      action('alt', 'secondary'),
+      action('quiet'),
+      action('weight', 'chip')
+    ]);
+
+    for (const id of ['go', 'alt', 'quiet']) {
+      const classes = classesOf(id).split(/\s+/);
+      expect(classes).toContain('py-[5px]');
+      expect(classes).toContain('text-xs');
+      expect(classes).not.toContain('h-9');
+    }
+    expect(classesOf('weight').split(/\s+/)).toContain('h-7');
   });
 
   it('draws a chip as a pill, not as a button', () => {
@@ -104,6 +123,7 @@ describe('action variants', () => {
       expect(classes).toContain('text-muted-foreground');
       expect(classes).not.toContain('bg-primary');
       expect(classes).not.toContain('border-input');
+      expect(classes).not.toContain('border-muted-foreground/40');
       expect(classes).not.toContain('rounded-full');
     }
   });

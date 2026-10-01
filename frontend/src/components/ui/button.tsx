@@ -22,9 +22,43 @@ const buttonVariants = cva(
         default: 'h-10 px-4 py-2',
         sm: 'h-9 rounded-md px-3',
         lg: 'h-11 rounded-md px-8',
-        icon: 'h-9 w-9'
+        icon: 'h-9 w-9',
+        // The two sizes below are the ones a line of text inside a card or
+        // under a message wants. shadcn's own steps are boxes of fixed height
+        // (h-9, h-10) with the text floating in them; these are sized by the
+        // text -- `h-auto`, a 16px line, padding round it -- so the label
+        // sits in the button the way it does in the mockup's `.b` and
+        // `.b-xs`. Added beside the shadcn steps, never instead of them:
+        // host elements get this module through the custom-element import
+        // map and may use any of the old ones.
+        //
+        // `compact` is the mockup's `.b`: 12px on 5px by 11px, radius 8px.
+        // Not `xs`-something, because it is not a step below `sm` on
+        // shadcn's scale -- it is a different kind of size, and a t-shirt
+        // name would promise an ordering it does not have.
+        compact:
+          'h-auto gap-1.5 rounded-lg px-[11px] py-[5px] text-xs leading-4 [&_svg]:size-3.5',
+        // `xs` is `.b-xs`: 11px on 3px by 8px, radius 7px -- the name the
+        // mockup gives it, and shadcn's for its smallest button.
+        xs: 'h-auto gap-1 rounded-[7px] px-2 py-[3px] text-[11px] leading-4 [&_svg]:size-3'
       }
     },
+    // At the text-sized steps the outline's `border-input` is the colour of
+    // the surface it sits on, and a secondary button reads as loose text.
+    // The mockup's secondary has a line a step stronger than the fill; the
+    // accented one is a step heavier. The shadcn sizes keep shadcn's look.
+    compoundVariants: [
+      {
+        variant: 'outline',
+        size: ['compact', 'xs'],
+        className: 'border-muted-foreground/40'
+      },
+      {
+        variant: 'default',
+        size: ['compact', 'xs'],
+        className: 'font-semibold'
+      }
+    ],
     defaultVariants: {
       variant: 'default',
       size: 'default'

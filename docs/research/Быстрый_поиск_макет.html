@@ -1,0 +1,3830 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Быстрый поиск: новый результат</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@500;700&display=swap"
+/>
+
+<style>
+  /* ── Токены страницы. Те же, что в «Пути селлера»: две страницы — один набор. ── */
+  :root {
+    --bg: #151013;
+    --surface: #1d171b;
+    --surface-2: #261e23;
+    --line: #382c33;
+    --line-2: #4a3b43;
+    --text: #f4ecf0;
+    --dim: #baa9b3;
+    --faint: #8b7a84;
+
+    --accent: #ec1a5e;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(236, 26, 94, 0.16);
+    --accent-line: rgba(236, 26, 94, 0.42);
+
+    --fact: #4fc0a6; /* измерено */
+    --fact-soft: rgba(79, 192, 166, 0.14);
+    --est: #e2a442; /* оценка */
+    --est-soft: rgba(226, 164, 66, 0.14);
+    --bad: #ef6a52;
+    --bad-soft: rgba(239, 106, 82, 0.14);
+
+    --plate: #1a141a;
+    --plate-line: #372b33;
+
+    --r-frame: 12px;
+    --r-card: 10px;
+    --r-pill: 999px;
+
+    /* ── Токены макета. Продукт тёмный, поэтому экраны остаются тёмными и в
+     светлой теме страницы: это снимок приложения, а не элемент вёрстки.
+     Ниже их не переопределяет ни одна тема — так и задумано. ───────────── */
+    --m-bg: #131015;
+    --m-panel: #1b161a;
+    --m-surf: #241d23;
+    --m-line: #352a31;
+    --m-line2: #4a3b43;
+    --m-text: #f4ecf0;
+    --m-dim: #b6a5af;
+    --m-faint: #877681;
+    --m-acc: #ec1a5e;
+    --m-acc-ink: #ffffff;
+    --m-acc-soft: rgba(236, 26, 94, 0.17);
+    --m-acc-line: rgba(236, 26, 94, 0.45);
+    --m-fact: #4fc0a6;
+    --m-est: #e2a442;
+    --m-bad: #ef6a52;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme='dark']) {
+      --bg: #faf6f7;
+      --surface: #ffffff;
+      --surface-2: #f3edef;
+      --line: #e3d7dc;
+      --line-2: #cdbdc4;
+      --text: #1b1218;
+      --dim: #6b5a63;
+      --faint: #8d7c85;
+
+      --accent: #cf1350;
+      --accent-soft: rgba(207, 19, 80, 0.1);
+      --accent-line: rgba(207, 19, 80, 0.34);
+
+      --fact: #0f7566;
+      --fact-soft: rgba(15, 117, 102, 0.12);
+      --est: #8d5d13;
+      --est-soft: rgba(141, 93, 19, 0.13);
+      --bad: #bd3a26;
+      --bad-soft: rgba(189, 58, 38, 0.12);
+
+      --plate: #efe7ea;
+      --plate-line: #ddcfd5;
+    }
+  }
+
+  :root[data-theme='light'] {
+    --bg: #faf6f7;
+    --surface: #ffffff;
+    --surface-2: #f3edef;
+    --line: #e3d7dc;
+    --line-2: #cdbdc4;
+    --text: #1b1218;
+    --dim: #6b5a63;
+    --faint: #8d7c85;
+
+    --accent: #cf1350;
+    --accent-soft: rgba(207, 19, 80, 0.1);
+    --accent-line: rgba(207, 19, 80, 0.34);
+
+    --fact: #0f7566;
+    --fact-soft: rgba(15, 117, 102, 0.12);
+    --est: #8d5d13;
+    --est-soft: rgba(141, 93, 19, 0.13);
+    --bad: #bd3a26;
+    --bad-soft: rgba(189, 58, 38, 0.12);
+
+    --plate: #efe7ea;
+    --plate-line: #ddcfd5;
+  }
+
+  /* ── Основа ───────────────────────────────────────────────────────────── */
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family:
+      'Golos Text',
+      'Segoe UI',
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1100px;
+    margin-inline: auto;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 {
+    font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(29px, 5.2vw, 48px);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+    font-weight: 600;
+    font-size: clamp(20px, 2.9vw, 26px);
+    line-height: 1.16;
+    letter-spacing: -0.03em;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  p {
+    margin: 0;
+  }
+  ul {
+    margin: 0;
+    padding-left: 1.05em;
+  }
+  li {
+    margin-block: 2px;
+  }
+  a {
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .lead {
+    color: var(--dim);
+    max-width: 66ch;
+    font-size: 16.5px;
+  }
+  .note {
+    color: var(--faint);
+    font-size: 13.5px;
+    max-width: 74ch;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mono {
+    font-family:
+      'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+    vertical-align: 1px;
+  }
+  .tag-fact {
+    background: var(--fact-soft);
+    color: var(--fact);
+  }
+  .tag-est {
+    background: var(--est-soft);
+    color: var(--est);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    line-height: 1.3;
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .chip-acc {
+    background: var(--accent-soft);
+    border-color: transparent;
+    color: var(--accent);
+  }
+
+  /* ── Секции: корешок слева, как на первой странице ────────────────────── */
+  .sec {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 0 32px;
+    border-top: 1px solid var(--line);
+    padding-block: 44px 10px;
+  }
+  .spine {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding-top: 7px;
+  }
+  .sec-body {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    min-width: 0;
+  }
+  .sec-head {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  @media (max-width: 780px) {
+    .sec {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+    }
+    .spine {
+      padding-top: 0;
+    }
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 30px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    font-size: 13px;
+    color: var(--faint);
+    align-items: center;
+  }
+
+  /* ── Ярусы ────────────────────────────────────────────────────────────── */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .tier {
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .tier-n {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .tier p {
+    font-size: 13.5px;
+    color: var(--dim);
+  }
+  .tier .where {
+    margin-top: auto;
+    font-size: 12.5px;
+    color: var(--faint);
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .tier .where b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  @media (max-width: 760px) {
+    .tiers {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  table.t {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.t th,
+  table.t td {
+    text-align: left;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.t th {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+    border-bottom-color: var(--line-2);
+  }
+  table.t td.n {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  table.t td b {
+    font-weight: 600;
+  }
+  .t-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+  }
+  .t-wrap table.t {
+    min-width: 560px;
+  }
+  .t-wrap table.t tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ── Кадр сториборда ──────────────────────────────────────────────────── */
+  .shot {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .shot-eye {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .shot-eye .ltr {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .shot-eye .ttl {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .shot-eye .dev {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    padding: 1px 8px;
+  }
+  .scroller {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .stand {
+    background: var(--plate);
+    border: 1px solid var(--plate-line);
+    border-radius: var(--r-frame);
+    padding: 14px;
+  }
+  .stand.scroller {
+    padding: 14px;
+  }
+
+  .caps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    overflow: hidden;
+  }
+  .cap {
+    background: var(--surface);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .cap b {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+  }
+  .cap span {
+    font-size: 13px;
+    color: var(--dim);
+  }
+  @media (max-width: 700px) {
+    .caps {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .next {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .next em {
+    font-style: normal;
+    color: var(--faint);
+  }
+
+  /* ── Общая хромота приложения (один каркас на все экраны) ─────────────── */
+  .app {
+    width: 880px;
+    min-width: 880px;
+    display: grid;
+    grid-template-columns: 186px minmax(0, 1fr);
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line2);
+    border-radius: 14px;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .app.is-wide {
+    width: 100%;
+    min-width: 880px;
+  }
+  .app-side {
+    background: var(--m-panel);
+    border-right: 1px solid var(--m-line);
+    padding: 10px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .side-new {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 10px;
+    font-size: 12.5px;
+    color: var(--m-text);
+    font-weight: 500;
+  }
+  .side-lbl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--m-faint);
+    padding-inline: 3px;
+  }
+  .side-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .side-row {
+    padding: 5px 8px;
+    border-radius: 7px;
+    font-size: 12px;
+    color: var(--m-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .side-row.is-on {
+    background: var(--m-surf);
+    color: var(--m-text);
+  }
+  .side-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px 2px;
+    border-top: 1px solid var(--m-line);
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .cnt {
+    margin-left: auto;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    border-radius: var(--r-pill);
+    font-size: 10px;
+    padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .side-row .cnt {
+    float: right;
+  }
+
+  .app-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .app-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .logo {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.02em;
+  }
+  .hd-sp {
+    flex: 1;
+  }
+  .bal {
+    font-size: 12px;
+    color: var(--m-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .hd-ico {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--m-line2);
+    flex: none;
+  }
+  .av {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  /* Точка-счётчик на аватаре — единственный способ, которым продукт зовёт назад.
+   Белая на розовом кружке: розовая на розовом не видна вовсе. */
+  .av i {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--m-acc-ink);
+    border: 2px solid var(--m-bg);
+  }
+  .av.is-plain {
+    background: var(--m-line2);
+    color: var(--m-text);
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 300px;
+  }
+  .stage.has-panel {
+    grid-template-columns: minmax(0, 1fr) 262px;
+  }
+  .feed {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .feed.is-empty {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 14px;
+    padding-block: 34px;
+  }
+  .panel {
+    border-left: 1px solid var(--m-line);
+    background: var(--m-panel);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .panel-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .panel-h b {
+    font-size: 12.5px;
+    color: var(--m-text);
+    font-weight: 600;
+  }
+
+  /* Вкладки панели: человек перебирает объекты здесь, лента остаётся разговором. */
+  .tabs {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--m-line);
+    margin-bottom: 2px;
+  }
+  .tab {
+    flex: none;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--m-line2);
+    color: var(--m-dim);
+    white-space: nowrap;
+  }
+  .tab.is-on {
+    background: var(--m-surf);
+    color: var(--m-text);
+    border-color: var(--m-acc-line);
+    font-weight: 600;
+  }
+  .tab.is-new::after {
+    content: '';
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    margin-left: 5px;
+    vertical-align: 1px;
+  }
+
+  /* Строка шорт-листа — это вариант (SKU), а не карточка. */
+  .skurow {
+    display: flex;
+    gap: 8px;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px;
+    align-items: flex-start;
+    min-width: 0;
+  }
+  .skurow.is-on {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .skurow .meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .skurow .meta .nm {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .skurow .right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex: none;
+  }
+  .skurow .right .tot {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .skurow .right .sup {
+    font-size: 11px;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .skumore {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    padding-left: 8px;
+  }
+  .skurow.is-gone {
+    opacity: 0.38;
+  }
+  .skurow.is-gone .nm {
+    text-decoration: line-through;
+  }
+  .gsep {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding-top: 3px;
+  }
+  .gsep b {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .calc.is-narrow .crow {
+    grid-template-columns: minmax(0, 1fr) 52px 36px;
+    font-size: 10.5px;
+    padding: 3px 7px;
+    gap: 4px;
+  }
+  .calc.is-narrow .calc-h {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .calc.is-narrow .calc-foot {
+    font-size: 10px;
+    padding: 6px 7px;
+  }
+  .ro {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 9px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    font-size: 10.5px;
+    color: var(--m-dim);
+  }
+  .ro b {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--m-text);
+  }
+
+  .composer {
+    border-top: 1px solid var(--m-line);
+    padding: 9px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--m-line2);
+    background: var(--m-surf);
+    border-radius: var(--r-pill);
+    padding: 7px 7px 7px 14px;
+    color: var(--m-faint);
+    font-size: 12.5px;
+  }
+  .pill .grow {
+    flex: 1;
+    min-width: 0;
+  }
+  .pill .clip {
+    width: 15px;
+    height: 15px;
+    border: 1.5px solid var(--m-faint);
+    border-radius: 7px 7px 7px 2px;
+    flex: none;
+  }
+  .pill .send {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex: none;
+  }
+  .pill.is-typed {
+    color: var(--m-text);
+  }
+  /* Поле в фокусе: после нажатия плашки курсор уже здесь — вводить можно сразу. */
+  .pill.is-focus {
+    border-color: var(--m-acc-line);
+    box-shadow: 0 0 0 3px var(--m-acc-soft);
+  }
+  .pill.is-focus .caret {
+    width: 1px;
+    height: 15px;
+    background: var(--m-acc);
+    display: inline-block;
+  }
+  .ctr {
+    font-size: 11px;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctr.is-warn {
+    color: var(--m-est);
+  }
+
+  /* ── Содержимое ленты ─────────────────────────────────────────────────── */
+  .msg {
+    font-size: 13px;
+    color: var(--m-text);
+    max-width: 60ch;
+  }
+  .msg .sub {
+    color: var(--m-faint);
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+  }
+  .msg-u {
+    align-self: flex-end;
+    max-width: 58%;
+    background: var(--m-acc-soft);
+    border: 1px solid var(--m-acc-line);
+    border-radius: 12px 12px 3px 12px;
+    padding: 7px 11px;
+    font-size: 12.5px;
+  }
+  .zh {
+    font-size: 13px;
+    color: var(--m-text);
+    background: var(--m-surf);
+    border: 1px solid var(--m-line);
+    border-radius: 7px;
+    padding: 4px 9px;
+    display: inline-block;
+  }
+
+  .mcard {
+    border: 1px solid var(--m-line);
+    border-radius: var(--r-card);
+    background: var(--m-panel);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mcard.is-acc {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .mcard-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .mcard-h b {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .mcard-h .mono {
+    color: var(--m-faint);
+  }
+
+  .brow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .b {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--m-line2);
+    background: var(--m-surf);
+    color: var(--m-text);
+    border-radius: 8px;
+    padding: 5px 11px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .b-pri {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+    color: var(--m-acc-ink);
+    font-weight: 600;
+  }
+  .b-gh {
+    background: transparent;
+    border-color: transparent;
+    color: var(--m-dim);
+  }
+  .b-off {
+    color: var(--m-faint);
+    border-color: var(--m-line);
+    background: transparent;
+  }
+  .b-xs {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 7px;
+  }
+  .b .cost {
+    color: inherit;
+    opacity: 0.72;
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+  }
+  .b-pri .cost {
+    opacity: 0.85;
+  }
+
+  .mchips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  /* Полоса чипов на телефоне уезжает вбок — край гасим, чтобы обрезанный чип
+   читался как продолжение, а не как сломанная вёрстка. */
+  .mchips.is-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent);
+    mask-image: linear-gradient(90deg, #000 86%, transparent);
+  }
+  .mchip {
+    border: 1px solid var(--m-line2);
+    border-radius: var(--r-pill);
+    padding: 2px 9px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    white-space: nowrap;
+    flex: none;
+  }
+  .mchip.is-on {
+    background: var(--m-acc-soft);
+    border-color: var(--m-acc-line);
+    color: var(--m-acc);
+  }
+  .mchip.is-off {
+    border-style: dashed;
+    color: var(--m-faint);
+  }
+  .mchip.is-new {
+    background: rgba(79, 192, 166, 0.14);
+    border-color: transparent;
+    color: var(--m-fact);
+  }
+  .mchip.is-hit {
+    background: rgba(226, 164, 66, 0.15);
+    border-color: transparent;
+    color: var(--m-est);
+  }
+
+  .mtag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .mtag-est {
+    background: rgba(226, 164, 66, 0.15);
+    color: var(--m-est);
+  }
+  .mtag-fact {
+    background: rgba(79, 192, 166, 0.14);
+    color: var(--m-fact);
+  }
+  .mtag-own {
+    border: 1px solid var(--m-line2);
+    color: var(--m-faint);
+  }
+
+  .mlbl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--m-faint);
+  }
+  /* Цена сценария 1 не решена — «N» нарисовано как незаполненное значение, а не как число. */
+  .nq {
+    border-bottom: 1px dashed currentColor;
+  }
+
+  /* Экран входа */
+  .entry {
+    width: 560px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+  }
+  .entry-h {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -0.03em;
+    text-align: center;
+  }
+  .entry-s {
+    font-size: 12.5px;
+    color: var(--m-faint);
+    text-align: center;
+    margin-top: 3px;
+  }
+  .pill-lg {
+    padding: 10px 10px 10px 16px;
+    font-size: 13px;
+  }
+  .pill-lg .send {
+    width: 30px;
+    height: 30px;
+  }
+  .pill .go {
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    border-radius: var(--r-pill);
+    padding: 5px 12px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill-lg .go {
+    padding: 6px 13px;
+    font-size: 12px;
+  }
+  .bwrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bwrap .sub {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    padding-inline: 2px;
+  }
+  .hintline {
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+
+  /* Зона входа: одно действие, потом два пояснения. Пояснения не кнопки —
+   иначе человек снова выбирает режим руками, а роутинг сделан против этого. */
+  .zone {
+    border-top: 1px solid var(--m-line);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .zone-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .zone-h b {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  /* Зона «Сценарии»: плашка-кнопка — название, «что получишь», цена.
+   Роль поля и роль кнопки разведены: поле — «что», кнопка — «что сделать». */
+  .plates {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .pbtn {
+    border: 1px solid var(--m-line2);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .pbtn b {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .pbtn span {
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--m-faint);
+  }
+  .pbtn .cost {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--m-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .pbtn.is-main {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+    color: var(--m-acc-ink);
+  }
+  .pbtn.is-main span,
+  .pbtn.is-main .cost {
+    color: rgba(255, 255, 255, 0.84);
+  }
+
+  .tasklist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .taskrow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 5px 9px;
+    min-width: 0;
+  }
+  .taskrow b {
+    font-size: 11.5px;
+    font-weight: 600;
+    flex: none;
+  }
+  .taskrow span {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    flex: 1;
+    min-width: 0;
+  }
+  .taskrow .cost {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--m-dim);
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Фото товара — плашка, а не картинка: это макет. */
+  .ph {
+    background: repeating-linear-gradient(
+      45deg,
+      var(--m-surf) 0 6px,
+      var(--m-line) 6px 7px
+    );
+    border-radius: 7px;
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    font-size: 8.5px;
+    color: var(--m-faint);
+    padding-bottom: 3px;
+    text-align: center;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.02em;
+  }
+  .ph-64 {
+    width: 64px;
+    height: 64px;
+  }
+  .ph-48 {
+    width: 48px;
+    height: 48px;
+  }
+  .ph-40 {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Карточки выдачи в боковой панели */
+  .pcards {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+  }
+  .pcard {
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+  .pcard-b {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .pcard-b .nm {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .pcard-b .pr {
+    font-size: 12.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Рубли по курсу — крупно, юани 1688 — рядом мелко, как у строки-SKU. */
+  .pcard-b .pr .cny {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--m-faint);
+    margin-left: 4px;
+  }
+  .pcard-b .sl {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .ledge {
+    text-align: center;
+    font-size: 11px;
+    color: var(--m-faint);
+    border: 1px dashed var(--m-line2);
+    border-radius: 8px;
+    padding: 5px;
+  }
+
+  .sw {
+    width: 28px;
+    height: 16px;
+    border-radius: var(--r-pill);
+    background: var(--m-line2);
+    position: relative;
+    flex: none;
+    display: inline-block;
+  }
+  .sw i {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--m-faint);
+  }
+  .sw.is-on {
+    background: var(--m-acc);
+  }
+  .sw.is-on i {
+    left: auto;
+    right: 2px;
+    background: var(--m-acc-ink);
+  }
+
+  /* Прогон */
+  .bar {
+    height: 5px;
+    border-radius: var(--r-pill);
+    background: var(--m-surf);
+    overflow: hidden;
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--m-acc);
+  }
+
+  /* Калькулятор */
+  .calc {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  .calc-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .calc-col + .calc-col {
+    border-left: 1px solid var(--m-line);
+  }
+  .calc-h {
+    padding: 6px 10px;
+    background: var(--m-surf);
+    border-bottom: 1px solid var(--m-line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .crow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 62px 42px;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .crow span:nth-child(1) {
+    color: var(--m-dim);
+  }
+  .crow span:nth-child(2),
+  .crow span:nth-child(3) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .crow span:nth-child(3) {
+    color: var(--m-faint);
+  }
+  .crow.is-tot {
+    font-weight: 700;
+    border-bottom: none;
+    background: var(--m-panel);
+  }
+  .crow.is-tot span:nth-child(1) {
+    color: var(--m-text);
+  }
+  .crow.is-loss span:nth-child(2),
+  .crow.is-loss span:nth-child(3) {
+    color: var(--m-bad);
+  }
+  .calc-foot {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--m-line);
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--m-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  /* Кабинет — диалог над размытым чатом */
+  .over {
+    position: relative;
+  }
+  .over .blurred {
+    filter: blur(2.5px) saturate(0.8);
+    opacity: 0.5;
+  }
+  .over .veil {
+    position: absolute;
+    inset: 0;
+    background: rgba(9, 6, 9, 0.55);
+    border-radius: 14px;
+  }
+  .dlg {
+    position: absolute;
+    inset: 22px 42px;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 196px minmax(0, 1fr);
+    background: var(--m-bg);
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  }
+  .dlg-rail {
+    border-right: 1px solid var(--m-line);
+    background: var(--m-panel);
+    padding: 10px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .srch {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 5px 10px;
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+  .dlg-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-inline: 2px;
+  }
+  .dlg-user b {
+    font-size: 12px;
+    font-weight: 600;
+    display: block;
+  }
+  .dlg-user span {
+    font-size: 11px;
+    color: var(--m-faint);
+    display: block;
+  }
+  .dlg-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .dlg-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .dlg-h b {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .dlg-h p {
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+  .dlg-body {
+    padding: 11px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    overflow: hidden;
+  }
+  .dlg-foot {
+    margin-top: auto;
+    border-top: 1px solid var(--m-line);
+    padding: 8px 14px;
+    display: flex;
+    gap: 7px;
+  }
+  .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .fld {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .fld em {
+    font-style: normal;
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .fld b {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .fld.is-empty {
+    border-color: var(--m-est);
+    border-style: dashed;
+  }
+  .cards2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* Телефон */
+  .phone {
+    width: 360px;
+    min-width: 360px;
+    max-width: 100%;
+    border: 1px solid var(--m-line2);
+    border-radius: 26px;
+    padding: 8px;
+    background: var(--m-panel);
+  }
+  .pscr {
+    border-radius: 19px;
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .ptop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .pbody {
+    padding: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    min-width: 0;
+  }
+  .pfoot {
+    border-top: 1px solid var(--m-line);
+    padding: 8px 11px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .phones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .btn2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .btn2 .b {
+    justify-content: center;
+  }
+
+  /* Две карточки экрана M — рядом, но каждая со своей прокруткой */
+  .pair {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  /* На узком экране рамка телефона тянется по ширине, иначе страница уезжает вбок. */
+  @media (max-width: 470px) {
+    .stand {
+      padding: 8px;
+      border-radius: 10px;
+    }
+    .phone {
+      min-width: 0;
+      width: 100%;
+    }
+    .caps {
+      border-radius: 8px;
+    }
+  }
+
+  /* Ничего не двигается само; правило — на случай будущей анимации. */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+  /* ── Макет быстрого поиска после комментариев ── */
+  .page {
+    max-width: 1240px;
+  }
+  .chg {
+    box-shadow: inset 0 -2px 0 var(--m-acc);
+  }
+  .qtiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .qtile {
+    border: 1px solid var(--m-line2);
+    border-radius: 9px;
+    background: transparent;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .qtile b {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .qtile .cost {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--m-dim);
+  }
+  .app.is-xl {
+    width: 1040px;
+    min-width: 1040px;
+  }
+  .stage.has-panel.xl {
+    grid-template-columns: minmax(0, 1fr) 480px;
+  }
+  .gone {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: baseline;
+    font-size: 11px;
+    color: var(--m-faint);
+    border: 1px dashed var(--m-line2);
+    border-radius: 8px;
+    padding: 6px 9px;
+  }
+  .gone s {
+    text-decoration-color: var(--m-bad);
+  }
+  .rhead {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .rhead > b {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--m-text);
+  }
+  .rhead .sub {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .bigcard {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 6px 12px;
+  }
+  .bigph {
+    width: 120px;
+    height: 120px;
+    grid-row: span 1;
+    font-size: 10px;
+  }
+  .bc-b {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bc-nm {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .bc-zh {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .bc-pr {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 6px;
+  }
+  .bc-pr .cny {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--m-faint);
+  }
+  .bc-moq {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--m-dim);
+  }
+  .bc-moq::before {
+    content: '· ';
+    color: var(--m-faint);
+  }
+  .bc-sku {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .bc-sep {
+    height: 1px;
+    background: var(--m-line);
+    margin: 3px 0;
+  }
+  .bc-sl {
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .bc-sl2 {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .bc-act {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .panel.solo {
+    width: 540px;
+    max-width: 100%;
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    color: var(--m-text);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .feed.solo {
+    width: 620px;
+    max-width: 100%;
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .grp {
+    font-size: 11.5px;
+    color: var(--m-dim);
+    font-weight: 600;
+    padding-top: 2px;
+  }
+  .det {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .det-top {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .detph {
+    width: 180px;
+    height: 180px;
+    font-size: 10px;
+  }
+  .thumbs {
+    display: flex;
+    gap: 6px;
+  }
+  .dt {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .dt th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--m-faint);
+    padding: 3px 5px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .dt td {
+    padding: 4px 5px;
+    border-bottom: 1px solid var(--m-line);
+    color: var(--m-dim);
+  }
+  .dt td b {
+    color: var(--m-text);
+  }
+  .dt td i {
+    font-style: normal;
+    color: var(--m-faint);
+    font-size: 10px;
+  }
+  .dt tr.is-on td {
+    background: var(--m-acc-soft);
+  }
+  .qs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 22px;
+    max-width: 80ch;
+    color: var(--dim);
+    font-size: 15px;
+  }
+  .qs b {
+    color: var(--text);
+  }
+
+  .b.is-busy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.75;
+    cursor: progress;
+  }
+  .spin {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--m-line2);
+    border-top-color: var(--m-acc);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -1px;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation: none;
+    }
+  }
+  .ph-24 {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 4px;
+  }
+  .ph.is-on {
+    outline: 2px solid var(--m-acc);
+    outline-offset: 1px;
+  }
+  .door {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+    border-top: 1px solid var(--m-line);
+    padding-top: 10px;
+    margin-top: 2px;
+  }
+  .door .sub,
+  .panel .sub {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .duo {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .duo .panel.solo {
+    width: 480px;
+  }
+  .props {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  @media (max-width: 900px) {
+    .props {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .prop {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .solo.mini {
+    width: auto;
+    padding: 12px;
+  }
+  .pnote {
+    font-size: 13.5px;
+    color: var(--dim);
+  }
+  .prog {
+    height: 4px;
+    border-radius: 99px;
+    background: var(--m-line);
+    overflow: hidden;
+    max-width: 320px;
+  }
+  .prog i {
+    display: block;
+    height: 100%;
+    background: var(--m-acc);
+  }
+  .bigcard.is-cand {
+    border-color: var(--m-acc-line);
+  }
+  .cand {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--m-acc);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ck {
+    font-size: 10.5px;
+    border: 1px solid var(--m-line2);
+    border-radius: 6px;
+    padding: 1px 7px;
+    color: var(--m-dim);
+  }
+  .ck.is-on {
+    border-color: var(--m-acc-line);
+    color: var(--m-acc);
+    background: var(--m-acc-soft);
+  }
+  .nl {
+    font-size: 12.5px;
+    color: var(--m-text);
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 60ch;
+  }
+  .b-off {
+    opacity: 0.55;
+  }
+  .skurow.is-pick {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .ck.is-x {
+    border-color: transparent;
+    color: var(--m-faint);
+  }
+  .divl {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    text-align: center;
+    border-top: 1px dashed var(--m-line2);
+    padding-top: 4px;
+  }
+  .branch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 9px;
+  }
+  .branch b {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(
+        0,
+        1fr
+      );
+    gap: 10px;
+    align-items: center;
+  }
+  @media (max-width: 900px) {
+    .flow {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .farr {
+      transform: rotate(90deg);
+      justify-self: center;
+    }
+  }
+  .fstep {
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 13px;
+    color: var(--dim);
+  }
+  .fstep b {
+    color: var(--text);
+    font-size: 14px;
+  }
+  .fstep i {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .fstep.is-to {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+  .fl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .farr {
+    font-size: 22px;
+    color: var(--accent);
+  }
+  .bc-cn {
+    font-size: 10px;
+    color: var(--m-faint);
+    opacity: 0.8;
+    line-height: 1.2;
+  }
+
+  /* ── Светлая тема снимков: токены светлой темы приложения (index.css форка:
+   background 0 0% 100%, border/muted 0 0% 90%, muted-foreground 0 0% 36%,
+   primary 340 92% 52%). Включается переключателем в шапке или #light. ── */
+  :root[data-mock='light'] {
+    /* Светлая читается хуже тёмной не из-за палитры, а из-за контраста мелкого
+     текста: серый #8a8a8a на белом даёт ~3,4:1, а подписям 10–11px нужно ≥5:1.
+     Панель на тон темнее карточек — иначе белая карточка на белом не видна. */
+    --m-bg: #ffffff;
+    --m-panel: #f4f4f5;
+    --m-surf: #ffffff;
+    --m-line: #e4e4e7;
+    --m-line2: #c9c9cf;
+    --m-text: #111113;
+    --m-dim: #3f3f46;
+    --m-faint: #63636b;
+    --m-acc: #f5145f;
+    --m-acc-ink: #ffffff;
+    --m-acc-soft: rgba(245, 20, 95, 0.06);
+    --m-acc-line: rgba(245, 20, 95, 0.5);
+    --m-fact: #0b6b5d;
+    --m-est: #8a5a0c;
+    --m-bad: #c03a26;
+  }
+  :root[data-mock='light'] .app {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.06);
+  }
+  :root[data-mock='light'] .bigcard,
+  :root[data-mock='light'] .skurow {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  :root[data-mock='light'] .skurow.is-pick,
+  :root[data-mock='light'] .bigcard.is-cand {
+    box-shadow: none;
+  }
+  /* Пунктир выключенного фильтра обязан читаться: рамкой цвета обычной
+   границы он сливается с фоном и выглядит сплошной линией — в обеих темах. */
+  .mchip.is-off,
+  .ledge,
+  .gone {
+    border-color: color-mix(in srgb, var(--m-faint) 60%, transparent);
+  }
+  .themesw {
+    display: inline-flex;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px;
+    background: var(--surface);
+  }
+  .themesw button {
+    font: inherit;
+    font-size: 13px;
+    border: 0;
+    background: transparent;
+    color: var(--dim);
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .themesw button[aria-pressed='true'] {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* Разрядка капителью на белом рассыпается: тоньше и светлее, чем кажется.
+   В светлой — плотнее, жирнее и цвета подписи, а не фона. */
+  :root[data-mock='light'] .mlbl {
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    color: var(--m-dim);
+  }
+  :root[data-mock='light'] .bc-cn {
+    opacity: 1;
+  }
+  :root[data-mock='light'] .bigcard,
+  :root[data-mock='light'] .skurow {
+    box-shadow: 0 1px 2px rgba(16, 16, 20, 0.06);
+  }
+  :root[data-mock='light'] .side-row.is-on {
+    background: #e4e4e7;
+  }
+</style>
+<div class="page">
+  <header class="hero">
+    <p class="eyebrow">PANDAPOISK · быстрый поиск после комментариев</p>
+    <h1>Быстрый поиск: новый результат</h1>
+    <div class="themesw" role="group" aria-label="Тема снимков">
+      <button type="button" data-set="light">Светлая тема</button>
+      <button type="button" data-set="dark">Тёмная тема</button>
+    </div>
+    <p class="lead">
+      Как выглядит быстрый поиск, если учесть комментарии из «Быстрый поиск —
+      изменения интерфейса». Запуск не меняется: плашка, фото или описание,
+      поиск. Меняется результат. В ленте одно сообщение и три кнопки. Справа 20
+      крупных горизонтальных карточек. Варианты (SKU) заранее не грузятся:
+      только по «Все варианты» или «Подробнее» у конкретной карточки, с лоадером
+      на кнопке. Редакция 2 — по ответам от 01.10.
+    </p>
+    <div class="legend">
+      <span
+        >Цена: рубли крупно, юани рядом мелко. Рубль здесь — цена варианта по
+        курсу 11,95 ₽/¥, а не итог на складе.</span
+      >
+      <span
+        ><span class="tag tag-est">предложение</span> — вход в сценарий, вариант
+        на выбор</span
+      >
+    </div>
+  </header>
+
+  <!-- ───────────── Q1 Главная ───────────── -->
+  <section class="sec">
+    <div class="spine">Главная</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Плашка называется «Найти по фото», цена — 5 кредитов</h2>
+        <p class="lead">
+          Блок «Быстрый поиск» стоит там же и выглядит так же. Меняются подпись
+          первой плашки и цена: её видно до нажатия.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q1</span
+          ><span class="ttl">Вход, блок «Быстрый поиск»</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row">набор столовых приборов</div>
+                <div class="side-row">термокружка 450 мл</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 35 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage">
+                <div class="feed is-empty">
+                  <div class="entry" style="width: 600px">
+                    <div>
+                      <p class="entry-h">Что ищем на 1688?</p>
+                      <p class="entry-s">
+                        Напишите, приложите фото или нажмите кнопку — дальше
+                        подскажу
+                      </p>
+                    </div>
+                    <div class="pill pill-lg">
+                      <span class="clip"></span
+                      ><span class="grow">Фото, название или ссылка</span
+                      ><span class="send">↑</span>
+                    </div>
+                    <p class="hintline">
+                      Enter — быстрый поиск: 20 карточек ·
+                      <span class="chg">5 кредитов</span> · секунды.
+                    </p>
+                    <div class="zone">
+                      <div class="zone-h">
+                        <b>Быстрый поиск</b
+                        ><span class="mlbl"
+                          >нажали — и я попрошу фото или описание</span
+                        >
+                      </div>
+                      <div class="qtiles">
+                        <div class="qtile">
+                          <b>📷 <span class="chg">Найти по фото</span></b
+                          ><span class="cost"
+                            ><span class="chg">5 кредитов</span></span
+                          >
+                        </div>
+                        <div class="qtile">
+                          <b>✍️ Описать товар</b
+                          ><span class="cost"
+                            ><span class="chg">5 кредитов</span></span
+                          >
+                        </div>
+                      </div>
+                    </div>
+                    <div class="zone">
+                      <div class="zone-h">
+                        <b>Сценарии</b><span class="mlbl">без изменений</span>
+                      </div>
+                      <div class="plates">
+                        <div class="pbtn is-main">
+                          <b>Глазами байера</b
+                          ><span
+                            >рынок 1688, надёжные поставщики, экономика</span
+                          ><span class="cost">12 кредитов</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что поменялось</b
+            ><span
+              >«Снять товар» стало «Найти по фото». Цена 5 кредитов — на обеих
+              плашках, включая «Описать товар», и в подсказке Enter. Выделено
+              розовой линией.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что не трогаем</b
+            ><span
+              >Место и вид блока, название «Описать товар», сценарии и частные
+              задачи.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Дальше</b
+            ><span
+              >Как сейчас: агент 1 репликой просит фото, человек отправляет,
+              идёт поиск.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Q2 Результат: карточки ───────────── -->
+  <section class="sec">
+    <div class="spine">Результат</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Слева одно сообщение, справа 20 крупных карточек</h2>
+        <p class="lead">
+          В ленте две кнопки. Ушли «Открыть карточки 1688», плашка «Глазами
+          байера», «Да, разбери», «Свой вопрос», «Нет, спасибо», «Расширить
+          линейку» и повторная плитка. «Шорт-лист поставщиков» стал «Собрать
+          шорт-лист». Чип «рядом по категории» ушёл из фильтров: это отдельная
+          задача за кредиты. Вход в неё — строкой «Соседние ветки» под
+          заголовком выдачи, экран К1. Панель открывается сама и стала шире,
+          чтобы фото было крупным.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q2</span
+          ><span class="ttl">Поиск по фото завершён, вкладка «Карточки»</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app is-xl">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">ночник капибара</div>
+                <div class="side-row">набор столовых приборов</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 30 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage has-panel xl">
+                <div class="feed">
+                  <div class="msg-u">
+                    <span class="ph ph-64" style="display: inline-flex"
+                      >фото</span
+                    >
+                  </div>
+                  <div class="msg">
+                    Нашёл 20 карточек. Результаты открыты справа.
+                    <span class="sub"
+                      >Искал силиконовый ночник в форме капибары с USB и тёплым
+                      светом.</span
+                    >
+                  </div>
+                  <div class="brow">
+                    <span class="b b-pri">Давай я разберу выдачу</span>
+                    <span class="b">Собрать шорт-лист</span>
+                  </div>
+                  <div class="gone">
+                    <span class="mlbl">убрано из ленты</span>
+                    <s>Открыть карточки 1688</s>
+                    <s>Глазами байера · 12 кредитов</s> <s>Да, разбери</s>
+                    <s>Свой вопрос</s> <s>Нет, спасибо</s>
+                    <s>Расширить линейку</s> <s>Снять товар</s>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="tabs">
+                    <span class="tab is-on">Карточки · 20</span>
+                  </div>
+                  <div class="rhead">
+                    <b>Результаты поиска — 20 карточек</b>
+                    <div class="brow">
+                      <span class="sub">по этому же запросу есть ещё</span
+                      ><span class="b b-xs"
+                        >Ещё 20 карточек
+                        <span class="cost">· 2 кредита</span></span
+                      >
+                    </div>
+                    <div class="brow">
+                      <span class="sub"
+                        >16 из 20 — в ветке
+                        <b style="color: var(--m-text)">Ночники</b></span
+                      ><span class="b b-pri"
+                        >Соседние ветки
+                        <span class="cost"
+                          >· 3 кредита за 20 товаров</span
+                        ></span
+                      ><span class="tag tag-est">→ К1</span>
+                    </div>
+                  </div>
+                  <div class="mchips">
+                    <span class="mchip is-off">только фабрики</span
+                    ><span class="mchip is-off">партия до 100</span
+                    ><span class="mchip is-off">дешевле медианы</span>
+                  </div>
+                  <p class="mlbl">
+                    Цена показанного варианта в ₽ по курсу 11,95 ₽/¥, рядом — в
+                    юанях
+                  </p>
+                  <div class="pcards">
+                    <div class="bigcard">
+                      <div class="ph bigph">фото товара</div>
+                      <div class="bc-b">
+                        <span class="bc-nm"
+                          >Ночник-капибара, силикон, USB, тёплый свет</span
+                        >
+                        <span class="bc-pr"
+                          >148 ₽<span class="cny">12,4 ¥</span
+                          ><span class="bc-moq">MOQ 2 шт</span></span
+                        >
+                        <span class="bc-sku"
+                          >показан вариант: коричневый · с пультом</span
+                        >
+                        <span class="bc-sep"></span>
+                        <span class="bc-sl">Dongguan Weige Electronics</span>
+                        <span class="bc-cn">东莞市唯格电子科技有限公司</span>
+                        <span class="bc-sl2">фабрика · Дунгуань</span>
+                        <span class="bc-sl2"
+                          >6 лет на 1688 · рейтинг 3,5 из 5</span
+                        >
+                      </div>
+                      <div class="bc-act">
+                        <span class="b b-xs b-pri">Подробнее</span
+                        ><span class="b b-xs is-busy"
+                          ><i class="spin"></i>Загружаю варианты…</span
+                        >
+                        <span class="b b-xs"
+                          >Запросить отзывы
+                          <span class="cost">· 1 кредит</span></span
+                        >
+                        <span class="b b-xs"
+                          >Ассортимент этого продавца
+                          <span class="cost">· 2 кредита</span></span
+                        >
+                        <span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                      </div>
+                    </div>
+                    <div class="bigcard">
+                      <div class="ph bigph">фото товара</div>
+                      <div class="bc-b">
+                        <span class="bc-nm"
+                          >Силиконовый ночник «капибара с апельсином», 7
+                          цветов</span
+                        >
+                        <span class="bc-pr"
+                          >111 ₽<span class="cny">9,3 ¥</span
+                          ><span class="bc-moq">MOQ 10 шт</span></span
+                        >
+                        <span class="bc-sku"
+                          >показан вариант: тёплый белый · аккумулятор</span
+                        >
+                        <span class="bc-sep"></span>
+                        <span class="bc-sl">Yiwu Leqi Trading</span>
+                        <span class="bc-cn">义乌市乐奇贸易有限公司</span>
+                        <span class="bc-sl2">посредник · Иу</span>
+                        <span class="bc-sl2"
+                          >3 года на 1688 · рейтинг 4,0 из 5</span
+                        >
+                      </div>
+                      <div class="bc-act">
+                        <span class="b b-xs b-pri">Подробнее</span
+                        ><span class="b b-xs">Все варианты</span>
+                        <span class="b b-xs"
+                          >Запросить отзывы
+                          <span class="cost">· 1 кредит</span></span
+                        >
+                        <span class="b b-xs"
+                          >Ассортимент этого продавца
+                          <span class="cost">· 2 кредита</span></span
+                        >
+                        <span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                      </div>
+                    </div>
+                    <p class="ledge">
+                      ещё 18 карточек ниже · прокрутка внутри панели
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow">Уточните своими словами…</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Заголовок «Результаты поиска — 20 карточек» и кнопку «Ещё 20 · 2
+              кредита» над вкладками. Карточка: фото 120 px, товар и показанный
+              вариант сверху, продавец под чертой.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Открыть «Подробнее» или все варианты — кнопка сразу показывает
+              лоадер, как на первой карточке. Запросить отзывы, ассортимент
+              продавца, страницу на 1688. Слева — разобрать выдачу или собрать
+              шорт-лист, своё — в поле.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Данные</b
+            ><span
+              >Продавец, фабрика или посредник, стаж и рейтинг уже приходят в
+              ответе поиска (<code>shop_info</code>) — лишних вызовов не
+              нужно.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Q3 Варианты ───────────── -->
+  <section class="sec">
+    <div class="spine">Варианты</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Все варианты» грузит SKU одной карточки — по нажатию</h2>
+        <p class="lead">
+          Заранее варианты не грузятся. Нажал «Все варианты» — кнопка показывает
+          лоадер, через пару секунд появляется вкладка с вариантами этой
+          карточки, и панель переходит на неё.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q3</span
+          ><span class="ttl">Нажал «Все варианты» на первой карточке</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="panel solo">
+              <p class="mlbl">1 · сразу после нажатия</p>
+              <div class="tabs">
+                <span class="tab is-on">Карточки · 20</span>
+              </div>
+              <div class="bigcard">
+                <div class="ph bigph">фото товара</div>
+                <div class="bc-b">
+                  <span class="bc-nm"
+                    >Ночник-капибара, силикон, USB, тёплый свет</span
+                  >
+                  <span class="bc-pr"
+                    >148 ₽<span class="cny">12,4 ¥</span
+                    ><span class="bc-moq">MOQ 2 шт</span></span
+                  >
+                  <span class="bc-sku"
+                    >показан вариант: коричневый · с пультом</span
+                  >
+                  <span class="bc-sep"></span>
+                  <span class="bc-sl">Dongguan Weige Electronics</span>
+                  <span class="bc-cn">东莞市唯格电子科技有限公司</span>
+                  <span class="bc-sl2"
+                    >фабрика · 6 лет на 1688 · рейтинг 3,5 из 5</span
+                  >
+                </div>
+                <div class="bc-act">
+                  <span class="b b-xs b-pri is-off2">Подробнее</span>
+                  <span class="b b-xs is-busy"
+                    ><i class="spin"></i>Загружаю варианты…</span
+                  >
+                </div>
+              </div>
+              <span class="sub"
+                >Кнопка неактивна, пока идёт запрос: второе нажатие не отправит
+                второй запрос.</span
+              >
+            </div>
+            <div class="panel solo">
+              <p class="mlbl">2 · варианты пришли</p>
+              <div class="tabs">
+                <span class="tab">Карточки · 20</span
+                ><span class="tab is-on is-new"
+                  >Варианты: ночник-капибара ×</span
+                >
+              </div>
+              <p class="mlbl">4 варианта · цена в ₽ по курсу 11,95 ₽/¥</p>
+              <div class="pcards">
+                <div class="bigcard">
+                  <div class="ph bigph">фото варианта</div>
+                  <div class="bc-b">
+                    <span class="bc-nm">коричневый · с пультом</span>
+                    <span class="bc-pr"
+                      >148 ₽<span class="cny">12,4 ¥</span
+                      ><span class="bc-moq"
+                        >MOQ 2 шт · на всю карточку</span
+                      ></span
+                    >
+                    <span class="bc-sep"></span>
+                    <span class="bc-sl2">Остаток 3 420 шт</span>
+                    <span class="bc-sl2">Объём 12 × 9 × 10 см · 1,1 л</span>
+                    <span class="bc-sl2"
+                      >Вес 0,18 кг
+                      <span class="mtag mtag-fact">с карточки</span></span
+                    >
+                  </div>
+                  <div class="bc-act">
+                    <span class="b b-xs b-pri">Подробнее</span>
+                  </div>
+                </div>
+                <div class="bigcard">
+                  <div class="ph bigph">фото варианта</div>
+                  <div class="bc-b">
+                    <span class="bc-nm">серый · без пульта</span>
+                    <span class="bc-pr"
+                      >129 ₽<span class="cny">10,8 ¥</span
+                      ><span class="bc-moq"
+                        >MOQ 2 шт · на всю карточку</span
+                      ></span
+                    >
+                    <span class="bc-sep"></span>
+                    <span class="bc-sl2"
+                      >Остаток 0 шт
+                      <span class="mtag mtag-est">нет в наличии</span></span
+                    >
+                    <span class="bc-sl2"
+                      >Объём —
+                      <span class="mtag mtag-own"
+                        >продавец не указал</span
+                      ></span
+                    >
+                    <span class="bc-sl2"
+                      >Вес 0,16 кг
+                      <span class="mtag mtag-fact">с карточки</span></span
+                    >
+                  </div>
+                  <div class="bc-act">
+                    <span class="b b-xs b-pri">Подробнее</span>
+                  </div>
+                </div>
+                <p class="ledge">ещё 2 варианта</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Лоадер на нажатой кнопке, затем вкладку «Варианты» этой карточки:
+              фото, цена, остаток, объём, вес. Пустое поле подписано, а не
+              выдумано.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Открыть «Подробнее» с этим вариантом в фокусе. Отзывы
+              запрашиваются с карточки, а не с варианта: на 1688 их пишут на
+              карточку.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Цена</b
+            ><span
+              >1 запрос по карточке, входит в 5 кредитов поиска. Ответ
+              сохраняется: «Подробнее» той же карточки уже не ждёт.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Q4 Подробнее ───────────── -->
+  <section class="sec">
+    <div class="spine">Подробнее</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Подробнее» открывает вкладку со всей связкой</h2>
+        <p class="lead">
+          Нажал — появилась вкладка с именем товара, и панель перешла на неё
+          сама. Внутри всё, что 1688 отдаёт по карточке: фото, ступени цены, все
+          варианты, характеристики, продавец, доставка.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q4</span><span class="ttl">Вкладка «Подробнее»</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo">
+            <div class="tabs">
+              <span class="tab">Карточки · 20</span
+              ><span class="tab is-on is-new">Ночник-капибара ×</span>
+            </div>
+            <div class="det">
+              <div class="det-top">
+                <div class="ph detph">
+                  фото варианта<br />коричневый · с пультом
+                </div>
+                <div class="bc-b">
+                  <span class="bc-nm" style="font-size: 14px"
+                    >Ночник-капибара, силикон, USB, тёплый свет</span
+                  >
+                  <span class="bc-zh">卡皮巴拉硅胶小夜灯 USB充电 暖光</span>
+                  <span class="bc-pr"
+                    >148 ₽<span class="cny">12,4 ¥</span
+                    ><span class="bc-moq">MOQ 2 шт</span></span
+                  >
+                  <span class="bc-sl2"
+                    >2 140 продаж за 30 дней · повторные 18 %</span
+                  >
+                  <div class="brow">
+                    <span class="b b-xs"
+                      >Запросить отзывы
+                      <span class="cost">· 1 кредит</span></span
+                    ><span class="b b-xs"
+                      >Ассортимент этого продавца
+                      <span class="cost">· 2 кредита</span></span
+                    ><span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                  </div>
+                </div>
+              </div>
+              <div class="thumbs">
+                <span class="ph ph-40 is-on">вар.</span
+                ><span class="ph ph-40">1</span><span class="ph ph-40">2</span
+                ><span class="ph ph-40">3</span><span class="ph ph-40">4</span
+                ><span class="ph ph-40">5</span>
+              </div>
+
+              <p class="mlbl">Цена за штуку от партии</p>
+              <div class="ro">
+                <span>2–49 шт <b>148 ₽</b> 12,4 ¥</span
+                ><span>50–499 шт <b>134 ₽</b> 11,2 ¥</span
+                ><span>500+ шт <b>121 ₽</b> 10,1 ¥</span>
+              </div>
+
+              <p class="mlbl">
+                Все варианты · 4 · нажмите строку — её фото станет основным
+              </p>
+              <table class="dt">
+                <tr>
+                  <th>вариант</th>
+                  <th>цена</th>
+                  <th>остаток</th>
+                  <th>вес</th>
+                  <th>объём</th>
+                </tr>
+                <tr class="is-on">
+                  <td><span class="ph ph-24"></span>коричневый · с пультом</td>
+                  <td><b>148 ₽</b> <i>12,4 ¥</i></td>
+                  <td>3 420</td>
+                  <td>0,18 кг</td>
+                  <td>1,1 л</td>
+                </tr>
+                <tr>
+                  <td><span class="ph ph-24"></span>коричневый · без пульта</td>
+                  <td><b>136 ₽</b> <i>11,4 ¥</i></td>
+                  <td>5 100</td>
+                  <td>0,17 кг</td>
+                  <td>1,1 л</td>
+                </tr>
+                <tr>
+                  <td><span class="ph ph-24"></span>серый · с пультом</td>
+                  <td><b>141 ₽</b> <i>11,8 ¥</i></td>
+                  <td>860</td>
+                  <td>0,18 кг</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><span class="ph ph-24"></span>серый · без пульта</td>
+                  <td><b>129 ₽</b> <i>10,8 ¥</i></td>
+                  <td>0</td>
+                  <td>0,16 кг</td>
+                  <td>—</td>
+                </tr>
+              </table>
+
+              <p class="mlbl">Ветка 1688</p>
+              <div class="branch">
+                <span>Дом и сад › Освещение › <b>Ночники</b></span>
+                <span class="b b-pri"
+                  >Рядом по категории
+                  <span class="cost">· 3 кредита за 20 товаров</span></span
+                >
+                <span class="tag tag-est">→ К1</span>
+              </div>
+
+              <p class="mlbl">Характеристики</p>
+              <div class="ro">
+                <span>материал <b>силикон</b></span
+                ><span>питание <b>USB-C, 1200 мА·ч</b></span
+                ><span>свет <b>тёплый, 3 режима</b></span
+                ><span>размер <b>12 × 9 × 10 см</b></span>
+              </div>
+
+              <p class="mlbl">Продавец</p>
+              <div class="ro">
+                <span
+                  ><b>Dongguan Weige Electronics</b>
+                  <span class="bc-cn" style="display: inline"
+                    >东莞市唯格电子科技有限公司</span
+                  ></span
+                ><span>фабрика</span><span>Гуандун, Дунгуань</span
+                ><span>6 лет на 1688</span><span>рейтинг <b>3,5 из 5</b></span
+                ><span>без заводской проверки</span>
+              </div>
+
+              <p class="mlbl">Доставка по Китаю</p>
+              <div class="ro">
+                <span>из Дунгуаня</span><span>отправка за <b>48 ч</b></span>
+              </div>
+              <div class="door">
+                <span class="tag tag-est">предложение Б</span>
+                <span class="b b-pri"
+                  >Глазами байера по этому товару
+                  <span class="cost">· 12 кредитов</span></span
+                >
+                <span class="sub"
+                  >7 поставщиков этого товара, цена на складе в ₽, ~3
+                  минуты</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Новую вкладку с именем товара, панель уже на ней. Вариант, с
+              которого нажали, подсвечен, и его фото — основное. Пока данные
+              грузятся, на кнопке «Подробнее» лоадер.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Нажать строку варианта — его фото станет основным, строка
+              подсветится. Листать фото карточки, запросить отзывы, закрыть
+              вкладку крестиком. Следующее «Подробнее» заменяет вкладку.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Данные</b
+            ><span
+              >Один полный запрос по карточке при первом нажатии. Он же
+              наполняет «Все варианты» этой карточки, второй раз не зовётся.
+              Входит в 5 кредитов поиска.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Q5 Уточнение ───────────── -->
+  <section class="sec">
+    <div class="spine">Уточнение</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Уточнение фильтрует, новый поиск — только с вопросом</h2>
+        <p class="lead">
+          Уточнение своими словами сужает текущую выдачу бесплатно. Если нужен
+          другой товар, агент прямо говорит, что это новый поиск за 5 кредитов,
+          и ждёт нажатия.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q5</span
+          ><span class="ttl">Два уточнения подряд</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="msg-u">только белые и дешевле 150 ₽</div>
+            <div class="msg">
+              Оставил 6 из 20 карточек: белый свет, до 150 ₽. Новый поиск не
+              запускал, кредиты не списаны.
+              <span class="sub">Фильтр виден над карточками справа.</span>
+            </div>
+            <div class="brow">
+              <span class="mchip is-on">белый свет ×</span
+              ><span class="mchip is-on">до 150 ₽ ×</span
+              ><span class="b b-xs b-gh">сбросить</span>
+            </div>
+            <div class="msg-u">а есть такой же, но в форме кота?</div>
+            <div class="msg">
+              Это другой товар — в этой выдаче котов нет. Нужен новый поиск за 5
+              кредитов. Текущие 20 карточек останутся во вкладке.
+            </div>
+            <div class="brow">
+              <span class="b b-pri"
+                >Искать «ночник-кот»
+                <span class="cost">· 5 кредитов</span></span
+              ><span class="b">Остаться в этой выдаче</span>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >На уточнение — сколько осталось и что кредиты не списаны. На
+              новый товар — цену поиска до запуска.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Снять фильтр чипом или запустить новый поиск кнопкой. Сам по себе
+              платный поиск не стартует.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Правило</b
+            ><span
+              >Любое списание сначала называется словами и ценой на кнопке, без
+              отдельного диалога подтверждения.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Q6 Шорт-лист ───────────── -->
+  <section class="sec">
+    <div class="spine">Шорт-лист</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>
+          «Собрать шорт-лист» работает как раньше: кандидаты, варианты, панель
+        </h2>
+        <p class="lead">
+          Кандидат — <b>карточка 1688</b>, по одной лучшей на продавца: 20
+          карточек дают 14 кандидатов. Кнопка находит их и здесь же догружает
+          варианты каждого: заранее их больше никто не грузит. Затем открывается
+          панель «Шорт-лист · Расчёт · Карточки 1688» со
+          <b>всеми</b> кандидатами. Метка «в отчёте» стоит у 5 лучших, человек
+          её переставляет. Отчёт — следующий шаг, с прежним правилом оплаты.
+        </p>
+      </div>
+
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q6.1</span
+          ><span class="ttl"
+            >Нажал «Собрать шорт-лист»: отбор и догрузка вариантов</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app is-xl">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">ночник капибара</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 30 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage has-panel xl">
+                <div class="feed">
+                  <div class="msg">
+                    Нашёл 20 карточек. Результаты открыты справа.
+                    <span class="sub"
+                      >Искал силиконовый ночник в форме капибары с USB и тёплым
+                      светом.</span
+                    >
+                  </div>
+                  <div class="brow">
+                    <span class="b b-off">Давай я разберу выдачу</span
+                    ><span class="b b-off">Собрать шорт-лист</span>
+                  </div>
+                  <div class="msg-u">Собрать шорт-лист</div>
+                  <div class="msg">
+                    Кандидатов 14: по одной лучшей карточке на продавца, по
+                    цене, MOQ, типу продавца и рейтингу.
+                    <span class="sub"
+                      >В 20 карточках 14 продавцов — у шести по 2 карточки, в
+                      кандидаты идёт лучшая.</span
+                    >
+                  </div>
+                  <div class="msg">
+                    <span class="spin"></span> Загружаю варианты кандидатов:
+                    <b>9 из 14</b> карточек…
+                    <span class="sub"
+                      >Без них нет цены варианта, веса и остатка — а значит, и
+                      расчёта на складе.</span
+                    >
+                  </div>
+                  <div class="prog"><i style="width: 64%"></i></div>
+                </div>
+                <div class="panel">
+                  <div class="tabs">
+                    <span class="tab is-on">Карточки · 20</span>
+                  </div>
+                  <div class="rhead">
+                    <b>Результаты поиска — 20 карточек</b>
+                  </div>
+                  <div class="pcards">
+                    <div class="bigcard is-cand">
+                      <div class="ph bigph">фото товара</div>
+                      <div class="bc-b">
+                        <span class="cand"
+                          >кандидат · варианты загружены ✓</span
+                        >
+                        <span class="bc-nm"
+                          >Ночник-капибара, силикон, USB, тёплый свет</span
+                        >
+                        <span class="bc-pr"
+                          >148 ₽<span class="cny">12,4 ¥</span
+                          ><span class="bc-moq">MOQ 2 шт</span></span
+                        >
+                        <span class="bc-sep"></span>
+                        <span class="bc-sl">Dongguan Weige Electronics</span>
+                        <span class="bc-cn">东莞市唯格电子科技有限公司</span>
+                        <span class="bc-sl2"
+                          >фабрика · 6 лет на 1688 · рейтинг 3,5 из 5</span
+                        >
+                      </div>
+                    </div>
+                    <div class="bigcard is-cand">
+                      <div class="ph bigph">фото товара</div>
+                      <div class="bc-b">
+                        <span class="cand"
+                          ><span class="spin"></span> кандидат · загружаю
+                          варианты…</span
+                        >
+                        <span class="bc-nm"
+                          >Ночник-капибара с аккумулятором, 3 режима</span
+                        >
+                        <span class="bc-pr"
+                          >166 ₽<span class="cny">13,9 ¥</span
+                          ><span class="bc-moq">MOQ 5 шт</span></span
+                        >
+                        <span class="bc-sep"></span>
+                        <span class="bc-sl">Ningbo Kaixin Lighting</span>
+                        <span class="bc-cn">宁波凯欣照明有限公司</span>
+                        <span class="bc-sl2"
+                          >фабрика · 9 лет на 1688 · рейтинг 4,5 из 5</span
+                        >
+                      </div>
+                    </div>
+                    <p class="ledge">
+                      ещё 18 карточек ниже · 14 кандидатов отмечены рамкой, 6
+                      карточек — вторые у своих продавцов
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow">Уточните своими словами…</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >В ленте — сколько кандидатов и почему их меньше 20, затем
+              прогресс догрузки вариантов. В панели кандидаты отмечены рамкой, у
+              ещё не загруженных крутится лоадер.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что не происходит</b
+            ><span
+              >Кнопки под выдачей неактивны, пока идёт сбор: второе нажатие не
+              запустит второй сбор. Поле ввода свободно.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Данные</b
+            ><span
+              >1 полный запрос на каждого из 14 кандидатов, кроме уже открытых
+              через «Все варианты» или «Подробнее». Варианты нужны всем: без них
+              у строки нет цены варианта, веса и итога на складе.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q6.2</span
+          ><span class="ttl"
+            >Варианты загружены — панель открылась на «Шорт-листе»</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app is-xl">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">ночник капибара</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 30 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage has-panel xl">
+                <div class="feed">
+                  <div class="msg">
+                    <b>Кандидатов 14, все в панели.</b> В отчёт предлагаю 5 — у
+                    них метка «в отчёте»:
+                  </div>
+                  <ol class="nl">
+                    <li>
+                      Shenzhen Mingliang — белый · USB-C, <b>219 ₽</b> на складе
+                    </li>
+                    <li>
+                      Dongguan Weige — коричневый · с пультом, <b>236 ₽</b>
+                    </li>
+                    <li>
+                      Yiwu Leqi — тёплый белый · аккумулятор, <b>198 ₽</b>
+                    </li>
+                    <li>Ningbo Kaixin — серый · 3 режима, <b>251 ₽</b></li>
+                    <li>Guangzhou Huacai — коричневый · малый, <b>209 ₽</b></li>
+                  </ol>
+                  <div class="msg">
+                    <span class="sub"
+                      >Переставьте метки в панели или скажите словами: «убери
+                      третьего», «возьми вместо него Foshan». Остальные 9
+                      кандидатов никуда не деваются.</span
+                    >
+                  </div>
+                  <div class="brow">
+                    <span class="b b-pri">Собрать отчёт</span>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="tabs">
+                    <span class="tab is-on is-new">Шорт-лист</span
+                    ><span class="tab">Расчёт</span
+                    ><span class="tab">Карточки · 20</span>
+                  </div>
+                  <div class="panel-h">
+                    <b>Шорт-лист</b
+                    ><span class="mono">14 кандидатов · в отчёте 5 из 5</span>
+                  </div>
+                  <p class="mlbl">
+                    Кандидат — карточка, строка — её лучший вариант в наличии ·
+                    справа цена варианта и итог на складе
+                  </p>
+                  <div class="mchips">
+                    <span class="mchip is-on">все · 14</span
+                    ><span class="mchip">в отчёте · 5</span
+                    ><span class="mchip is-off">только фабрики</span
+                    ><span class="mchip is-off">партия до 100</span
+                    ><span class="mchip is-off">убраны вами · 0</span>
+                  </div>
+                  <div class="pcards">
+                    <div class="skurow is-pick">
+                      <div class="ph ph-64">фото варианта</div>
+                      <div class="meta">
+                        <span class="nm">Ночник-капибара, силикон, USB-C</span>
+                        <span class="mlbl"
+                          >белый · USB-C · Shenzhen Mingliang · фабрика</span
+                        >
+                        <div class="brow">
+                          <span class="ck is-on">✓ в отчёте</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                        <span class="skumore" style="padding-left: 0"
+                          >ещё 3 варианта этой карточки</span
+                        >
+                      </div>
+                      <div class="right">
+                        <span class="sup">11,2 ¥ · 134 ₽</span
+                        ><span class="tot">219 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 81</span>
+                      </div>
+                    </div>
+                    <div class="skurow is-pick">
+                      <div class="ph ph-64">фото варианта</div>
+                      <div class="meta">
+                        <span class="nm"
+                          >Ночник-капибара, силикон, USB, тёплый свет</span
+                        >
+                        <span class="mlbl"
+                          >коричневый · с пультом · Dongguan Weige ·
+                          фабрика</span
+                        >
+                        <div class="brow">
+                          <span class="ck is-on">✓ в отчёте</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                        <span class="skumore" style="padding-left: 0"
+                          >ещё 3 варианта этой карточки</span
+                        >
+                      </div>
+                      <div class="right">
+                        <span class="sup">12,4 ¥ · 148 ₽</span
+                        ><span class="tot">236 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 72</span>
+                      </div>
+                    </div>
+                    <div class="skurow is-pick">
+                      <div class="ph ph-64">фото варианта</div>
+                      <div class="meta">
+                        <span class="nm"
+                          >Силиконовый ночник «капибара с апельсином»</span
+                        >
+                        <span class="mlbl"
+                          >тёплый белый · аккумулятор · Yiwu Leqi ·
+                          посредник</span
+                        >
+                        <div class="brow">
+                          <span class="ck is-on">✓ в отчёте</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                        <span class="skumore" style="padding-left: 0"
+                          >ещё 6 вариантов этой карточки</span
+                        >
+                      </div>
+                      <div class="right">
+                        <span class="sup">9,3 ¥ · 111 ₽</span
+                        ><span class="tot">198 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 64</span>
+                      </div>
+                    </div>
+                    <p class="divl">
+                      ещё 2 в отчёте ниже · дальше кандидаты без метки
+                    </p>
+                    <div class="skurow">
+                      <div class="ph ph-64">фото варианта</div>
+                      <div class="meta">
+                        <span class="nm"
+                          >Ночник-капибара с пультом, 16 цветов</span
+                        >
+                        <span class="mlbl"
+                          >розовый · пульт · Foshan Guangyi · фабрика</span
+                        >
+                        <div class="brow">
+                          <span class="ck">+ в отчёт</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                        <span class="skumore" style="padding-left: 0"
+                          >ещё 15 вариантов этой карточки</span
+                        >
+                      </div>
+                      <div class="right">
+                        <span class="sup">10,1 ¥ · 121 ₽</span
+                        ><span class="tot">205 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 58</span>
+                      </div>
+                    </div>
+                    <div class="skurow">
+                      <div class="ph ph-64">фото варианта</div>
+                      <div class="meta">
+                        <span class="nm">Мини-ночник капибара, батарейки</span>
+                        <span class="mlbl"
+                          >коричневый · мини · Jinhua Duoduo · посредник</span
+                        >
+                        <div class="brow">
+                          <span class="ck">+ в отчёт</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                        <span class="skumore" style="padding-left: 0"
+                          >ещё 1 вариант этой карточки</span
+                        >
+                      </div>
+                      <div class="right">
+                        <span class="sup">6,8 ¥ · 81 ₽</span
+                        ><span class="tot">176 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 49</span>
+                      </div>
+                    </div>
+                    <p class="ledge">
+                      ещё 9 кандидатов ниже · порядок по баллу
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow">Уточните своими словами…</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Панель сама перешла на «Шорт-лист»: все 14 кандидатов по баллу, 5
+              из них с меткой «в отчёте» и подсветкой. У каждой строки цена
+              варианта мелко, итог на складе крупно, доверие.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Снять метку и поставить другому — счётчик «в отчёте 5 из 5»
+              обновится на месте. При полном наборе «+ в отчёт» подскажет снять
+              метку с кого-то. Крест убирает продавца в фильтр «убраны вами»,
+              откуда его можно вернуть. Нажать строку — откроется
+              «Расчёт».</span
+            >
+          </div>
+          <div class="cap">
+            <b>Как раньше</b
+            ><span
+              >Те же вкладки и правки, что раньше, с двумя отличиями. Варианты
+              догружаются здесь, а не при поиске. Метки ставятся прямо в
+              «Шорт-листе», а не в пуле «Карточки 1688».</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">Q6.3</span
+          ><span class="ttl"
+            >«Собрать отчёт»: бесплатная версия и полный отчёт</span
+          ><span class="dev">лента и панель</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="feed solo">
+              <div class="msg-u">Собрать отчёт</div>
+              <div class="msg">
+                Бесплатная версия готова: сравнение 5 поставщиков с меткой «в
+                отчёте» на одной странице.
+              </div>
+              <div class="brow">
+                <span class="b b-xs">📄 Шорт-лист (бесплатная версия).pdf</span>
+              </div>
+              <div class="msg">
+                В полном отчёте — все варианты, характеристики и условия каждого
+                поставщика, приложение в Excel.
+                <span class="sub"
+                  >Кредиты спишутся, только когда оба файла будут готовы.</span
+                >
+              </div>
+              <div class="brow">
+                <span class="b b-pri"
+                  >Полный отчёт <span class="cost">· 4 кредита</span></span
+                ><span class="b">Хватит бесплатного</span>
+              </div>
+            </div>
+            <div class="panel solo">
+              <div class="tabs">
+                <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+                ><span class="tab">Карточки · 20</span
+                ><span class="tab is-on is-new">Отчёт</span>
+              </div>
+              <div class="panel-h">
+                <b>Отчёт</b><span class="mono">бесплатная версия</span>
+              </div>
+              <div class="ph" style="width: 100%; height: 220px">
+                страница PDF
+              </div>
+              <div class="brow">
+                <span class="b b-xs">Скачать PDF</span
+                ><span class="b b-xs b-pri"
+                  >Полный отчёт <span class="cost">· 4 кредита</span></span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Бесплатный PDF в ленте и во вкладке «Отчёт», рядом предложение
+              полного отчёта с ценой.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Купить полный отчёт за 4 кредита или остаться на бесплатном.
+              Повторная выгрузка собранного — бесплатно.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Как раньше</b
+            ><span
+              >Правило оплаты не меняется. Догружать варианты к отчёту уже не
+              нужно: они пришли на шаге Q6.1.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Q7 Дверь в сценарий ───────────── -->
+  <section class="sec">
+    <div class="spine">Сценарий</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Где теперь предлагается «Глазами байера»: три предложения</h2>
+        <p class="lead">
+          С экрана результата плашка ушла. Сценарий стоит предлагать там, где
+          человек уже выбрал конкретный товар или получил пользу, и только одной
+          кнопкой с ценой.
+        </p>
+      </div>
+      <div class="props">
+        <div class="prop">
+          <p class="mlbl">предложение А · внутри разбора</p>
+          <div class="feed solo mini">
+            <div class="msg">
+              …Дешевле всех — Yiwu Leqi, 111 ₽, но это посредник. Из фабрик
+              лучшая цена у Dongguan Weige: 148 ₽, MOQ 2 шт.
+              <span class="sub"
+                >Чтобы понять, во что это обойдётся у вас на складе и кто
+                надёжнее, могу разобрать товар глазами байера.</span
+              >
+            </div>
+            <div class="brow">
+              <span class="b b-pri"
+                >Глазами байера <span class="cost">· 12 кредитов</span></span
+              >
+            </div>
+          </div>
+          <p class="pnote">
+            Последней строкой ответа на «Давай я разберу выдачу». Появляется
+            после пользы, а не до неё. Одна кнопка вместо прежних пяти.
+          </p>
+        </div>
+        <div class="prop">
+          <p class="mlbl">предложение Б · во вкладке «Подробнее»</p>
+          <div class="panel solo mini">
+            <div class="door" style="border: 0; padding: 0">
+              <span class="b b-pri"
+                >Глазами байера по этому товару
+                <span class="cost">· 12 кредитов</span></span
+              >
+              <span class="sub"
+                >7 поставщиков этого товара, цена на складе в ₽, ~3 минуты</span
+              >
+            </div>
+          </div>
+          <p class="pnote">
+            Внизу вкладки, см. Q4. Человек уже выбрал товар — ровно то, что
+            нужно сценарию на входе. Сценарий стартует с этой карточкой, без
+            вопроса «пришлите фото».
+          </p>
+        </div>
+        <div class="prop">
+          <p class="mlbl">предложение В · после шорт-листа (Q6.2)</p>
+          <div class="feed solo mini">
+            <div class="msg">
+              Полный отчёт готов.
+              <span class="sub"
+                >Следующий шаг — цена на складе в ₽ по каждому из 7
+                поставщиков.</span
+              >
+            </div>
+            <div class="brow">
+              <span class="b b-pri"
+                >Посчитать глазами байера
+                <span class="cost">· 12 кредитов</span></span
+              >
+            </div>
+          </div>
+          <p class="pnote">
+            В ряду «что дальше» после отчёта. Человек уже заплатил и сравнивает
+            поставщиков — расчёт продолжает его работу.
+          </p>
+        </div>
+      </div>
+      <p class="note">
+        <b>Рекомендация: Б и А вместе.</b> Б — постоянное место на объекте,
+        которое не засоряет ленту. А — одна фраза в разговоре для тех, кто
+        вкладку не открывал. В можно добавить позже, когда будет видно, сколько
+        людей доходит до полного отчёта.
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────── Категория ───────────── -->
+  <section class="sec">
+    <div class="spine">Категория</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>
+          «Рядом по категории»: две кнопки на основных экранах и куда они ведут
+        </h2>
+        <p class="lead">
+          Это не фильтр, а отдельная задача: другая ветка дерева 1688, 3 кредита
+          за 20 товаров. Поэтому из ряда фильтров она ушла, а вход в неё —
+          кнопкой с ценой в двух местах. Обе кнопки открывают
+          <b>новый чат</b> «Рядом по категории», как сейчас: выдача по ночникам
+          остаётся своим чатом в левой панели.
+        </p>
+      </div>
+
+      <div class="flow">
+        <div class="fstep">
+          <span class="fl">Q2 · Результат</span
+          ><b>строка под заголовком выдачи</b
+          ><span
+            >«16 из 20 — в ветке Ночники» ·
+            <i>Соседние ветки · 3 кредита</i></span
+          >
+        </div>
+        <div class="farr">→</div>
+        <div class="fstep is-to">
+          <span class="fl">К1 · новый чат</span><b>«Рядом по категории»</b
+          ><span
+            >ветка Ночники уже выбрана, соседние ветки чипами, 20 товаров ветки
+            справа</span
+          >
+        </div>
+        <div class="farr">←</div>
+        <div class="fstep">
+          <span class="fl">Q4 · Подробнее</span><b>строка «Ветка 1688»</b
+          ><span
+            >«Дом и сад › Освещение › Ночники» ·
+            <i>Рядом по категории · 3 кредита</i></span
+          >
+        </div>
+      </div>
+      <p class="note">
+        Разница двух входов — какая ветка приезжает в новый чат. Из Q2 — ветка,
+        где больше всего карточек выдачи. Из Q4 — ветка именно этого товара: у
+        карточки «детский светильник» в той же выдаче это будет «Детские
+        светильники».
+      </p>
+
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">К1</span
+          ><span class="ttl"
+            >Нажал «Соседние ветки» в Q2 или «Рядом по категории» в Q4</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app is-xl">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">рядом: ночники</div>
+                <div class="side-row">ночник капибара</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 27 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage has-panel xl">
+                <div class="feed">
+                  <div class="msg">
+                    <span class="sub"
+                      >Из чата «ночник капибара» ·
+                      <span style="color: var(--m-acc)"
+                        >← вернуться к выдаче</span
+                      ></span
+                    >
+                  </div>
+                  <div class="msg">
+                    Ваша ветка: <b>Дом и сад › Освещение › Ночники</b>. Рядом с
+                    ней — 6 соседних веток. Товары вашей ветки открыл справа.
+                  </div>
+                  <div class="mchips">
+                    <span class="mchip is-on">ночники · ваша</span>
+                    <span class="mchip">детские светильники</span>
+                    <span class="mchip">светодиодные лампы</span>
+                    <span class="mchip">проекторы звёздного неба</span>
+                    <span class="mchip">гирлянды</span>
+                    <span class="mchip">декоративные светильники</span>
+                    <span class="mchip">настольные лампы</span>
+                  </div>
+                  <div class="msg">
+                    <span class="sub"
+                      >Каждая ветка — 20 товаров по продажам за 30 дней · 3
+                      кредита. Нажали чип — товары справа сменятся, лента не
+                      растёт.</span
+                    >
+                  </div>
+                  <div class="brow">
+                    <span class="b b-pri">Следить за категорией</span
+                    ><span class="b">Собрать шорт-лист</span>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="tabs">
+                    <span class="tab is-on">Ветка · 20</span>
+                  </div>
+                  <div class="rhead">
+                    <b>Ветка «Ночники» — 20 товаров</b>
+                    <div class="brow">
+                      <span class="sub">по продажам за 30 дней</span
+                      ><span class="b b-xs"
+                        >Ещё 20 товаров
+                        <span class="cost">· 3 кредита</span></span
+                      >
+                    </div>
+                  </div>
+                  <div class="mchips">
+                    <span class="mchip is-off">только фабрики</span
+                    ><span class="mchip is-off">партия до 100</span
+                    ><span class="mchip is-off">дешевле медианы</span>
+                  </div>
+                  <div class="pcards">
+                    <div class="bigcard">
+                      <div class="ph bigph">фото товара</div>
+                      <div class="bc-b">
+                        <span class="bc-nm"
+                          >Проектор-ночник «звёздное небо», USB</span
+                        >
+                        <span class="bc-pr"
+                          >227 ₽<span class="cny">19,0 ¥</span
+                          ><span class="bc-moq">MOQ 2 шт</span></span
+                        >
+                        <span class="bc-sku"
+                          ><span
+                            class="mchip is-hit"
+                            style="padding: 0 6px; font-size: 10px"
+                            >хит</span
+                          >
+                          8 400 продаж за 30 дней</span
+                        >
+                        <span class="bc-sep"></span>
+                        <span class="bc-sl">Shenzhen Starlight Tech</span>
+                        <span class="bc-cn">深圳市星光科技有限公司</span>
+                        <span class="bc-sl2"
+                          >фабрика · 7 лет на 1688 · рейтинг 4,5 из 5</span
+                        >
+                      </div>
+                      <div class="bc-act">
+                        <span class="b b-xs b-pri">Подробнее</span
+                        ><span class="b b-xs">Все варианты</span>
+                        <span class="b b-xs"
+                          >Запросить отзывы
+                          <span class="cost">· 1 кредит</span></span
+                        >
+                        <span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                      </div>
+                    </div>
+                    <p class="ledge">ещё 19 товаров ниже</p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow">Уточните своими словами…</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Новый чат «рядом: ночники» над прежним в левой панели. В ленте
+              своя ветка и 6 соседних чипами, справа 20 товаров ветки в тех же
+              крупных карточках.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Нажать чип соседней ветки, подписаться на категорию, собрать
+              шорт-лист по ветке. Вернуться к выдаче — строкой вверху ленты или
+              чатом в левой панели.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Цена</b
+            ><span
+              >3 кредита за 20 товаров ветки, списание после показа. Выбор ветки
+              не тарифицируется. Цена стоит на обеих кнопках входа до
+              нажатия.</span
+            >
+          </div>
+        </div>
+      </div>
+      <p class="note">
+        <b>Можно позже — третий вход.</b> Строкой в ответе «Давай я разберу
+        выдачу», когда карточки разошлись по 2–3 веткам. <b>Для кода:</b> сейчас
+        дверь передаёт в новый чат текст запроса, и ветка подбирается заново.
+        Чтобы вход из Q4 открывал ветку именно этого товара, дверь должна
+        передавать номер ветки карточки.
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────── Решения ───────────── -->
+  <section class="sec">
+    <div class="spine">Решения</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Что решено 01.10 и что это значит для кода</h2>
+      </div>
+      <ol class="qs">
+        <li>
+          <b>Две кнопки в ленте.</b> «Давай я разберу выдачу» и «Собрать
+          шорт-лист». Свой вопрос человек пишет в поле.
+        </li>
+        <li>
+          <b>5 кредитов на обе плашки.</b> «Найти по фото» и «Описать товар»
+          стоят одинаково. В коде сейчас 2 кредита за страницу поиска.
+        </li>
+        <li>
+          <b>Варианты — по нажатию.</b> «Все варианты» и «Подробнее» грузят одну
+          карточку, кнопка показывает лоадер и неактивна до ответа. Ответ общий
+          для обеих кнопок.
+        </li>
+        <li>
+          <b>Ассортимент продавца — 2 кредита.</b> Агентский запрос витрины в
+          коде стоит 1 кредит, его надо поднять до 2, чтобы обе двери стоили
+          одинаково.
+        </li>
+        <li>
+          <b>«Собрать шорт-лист» работает как раньше.</b> Находит кандидатов, по
+          одной карточке на продавца, здесь же догружает их варианты и открывает
+          панель «Шорт-лист · Расчёт · Карточки 1688». Во вкладке все кандидаты,
+          метка «в отчёте» у 5, человек её переставляет. Отчёт — следующим
+          шагом: бесплатная версия, полный за 4 кредита.
+        </li>
+        <li>
+          <b>Отзывы — с карточки.</b> Кнопка «Запросить отзывы · 1 кредит» на
+          карточке и во вкладке «Подробнее», на варианте её нет.
+        </li>
+        <li>
+          <b>«Подробнее».</b> Одна вкладка с именем товара, панель переходит на
+          неё. Вариант, с которого нажали, подсвечен, его фото основное. Нажатие
+          на строку варианта делает основным его фото.
+        </li>
+        <li>
+          <b>Вход в сценарий.</b> Три предложения выше, рекомендация — Б и А.
+          Ждёт вашего выбора.
+        </li>
+        <li>
+          <b>«Рядом по категории» — не фильтр.</b> Чип убран из ряда фильтров.
+          Вход — двумя кнопками с ценой: «Соседние ветки» под заголовком выдачи
+          (Q2) и «Рядом по категории» в строке ветки во вкладке «Подробнее»
+          (Q4). Обе открывают новый чат К1.
+        </li>
+      </ol>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    function apply(mode) {
+      root.setAttribute('data-mock', mode);
+      root.setAttribute('data-theme', mode);
+      document.querySelectorAll('.themesw button').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.set === mode));
+      });
+      try {
+        localStorage.setItem('qs-mock-theme', mode);
+      } catch (e) {}
+    }
+    var start =
+      location.hash === '#light'
+        ? 'light'
+        : location.hash === '#dark'
+          ? 'dark'
+          : null;
+    if (!start) {
+      try {
+        start = localStorage.getItem('qs-mock-theme');
+      } catch (e) {}
+    }
+    apply(start || 'light');
+    document.querySelectorAll('.themesw button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        apply(b.dataset.set);
+      });
+    });
+  })();
+</script>

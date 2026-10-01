@@ -27,12 +27,15 @@ code {
     --popover-foreground: 0 0% 5%;
     --primary: 340 92% 52%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Neutral, like the rest of the palette: these two and the accent's
+       foreground were shadcn's slate template, and a filled secondary
+       button came out pale blue among the greys. */
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 90%;
     --muted-foreground: 0 0% 36%;
     --accent: 0 0% 95%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
     --border: 0 0% 90%;
@@ -63,11 +66,11 @@ code {
     --primary: 340 92% 52%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 19%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary-foreground: 0 0% 98%;
     --muted: 0 1% 26%;
     --muted-foreground: 0 0% 71%;
     --accent: 0 0% 26%;
-    --accent-foreground: 210 40% 98%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
     --border: 0 1% 26%;

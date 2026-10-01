@@ -6,6 +6,13 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx,js,jsx}'],
   theme: {
     extend: {
+      // The theme's own families, not Tailwind's stacks: a host that sets
+      // --font-sans / --font-mono in public/theme.json would otherwise get
+      // its body text in its font and every `font-mono` label in Menlo.
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)']
+      },
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
@@ -145,8 +152,52 @@ export default {
     // kept its pointer only while some app component used the class.
     {
       pattern:
-        /^(cursor-(?:pointer|default|not-allowed|wait)|select-none|border-(?:solid|dashed|dotted)|hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
+        /^(cursor-(?:pointer|default|not-allowed|wait|progress)|select-none|border-(?:solid|dashed|dotted)|hidden|inline|block|inline-block|flex|inline-flex|grid|inline-grid|static|relative|absolute|fixed|sticky|(?:top|right|bottom|left|inset|inset-x|inset-y)-(?:0|auto)|z-(?:0|10|20|30|40|50|auto)|divide-[xy](?:-(?:0|2|4|8|reverse))?|object-(?:contain|cover|fill|none|scale-down|center|top|bottom|left|right)|tabular-nums|line-through|underline|no-underline|align-(?:top|middle|bottom|baseline))$/
     },
+    // A host card's busy and selected states, and a full-width row in its
+    // grid. `animate-spin` is what turns lucide's `LoaderCircle` into a
+    // loader on a button that is waiting for its action; `ring-*` and
+    // `outline-primary` mark the row a host has picked without moving its
+    // layout the way a thicker border would; `aspect-square` keeps a photo
+    // box square whatever the photo is.
+    {
+      pattern:
+        /^(animate-spin|[hw]-px|aspect-(?:square|video|auto)|col-span-full|ring(?:-(?:0|1|2|4))?|ring-(?:primary|border)(?:\/(?:20|40|60))?|ring-offset-(?:0|1|2)|outline-(?:none|primary)|size-(?:1|1\.5|2|3|4|5|6|8|10|12|16|20|24|32))$/
+    },
+    // Arbitrary values cannot come from a pattern -- Tailwind matches those
+    // against the classes the theme generates, and `[120px]` is not one of
+    // them -- so the photo-beside-text card is spelled out. There is no
+    // `w-30` in Tailwind 3's scale (it jumps from 28 to 32); 120px is
+    // `w-[120px]`.
+    'grid-cols-[120px_minmax(0,1fr)]',
+    'grid-cols-[180px_minmax(0,1fr)]',
+    'w-[120px]',
+    'h-[120px]',
+    'size-[120px]',
+    'w-[180px]',
+    'h-[180px]',
+    'size-[180px]',
+    // The mockup's own type scale and the pill's padding, which sit between
+    // Tailwind's steps (`text-xs` is 12px, `py-0.5` is 2px).
+    'text-[10px]',
+    'text-[11px]',
+    'text-[13px]',
+    'text-[15px]',
+    'py-[3px]',
+    'rounded-[7px]',
+    // The filter chip of the mockup (.mchip: 11.5px, padding 2px 9px) and
+    // the soft primary line a chosen card or chip is framed by.
+    'text-[11.5px]',
+    'px-[9px]',
+    'py-[2px]',
+    'border-primary/45',
+    'bg-primary/5',
+    'bg-card',
+    'transition-colors',
+    { pattern: /^bg-primary\/10$/, variants: ['dark'] },
+    // A card casts a shadow only on a light page; in the dark one it reads
+    // as a smudge. `dark:` cannot be a plain string entry, hence the pattern.
+    { pattern: /^shadow-(?:none|sm)$/, variants: ['dark'] },
     // The same layout vocabulary at the two breakpoints a host element can
     // actually design for. Deliberately a subset of the group above: every
     // pattern listed here ships three times, and a phone layout needs the

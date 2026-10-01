@@ -228,6 +228,27 @@ export const elementSidebarState = atom<IElementSidebarState>({
 });
 
 /**
+ * What each slot of the panel held the last time the user had it in front
+ * of them, as a content signature, and the session that was in.
+ *
+ * Client-only and never on the wire: "this tab changed while you were on
+ * another one" is a fact about one viewer's eyes, not about the model the
+ * server owns. It lives in an atom rather than in the panel component
+ * because the panel is unmounted while it is put away, and a slot refilled
+ * behind a hidden panel is exactly the one whose tab should say so when it
+ * comes back. Written by `useFreshSlots` only.
+ */
+export interface ElementSidebarSeen {
+  session: string | undefined;
+  slots: Record<string, string>;
+}
+
+export const elementSidebarSeenState = atom<ElementSidebarSeen>({
+  key: 'ElementSidebarSeen',
+  default: { session: undefined, slots: {} }
+});
+
+/**
  * The thread the session is actually in, as opposed to the one it was
  * opened to resume.
  *

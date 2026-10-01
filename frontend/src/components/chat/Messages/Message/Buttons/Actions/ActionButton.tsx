@@ -110,7 +110,10 @@ const ActionButton = ({ action }: ActionProps) => {
     <Button
       id={action.id}
       onClick={handleClick}
-      size="sm"
+      // The commands are sized by their text (`compact`, the mockup's `.b`),
+      // not by shadcn's 36px box: a two-word label floated in it. A chip
+      // keeps `sm` under its own classes, which already say all of it.
+      size={variant === 'chip' ? 'sm' : 'compact'}
       variant={BUTTON_VARIANT[variant]}
       className={cn(
         VARIANT_CLASS[variant],

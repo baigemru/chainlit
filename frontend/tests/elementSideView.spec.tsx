@@ -41,8 +41,13 @@ vi.mock('@/components/Elements', async () => {
 
 const mockDispatch = vi.fn();
 let state: IElementSidebarState;
+// What `useFreshSlots` would answer. Its rule -- what counts as "changed
+// while you were elsewhere" -- is the package's and is tested there; here
+// it is only what the strip draws for it.
+let fresh: ReadonlySet<string> = new Set();
 vi.mock('@chainlit/react-client', () => ({
-  useElementSidebar: () => ({ state, dispatch: mockDispatch })
+  useElementSidebar: () => ({ state, dispatch: mockDispatch }),
+  useFreshSlots: () => fresh
 }));
 
 const element = (id: string): IMessageElement =>
@@ -75,6 +80,7 @@ const body = (id: string) =>
 beforeEach(() => {
   vi.clearAllMocks();
   mounts.length = 0;
+  fresh = new Set();
   mockIsMobile.mockReturnValue(false);
   state = { slots: [slot('cards')], active: 'cards', visible: true, rev: 1 };
 });
@@ -255,10 +261,12 @@ describe('ElementSideView', () => {
       'board',
       'notes'
     ]);
-    // The header is back too, because it is what carries the strip.
-    expect(document.querySelector('#side-view-title')!.textContent).toContain(
-      'board'
-    );
+    // The header is back too, because it is what carries the strip -- and
+    // with it the way out.
+    expect(
+      document.querySelector('#side-view-title #side-view-tabs')
+    ).not.toBeNull();
+    expect(document.querySelector('#side-view-title button')).not.toBeNull();
   });
 
   it('hides rather than destroys when the back arrow is used', () => {
@@ -313,5 +321,124 @@ describe('ElementSideView', () => {
     expect(sheet).not.toBeNull();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(mockDispatch).toHaveBeenCalledWith({ op: 'hide' });
+  });
+});
+
+describe('the tab strip', () => {
+  const two = (): IElementSidebarState => ({
+    slots: [slot('cards'), slot('report'), slot('pinned', { closable: false })],
+    active: 'cards',
+    visible: true,
+    rev: 1
+  });
+  const pill = (id: string) =>
+    document
+      .querySelector(`#side-view-tabs [role="tab"][id$="-${id}"]`)!
+      .closest('span.rounded-full') as HTMLElement;
+
+  it('draws each tab as a pill, the active one outlined in the accent', () => {
+    state = two();
+
+    mount();
+
+    expect(pill('cards').className).toContain('border-primary/45');
+    expect(pill('report').className).not.toContain('border-primary/45');
+    expect(pill('report').className).toContain('border-border');
+  });
+
+  it('puts the close button inside the pill, beside the trigger', () => {
+    // Inside the frame, so it reads as part of the tab; beside the trigger,
+    // never in it, for the reason `CloseSlot` gives.
+    state = two();
+
+    mount();
+
+    const closer = document.querySelector('[data-close-slot="report"]')!;
+    expect(closer.parentElement).toBe(pill('report'));
+    expect(closer.closest('[role="tab"]')).toBeNull();
+    expect(pill('pinned').querySelector('[data-close-slot]')).toBeNull();
+  });
+
+  it('marks a tab that changed while another was on screen', () => {
+    state = two();
+    fresh = new Set(['report']);
+
+    mount();
+
+    expect(pill('report').querySelector('[data-new-dot]')).not.toBeNull();
+    expect(pill('cards').querySelector('[data-new-dot]')).toBeNull();
+    // A decoration, not a word: the tab's name is still just its name.
+    const tab = pill('report').querySelector('[role="tab"]')!;
+    expect(tab.textContent).toBe('report');
+    expect(
+      pill('report')
+        .querySelector('[data-new-dot]')!
+        .getAttribute('aria-hidden')
+    ).toBe('true');
+  });
+
+  it('drops the title over a strip and keeps the back arrow on its line', () => {
+    // The title would only repeat the active tab. What must not go with it
+    // is the way to put the panel away.
+    state = two();
+
+    mount();
+
+    const header = document.querySelector('#side-view-title')!;
+    const tabs = document.querySelector('#side-view-tabs')!;
+    // Nothing in the header but the arrow and the strip.
+    expect(header.textContent).toBe(tabs.textContent);
+    const arrow = header.querySelector('button[aria-label="Hide panel"]')!;
+    expect(arrow.parentElement).toBe(tabs.parentElement);
+    fireEvent.click(arrow);
+    expect(mockDispatch).toHaveBeenCalledWith({ op: 'hide' });
+  });
+
+  it('keeps the strip to one line that scrolls sideways', () => {
+    state = two();
+
+    mount();
+
+    const classes = document.querySelector('#side-view-tabs')!.className;
+    expect(classes).toContain('flex-nowrap');
+    expect(classes).toContain('overflow-x-auto');
+    expect(classes).not.toContain('flex-wrap ');
+  });
+
+  it('keeps the title for a screen reader only on a phone with a strip', () => {
+    // The sheet is a dialog and needs a title; the strip already shows it.
+    mockIsMobile.mockReturnValue(true);
+    state = two();
+
+    mount();
+
+    expect(document.querySelector('#side-view-title')!.className).toContain(
+      'sr-only'
+    );
+    expect(document.querySelector('#side-view-tabs')).not.toBeNull();
+  });
+
+  it('draws keyboard focus once, round the pill, and never inside it', () => {
+    // The trigger's own ring sat inside the pill, smaller than it, and
+    // doubled the active tab's red outline.
+    state = two();
+
+    mount();
+
+    const tab = pill('report').querySelector('[role="tab"]')!;
+    const own = tab.className.split(/\s+/);
+    expect(own).toContain('focus-visible:ring-0');
+    expect(own).not.toContain('focus-visible:ring-2');
+    expect(pill('report').className).toContain(
+      'has-[[role=tab]:focus-visible]:ring-1'
+    );
+  });
+
+  it('marks no tab when nothing changed behind the user', () => {
+    state = two();
+
+    mount();
+
+    expect(document.querySelector('[data-new-dot]')).toBeNull();
   });
 });

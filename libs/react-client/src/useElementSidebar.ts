@@ -1,5 +1,11 @@
-import { useRecoilCallback, useRecoilValue } from 'recoil';
-import { elementSidebarState } from 'src/state';
+import { useEffect, useMemo } from 'react';
+import { useRecoilCallback, useRecoilState, useRecoilValue } from 'recoil';
+import {
+  ElementSidebarSeen,
+  elementSidebarSeenState,
+  elementSidebarState,
+  sessionIdState
+} from 'src/state';
 import { IElementSidebarState, IMessageElement } from 'src/types';
 
 import { useChatTransport } from './context';
@@ -135,6 +141,107 @@ const useElementSidebar = () => {
   return { state, dispatch };
 };
 
+/**
+ * The tab a frame puts in front of the user — the same fallback the panel
+ * draws, so "active" means one thing to the strip and to the dot beside it.
+ */
+const activeSlot = (state: IElementSidebarState): string | undefined =>
+  state.active ?? state.slots[0]?.id;
+
+/**
+ * What a slot holds, as one comparable string.
+ *
+ * By content, not by reference: a reconnect replays the whole panel as fresh
+ * `element.upsert`s, so every element object is new while not one of them
+ * changed, and an identity check would light up every inactive tab after a
+ * dropped connection.
+ */
+const signature = (slot: IElementSidebarState['slots'][number]): string =>
+  JSON.stringify(slot.elements);
+
+/**
+ * Record what the user has now seen.
+ *
+ * The active slot is seen as it is. An inactive one keeps whatever it held
+ * when it was last seen; one that *arrives* behind another tab is recorded
+ * as never seen. A new session — and the first slots of an empty panel,
+ * which on a reload is the whole replayed panel at once — is a baseline:
+ * nothing in it is news to anybody.
+ *
+ * Returns `seen` itself when nothing moved, so the effect that calls it
+ * settles instead of writing the atom on every render.
+ */
+export const noteSeen = (
+  seen: ElementSidebarSeen,
+  state: IElementSidebarState,
+  session: string | undefined
+): ElementSidebarSeen => {
+  const active = activeSlot(state);
+  const baseline =
+    seen.session !== session || Object.keys(seen.slots).length === 0;
+  const slots: Record<string, string> = {};
+  for (const slot of state.slots) {
+    slots[slot.id] =
+      baseline || slot.id === active
+        ? signature(slot)
+        : // `''` never equals a signature, which is always a JSON array.
+          (seen.slots[slot.id] ?? '');
+  }
+  const unchanged =
+    seen.session === session &&
+    Object.keys(slots).length === Object.keys(seen.slots).length &&
+    Object.entries(slots).every(([id, sig]) => seen.slots[id] === sig);
+  return unchanged ? seen : { session, slots };
+};
+
+/**
+ * The inactive slots whose contents changed since the user last saw them.
+ * The active one never is: being looked at is what clears it.
+ */
+export const freshSlots = (
+  seen: ElementSidebarSeen,
+  state: IElementSidebarState,
+  session: string | undefined
+): ReadonlySet<string> => {
+  // A record from another session describes another panel; until the
+  // effect has replaced it, it says nothing about this one.
+  if (seen.session !== session) return new Set();
+  const active = activeSlot(state);
+  return new Set(
+    state.slots
+      .filter(
+        (slot) =>
+          slot.id !== active &&
+          slot.id in seen.slots &&
+          seen.slots[slot.id] !== signature(slot)
+      )
+      .map((slot) => slot.id)
+  );
+};
+
+/**
+ * The tabs to mark as "changed while you were elsewhere".
+ *
+ * Client-side by design: the server already says everything this needs —
+ * every refill of a slot is a `sidebar.state` naming its elements, sent
+ * after their upserts — and who has looked at what is not the server's
+ * business. Call it from one place, the panel; it writes the record.
+ */
+const useFreshSlots = (): ReadonlySet<string> => {
+  const state = useRecoilValue(elementSidebarState);
+  const session = useRecoilValue(sessionIdState);
+  const [seen, setSeen] = useRecoilState(elementSidebarSeenState);
+
+  useEffect(() => {
+    setSeen((previous) => noteSeen(previous, state, session));
+  }, [state, session, setSeen]);
+
+  return useMemo(
+    () => freshSlots(seen, state, session),
+    [seen, state, session]
+  );
+};
+
 const send = (
   transport: ReturnType<typeof useChatTransport>,
   operation: SidebarOperation,
@@ -163,4 +270,4 @@ const send = (
   }
 };
 
-export { useElementSidebar };
+export { useElementSidebar, useFreshSlots };

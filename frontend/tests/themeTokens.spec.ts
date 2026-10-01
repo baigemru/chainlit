@@ -44,6 +44,15 @@ describe('theme tokens', () => {
     }
   });
 
+  it.each([':root', '.dark'])(
+    'gives the side panel its own surface, equal to --card in %s',
+    (selector) => {
+      // A host darkens --panel in its theme.json so white cards stand off
+      // the panel; by default nothing changes.
+      expect(token(selector, 'panel')).toBe(token(selector, 'card'));
+    }
+  );
+
   it('keeps a filled secondary button readable', () => {
     // Lightness of fill against text, in both themes: neutralising the hue
     // must not have moved either end toward the other.

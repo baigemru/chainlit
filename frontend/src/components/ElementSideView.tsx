@@ -264,7 +264,7 @@ export default function ElementSideView() {
             product card squeezed against a 175px image on a phone. */}
         <SheetContent
           className={cn(
-            'md:hidden flex flex-col w-[95vw] sm:max-w-[95vw]',
+            'md:hidden flex flex-col w-[95vw] sm:max-w-[95vw] bg-panel',
             chromeless && 'p-0'
           )}
         >
@@ -328,7 +328,7 @@ export default function ElementSideView() {
         }`}
       >
         <aside className="relative flex-grow overflow-auto mr-4 mb-4">
-          <Card className="overflow-auto h-full relative flex flex-col">
+          <Card className="overflow-auto h-full relative flex flex-col bg-panel">
             <Tabs
               value={active}
               onValueChange={onValueChange}

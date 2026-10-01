@@ -112,6 +112,22 @@ describe('ElementSideView', () => {
     ]);
   });
 
+  it('paints the panel with its own surface token', () => {
+    // --panel, not --card: the elements inside are cards themselves, and a
+    // host that tones the panel down must not tone them down with it.
+    state = {
+      slots: [slot('cards'), slot('report')],
+      active: 'cards',
+      visible: true,
+      rev: 1
+    };
+
+    mount();
+
+    const strip = document.querySelector('#side-view-tabs');
+    expect(strip?.closest('.bg-panel')).not.toBeNull();
+  });
+
   it('keeps the inactive slot mounted and merely hidden', () => {
     // The whole point. A conditional render here would remount whatever the
     // inactive tab is holding every time the user looked away from it.

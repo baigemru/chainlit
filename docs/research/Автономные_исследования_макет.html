@@ -2663,6 +2663,38 @@
     color: var(--m-dim);
     padding-left: 1.05em;
   }
+
+  /* Лоадер ленты: шиммер текста, как .loading-shimmer форка (03.10). */
+  .shim {
+    background: linear-gradient(
+      90deg,
+      var(--m-faint) 0%,
+      var(--m-text) 50%,
+      var(--m-faint) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation: shim 4s linear infinite;
+  }
+  @keyframes shim {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shim {
+      animation: none;
+      background: none;
+      color: var(--m-dim);
+      -webkit-text-fill-color: var(--m-dim);
+    }
+  }
 </style>
 <div class="page">
   <header class="hero">
@@ -4591,11 +4623,17 @@
           Повторное скачивание бесплатно. Если шорт-лист потом пересобран, новая
           выгрузка снова стоит 4 кредита. Это вопрос к вам, см. ниже.
         </p>
+        <p class="note">
+          03.10: файлы в ленту больше не приходят — полная версия уходит во
+          вкладку «Отчёт», в ленте строка-итог и кнопки. Экран ниже заменён
+          <a href="#r11">R11</a> (R11.3–R11.5).
+        </p>
       </div>
       <div class="shot">
         <div class="shot-eye">
           <span class="ltr">R9</span
           ><span class="ttl">После «Купить полный шорт-лист · 4 кредита»</span
+          ><span class="tag tag-est">заменено R11.5</span
           ><span class="dev">лента слева</span>
         </div>
         <div class="stand scroller">
@@ -4740,6 +4778,439 @@
           </div>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R11 Шорт-лист, отчёт и лоадеры (03.10) ───────────── -->
+  <section class="sec" id="r11">
+    <div class="spine">Общее</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Шорт-лист, отчёт и лоадеры — общие для всех сценариев</h2>
+        <p class="lead">
+          Утверждено 03.10. Пока система работает, внизу ленты всегда стоит один
+          лоадер, как везде в чате: «⏳ …» с шиммером. Шиммер горит только у
+          последнего сообщения, поэтому между лоадером и следующим сообщением
+          ничего не встаёт. Полная версия шорт-листа уходит в панель, во вкладку
+          «Отчёт». В ленте после покупки остаются строка-итог и кнопки. Те же
+          элементы и тот же порядок вкладок получает быстрый поиск (<a
+            href="Быстрый_поиск_макет.html#q8"
+            >Q8</a
+          >).
+        </p>
+      </div>
+
+      <div class="shot" id="r11-1">
+        <div class="shot-eye">
+          <span class="ltr">R11.1</span
+          ><span class="ttl">Шорт-лист лёг в панель, итог ещё пишется</span
+          ><span class="dev">лента и панель</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="feed solo">
+              <div class="rp-h">
+                <span class="st st-run">работает</span
+                ><span class="mlbl"
+                  >этап 6 из 6 · Формирую шорт-лист и итоговую выборку</span
+                >
+              </div>
+              <p class="ledge">выше — «Понял: …» и план исследования</p>
+              <div class="msg">
+                <span class="shim">⏳ Разбираю кандидатов и пишу итог…</span>
+              </div>
+            </div>
+            <div class="panel solo">
+              <div class="tabs">
+                <span class="tab is-on is-new">Шорт-лист</span
+                ><span class="tab">Расчёт</span
+                ><span class="tab">Выборка агента · 72</span
+                ><span class="tab">Поставщики · 41</span>
+              </div>
+              <div class="panel-h">
+                <b>Шорт-лист</b
+                ><span class="mono">24 кандидата · в шорт-листе 7</span>
+              </div>
+              <div class="pcards">
+                <div class="skurow is-pick">
+                  <div class="ph ph-64">фото SKU</div>
+                  <div class="meta">
+                    <span class="nm">Ночник-капибара, силикон, USB-C</span>
+                    <span class="mlbl"
+                      >белый · USB-C · Shenzhen Mingliang · фабрика · MOQ
+                      2</span
+                    ><span class="bc-zh"
+                      >深圳市明亮科技有限公司 (Shenzhen Mingliang Keji)</span
+                    >
+                    <span class="why" style="grid-column: auto"
+                      >надёжная: фабрика 8 лет, цена на 6 % ниже медианы</span
+                    >
+                    <div class="brow">
+                      <span class="ck is-on">✓ в шорт-листе</span
+                      ><span class="ck">Подробнее</span
+                      ><span class="ck">Все варианты · 4</span
+                      ><span class="ck is-x">×</span>
+                    </div>
+                  </div>
+                  <div class="right">
+                    <span class="sup">11,2 ¥ · 134 ₽</span
+                    ><span class="tot">219 ₽</span
+                    ><span class="mtag mtag-est">оценка</span>
+                  </div>
+                </div>
+                <p class="ledge">ещё 23 кандидата · как в R5</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Справа уже шорт-лист. Внизу ленты — лоадер «⏳ Разбираю
+              кандидатов и пишу итог…». Блок прогресса продолжает идти, но он
+              выше, над планом, и его не видно.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Когда появляется</b
+            ><span
+              >В тот момент, когда шорт-лист лёг в панель. Снимается перед
+              строкой «Готово: …» — итог встаёт на его место.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Ошибка</b
+            ><span
+              >Если прогон оборвался, лоадер не висит: вместо него «⚠️ …» и
+              экран R10.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot" id="r11-2">
+        <div class="shot-eye">
+          <span class="ltr">R11.2</span
+          ><span class="ttl">Итог в ленте, разбор ещё дописывается</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="rp-h">
+              <span class="st st-ok">готово</span
+              ><span class="mlbl">6 этапов из 6 · 4 мин 52 с</span>
+            </div>
+            <p class="ledge">
+              блок прогресса свёрнут на своём месте, ниже — план и «Понял: …»
+            </p>
+            <div class="msg">
+              <b
+                >Готово: 7 вариантов от 7 поставщиков, выбрал из 240
+                предложений.</b
+              >
+              <span class="sub">Учёл: MOQ до 100 шт.</span>
+            </div>
+            <div>
+              <div class="msg">
+                <span class="shim">дописываю разбор…</span>
+              </div>
+              <div class="ska">
+                <span class="ph ph-48">фото</span>
+                <span class="nm"
+                  >Ночник-капибара с аккумулятором · серый, 3 режима</span
+                >
+                <span class="sl"
+                  >Ningbo Kaixin Lighting · 宁波凯欣照明 (Ningbo Kaixin
+                  Zhaoming) · фабрика</span
+                >
+              </div>
+              <div class="ska">
+                <span class="ph ph-48">фото</span>
+                <span class="nm">Ночник-капибара, силикон · белый, USB-C</span>
+                <span class="sl"
+                  >Shenzhen Mingliang · 深圳市明亮科技 (Shenzhen Mingliang Keji)
+                  · фабрика</span
+                >
+              </div>
+              <p class="ledge">ещё 5 позиций</p>
+            </div>
+            <div class="brow">
+              <span class="b">Открыть шорт-лист</span>
+              <span class="b b-pri"
+                >Купить полный шорт-лист
+                <span class="cost">· 4 кредита</span></span
+              >
+              <span class="b b-gh">Задать вопрос</span>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Блок прогресса не исчез, а свернулся в строку «готово · 6 этапов
+              из 6 · 4 мин 52 с», как в R5. Ниже — итог и элемент шорт-листа. На
+              месте разбора — «дописываю разбор…» с шиммером.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что происходит</b
+            ><span
+              >Разбор («как выбирал» и «почему» по позициям) пишется в фоне. Это
+              состояние элемента шорт-листа, а не новое сообщение ленты. Когда
+              текст пришёл, строка сменяется им на месте.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что можно нажать</b
+            ><span
+              >Всё сразу: открыть шорт-лист, купить полную версию, задать
+              вопрос. Ждать разбор не нужно.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot" id="r11-3">
+        <div class="shot-eye">
+          <span class="ltr">R11.3</span
+          ><span class="ttl"
+            >Нажал «Купить полный шорт-лист» — лоадер сразу</span
+          ><span class="dev">лента и панель</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="feed solo">
+              <div class="msg-u">Купить полный шорт-лист</div>
+              <div class="msg"><span class="shim">⏳ Перевожу…</span></div>
+            </div>
+            <div class="panel solo">
+              <div class="tabs">
+                <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+                ><span class="tab">Выборка агента · 72</span
+                ><span class="tab">Поставщики · 41</span
+                ><span class="tab is-on">Отчёт</span>
+              </div>
+              <div class="panel-h">
+                <b>Шорт-лист — ночник капибара</b
+                ><span class="mono">бесплатная версия · PDF</span>
+              </div>
+              <div class="ph" style="width: 100%; height: 150px">
+                страница PDF бесплатной версии
+              </div>
+              <div class="brow">
+                <span class="b">Скачать PDF</span>
+              </div>
+              <div class="vs">
+                <div>
+                  <b>Бесплатная версия</b>
+                  <ul>
+                    <li>7 SKU на одной странице</li>
+                  </ul>
+                </div>
+                <div class="is-full">
+                  <b>Полная версия · 4 кредита</b>
+                  <ul>
+                    <li>как в R5.2</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="brow">
+                <span class="b b-pri is-busy is-dis"
+                  ><i class="spin"></i>собирается…</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Когда</b
+            ><span
+              >Лоадер встаёт сразу по нажатию, до того как пошла работа. Пустой
+              ленты после нажатия нет.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Этапы</b
+            ><span
+              >Один лоадер, текст меняется без провалов: «⏳ Дозагружаю данные и
+              отзывы…» → «⏳ Перевожу…» → «⏳ Собираю PDF и Excel…». Конец —
+              итог R11.5 на его месте или «⚠️ …» при ошибке.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Кнопка</b
+            ><span
+              >Во вкладке «Отчёт» кнопка покупки на это время — «собирается…» со
+              спиннером и неактивна. Второй раз купить нельзя.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot" id="r11-4">
+        <div class="shot-eye">
+          <span class="ltr">R11.4</span
+          ><span class="ttl">Вкладка «Отчёт» — полная версия куплена</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo" style="width: 540px">
+            <div class="tabs">
+              <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+              ><span class="tab">Выборка агента · 72</span
+              ><span class="tab">Поставщики · 41</span
+              ><span class="tab is-on">Отчёт</span>
+            </div>
+            <div class="panel-h">
+              <b>Шорт-лист — ночник капибара</b
+              ><span class="mono">полная версия · PDF и Excel</span>
+            </div>
+            <div class="mchips">
+              <span class="mchip">Бесплатная</span
+              ><span class="mchip is-on">Полная</span>
+            </div>
+            <div class="ph" style="width: 100%; height: 230px">
+              полный PDF: сравнение 7 SKU, характеристики, поставщики, отзывы и
+              риски, критерии отбора
+            </div>
+            <div class="brow">
+              <span class="b b-pri">Скачать PDF</span
+              ><span class="b">Скачать Excel</span>
+            </div>
+            <div class="vs">
+              <div>
+                <b>Бесплатная версия</b>
+                <ul>
+                  <li>7 SKU на одной странице</li>
+                  <li>фото, цена в ₽, MOQ</li>
+                  <li>продавец и «почему в шорт-листе»</li>
+                </ul>
+              </div>
+              <div class="is-full">
+                <b>Полная версия · куплено</b>
+                <ul>
+                  <li>все варианты и характеристики</li>
+                  <li>остатки, объём, вес</li>
+                  <li>поставщики подробно</li>
+                  <li>отзывы и риски</li>
+                  <li>критерии отбора</li>
+                  <li>Excel со всей выборкой</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Та же вкладка «Отчёт», что в R5.2, в состоянии «полная»:
+              переключатель «Бесплатная · Полная» стоит на «Полной», полный PDF,
+              «Скачать PDF» и «Скачать Excel», карточка «Полная версия ·
+              куплено». Кнопки покупки нет.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Три состояния</b
+            ><span
+              >Один элемент: «бесплатная» (R5.2), «собирается» (R11.3),
+              «полная». Бесплатная версия остаётся доступной переключателем —
+              платная её дополняет.</span
+            >
+          </div>
+          <div class="cap">
+            <b>После F5</b
+            ><span
+              >Состояние хранится в самом элементе. Тред, где полная версия уже
+              куплена, открывает вкладку сразу в «полной», бесплатно.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot" id="r11-5">
+        <div class="shot-eye">
+          <span class="ltr">R11.5</span
+          ><span class="ttl">Лента после покупки</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="msg-u">Купить полный шорт-лист</div>
+            <div class="msg">
+              <b>Готово: полная версия шорт-листа — во вкладке «Отчёт»</b>
+            </div>
+            <div class="brow">
+              <span class="b b-pri">Открыть отчёт</span
+              ><span class="b">Задать вопрос</span>
+            </div>
+            <div class="gone">
+              <span class="mlbl">убрано из ленты</span
+              ><s>📄 Шорт-лист — ночник капибара.pdf</s>
+              <s>📊 Шорт-лист — ночник капибара.xlsx</s> <s>Что внутри</s>
+              <s>🗂 Открыть панелью</s>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Одну жирную строку-итог и ряд кнопок отдельным сообщением. Без
+              эмодзи. Файлов в ленте нет: они во вкладке «Отчёт» и в кабинете,
+              раздел «Отчёты».</span
+            >
+          </div>
+          <div class="cap">
+            <b>«Открыть отчёт»</b
+            ><span
+              >Переключает панель на вкладку «Отчёт» и показывает панель, если
+              она скрыта. Содержимое вкладки кнопка не трогает.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Оплата</b
+            ><span
+              >Как в R9: кредиты списываются, когда оба файла готовы; повторное
+              скачивание бесплатно.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <p class="mlbl">Правила для всех сценариев</p>
+      <ol class="qs">
+        <li>
+          <b>Одна запись строки.</b> Фото, название, подпись «вариант · продавец
+          · фабрика/посредник · MOQ N», продавец латиницей и по-китайски, цена
+          «… ₽ на складе» с плашкой «оценка», «почему», группа, риск, «добавлено
+          / снято вами», «Подробнее», «Все варианты · N», «×».
+        </li>
+        <li>
+          <b>Метка «в шорт-листе» / «+ в шорт-лист», 7 мест.</b> Лимит один на
+          все сценарии. Метить можно со строки шорт-листа и с карточки во
+          вкладке выдачи.
+        </li>
+        <li>
+          <b>Одни чипы.</b> все / в шорт-листе / дешевле всех / надёжные /
+          баланс / убраны вами; «Сформировать шорт-лист заново · бесплатно».
+        </li>
+        <li>
+          <b>Одна лента после сборки.</b> Элемент шорт-листа и ряд «Открыть
+          шорт-лист» / «Купить полный шорт-лист · 4 кредита» / «Задать вопрос».
+          Текстового списка отмеченных кандидатов в ленте больше нет.
+        </li>
+        <li>
+          <b>Один порядок вкладок.</b> Шорт-лист · Расчёт · &lt;выдача&gt; · N ·
+          [Поставщики · N] · Отчёт. &lt;выдача&gt; — «Выборка агента» в
+          исследовании и «Карточки» в быстром поиске: содержимое разное, элемент
+          и метки одни. «Поставщики» — только в исследовании, в быстром поиске
+          этой вкладки нет.
+        </li>
+      </ol>
     </div>
   </section>
 

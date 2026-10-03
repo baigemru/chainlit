@@ -307,7 +307,12 @@ The tab strip appears whenever there is more than one slot, on both layouts and
 whatever the active slot is (`canvas` gives up the header of a _single-slot_ panel,
 never the way out of itself); the "×" that closes a slot is a sibling of its
 `TabsTrigger`, never a child, and a single slot carries its own beside the title —
-distinct from the back arrow and the sheet's close, which hide.
+distinct from the back arrow and the sheet's close, which hide. On a phone **an ask whose message is anchored to the top closes the sheet**
+(`open={!askClaimsScreen}`: `askUser` is set and the message with its `spec.stepId`
+carries `metadata.anchor === "top"`); any other ask leaves the sheet alone. The close is a
+prop change, which Radix never reports through `onOpenChange`, so no `hide` is sent and
+the sheet returns on the same tab when the ask ends — at the price of element-local state
+inside it, since a closed dialog unmounts its content. The desktop panel is untouched.
 
 `sink.onClose` has one branch: **close 4401 clears `userState`**, which is the answer
 `useApi` already gives an HTTP 401 (`api.ts:63-67`). The socket learns the same thing

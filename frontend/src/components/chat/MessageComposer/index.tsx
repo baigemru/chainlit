@@ -64,7 +64,7 @@ export default function MessageComposer({
 
   const { user } = useAuth();
   const { sendMessage, replyMessage } = useChatInteract();
-  const { askUser, disabled: _disabled } = useChatData();
+  const { askUser, composer, disabled: _disabled } = useChatData();
 
   const disabled = _disabled || !!attachments.find((a) => !a.uploaded);
 
@@ -208,7 +208,9 @@ export default function MessageComposer({
       onChange={setValue}
       onPaste={onPaste}
       onEnter={submit}
-      placeholder={t('chat.input.placeholder')}
+      // The conversation's own words when the server gave some, `''`
+      // included; the translation otherwise.
+      placeholder={composer?.placeholder ?? t('chat.input.placeholder')}
     />
   );
   const submitButton = (

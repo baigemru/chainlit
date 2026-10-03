@@ -1,5 +1,6 @@
 import { useCallback, useContext } from 'react';
 import { useRecoilValue, useSetRecoilState } from 'recoil';
+import { composerState } from 'src/composerState';
 import {
   acceptingState,
   actionState,
@@ -44,6 +45,7 @@ const useChatInteract = () => {
   const setActions = useSetRecoilState(actionState);
   const setIdToResume = useSetRecoilState(threadIdToResumeState);
   const setElementSidebar = useSetRecoilState(elementSidebarState);
+  const setComposer = useSetRecoilState(composerState);
   const setCurrentThreadId = useSetRecoilState(currentThreadIdState);
   const setAskUser = useSetRecoilState(askUserState);
   const setProtocolError = useSetRecoilState(protocolErrorState);
@@ -89,6 +91,9 @@ const useChatInteract = () => {
       // Back to the default, not to `undefined`: the panel is a state,
       // and every reader below it is reading one.
       setElementSidebar({ slots: [], active: null, visible: false, rev: 0 });
+      // The successor's replay states its own composer; until it lands, the
+      // words of the conversation just left must not sit over the new one.
+      setComposer({});
       setCurrentThreadId(undefined);
     },
     [
@@ -103,6 +108,7 @@ const useChatInteract = () => {
       setTasklists,
       setActions,
       setElementSidebar,
+      setComposer,
       setCurrentThreadId
     ]
   );

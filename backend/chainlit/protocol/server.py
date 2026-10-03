@@ -31,6 +31,7 @@ __all__ = [
     "AskEnd",
     "AskEndReason",
     "AskStart",
+    "ComposerState",
     "ElementRemove",
     "ElementUpsert",
     "Error",
@@ -316,6 +317,28 @@ class SidebarState(_Msg, tag="sidebar.state"):
     rev: int = 0
 
 
+class ComposerState(_Msg, tag="composer.state"):
+    """What the composer says in this conversation, whole.
+
+    New in this protocol. The placeholder was a translation and the line
+    under the field a property of the chat profile, drawn only on the empty
+    screen -- neither could say "this thread is running something, and here
+    is what typing now does", which changes inside one conversation and more
+    than once. So it is session state, like the element panel: the
+    application sets it, the session holds it, and this frame is its
+    projection -- full, idempotent, and said again on every reconnect.
+
+    Both fields absent is the default, not a blank: the client falls back
+    to its translated placeholder and to the profile's ``composer_hint``.
+    An empty string is an answer, and means "nothing here".
+    """
+
+    #: Replaces the translated placeholder of the input.
+    placeholder: str | None = None
+    #: Markdown under the composer, in the register of ``composer_hint``.
+    hint: str | None = None
+
+
 # --------------------------------------------------------------------------
 # Misc
 # --------------------------------------------------------------------------
@@ -362,6 +385,7 @@ ServerMsg = Union[
     ThreadOpen,
     SessionHandoff,
     SidebarState,
+    ComposerState,
     Toast,
     AccountBadge,
 ]

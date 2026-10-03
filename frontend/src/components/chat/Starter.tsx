@@ -186,7 +186,12 @@ export default function Starter({ starter, layout = 'tiles' }: StarterProps) {
           <span className="font-medium text-sm">{starter.label}</span>
         </div>
         {starter.description ? (
-          <span className={cn('text-xs', muted)}>{starter.description}</span>
+          // Line breaks kept: a plate's description is a paragraph and a
+          // separate "what you get" line, and the button's own
+          // `whitespace-normal` would fold the two into one run of text.
+          <span className={cn('whitespace-pre-line text-xs', muted)}>
+            {starter.description}
+          </span>
         ) : null}
         {starter.caption ? (
           <span className={cn('mt-auto self-end font-mono text-xs', muted)}>

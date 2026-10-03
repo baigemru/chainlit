@@ -5,6 +5,7 @@ import { IMessageContext } from 'types/messageContext';
 const defaultMessageContext = {
   highlightedMessage: null,
   loading: false,
+  accepting: true,
   onElementRefClick: undefined,
   onFeedbackUpdated: undefined,
   showFeedbackButtons: true,

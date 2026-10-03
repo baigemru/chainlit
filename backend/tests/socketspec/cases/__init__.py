@@ -5,6 +5,7 @@ from typing import Tuple
 from ..spec import Scenario
 from .ask import ASK_SCENARIOS
 from .bystanders import BYSTANDER_SCENARIOS
+from .composer import COMPOSER_SCENARIOS
 from .handshake import HANDSHAKE_SCENARIOS
 from .orphans import ORPHAN_SCENARIOS, PARENT_SCENARIOS
 from .reload import RELOAD_SCENARIOS
@@ -24,6 +25,7 @@ SCENARIOS: Tuple[Scenario, ...] = (
     + RESUME_DELETE_SCENARIOS
     + RESYNC_SCENARIOS
     + SIDEBAR_SCENARIOS
+    + COMPOSER_SCENARIOS
 )
 
 __all__ = ["SCENARIOS"]

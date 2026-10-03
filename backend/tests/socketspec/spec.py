@@ -177,6 +177,14 @@ class Given:
     sidebar_hidden: bool = False
     """The user put the panel away. The slots above are still there."""
 
+    composer_placeholder: Optional[str] = None
+    composer_hint: Optional[str] = None
+    """What the application told the composer to say, if it said anything.
+
+    Conversation state for the panel's reason: it outlives the socket, and
+    ``None`` for both is the default composer, which is still stated.
+    """
+
     hooks: Tuple[
         Literal["chat_start", "chat_resume", "thread_ready", "account_badge"], ...
     ] = ()

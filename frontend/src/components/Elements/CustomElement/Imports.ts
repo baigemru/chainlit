@@ -9,6 +9,7 @@ import * as ChainlitReactClient from '@chainlit/react-client';
 
 import * as Markdown from '@/components/Markdown';
 import * as AccordionComponents from '@/components/ui/accordion';
+import * as AlertDialogComponents from '@/components/ui/alert-dialog';
 import * as AspectRatioComponents from '@/components/ui/aspect-ratio';
 import * as AvatarComponents from '@/components/ui/avatar';
 import * as BadgeComponents from '@/components/ui/badge';
@@ -48,6 +49,9 @@ const Imports = {
   'lucide-react': LucideIcons,
   '@/components/ui/tabs': TabsComponents,
   '@/components/ui/accordion': AccordionComponents,
+  // A confirmation that a click beside it must not dismiss: `Dialog` closes
+  // on an outside click, which is the wrong answer to "stop the research?".
+  '@/components/ui/alert-dialog': AlertDialogComponents,
   '@/components/ui/aspect-ratio': AspectRatioComponents,
   '@/components/ui/avatar': AvatarComponents,
   '@/components/ui/badge': BadgeComponents,

@@ -36,6 +36,7 @@ from chainlit.runner import current_runner
 
 if TYPE_CHECKING:
     from chainlit.action import Action
+    from chainlit.element import Element
     from chainlit.persistence.config import Persistence, UnitOfWork
 
 __all__ = [
@@ -55,6 +56,7 @@ async def deliver_to_thread(
     metadata: Optional[Mapping[str, Any]] = None,
     user_identifier: Optional[str] = None,
     actions: Optional[Sequence["Action"]] = None,
+    elements: Optional[Sequence["Element"]] = None,
 ) -> str:
     """Put a message in a conversation from outside any session.
 
@@ -77,11 +79,18 @@ async def deliver_to_thread(
     "none"}`` is how a result that arrives mid-conversation lands without
     dragging the view away from what the person is reading. ``actions`` go
     under the message on either road: on screen now, or with the row, to be
-    drawn when the thread is next opened.
+    drawn when the thread is next opened. ``elements`` do the same, as
+    rows filed under the message by their own ids -- a ``CustomElement``
+    delivered into a closed tab is there when the thread is opened, and a
+    later ``update()`` of the same id replaces it. Only a ``CustomElement``
+    or an element given a ``url`` is accepted: there is no session to
+    upload a blob through, and a refusal that depended on whether the tab
+    was open would be a bug found in production.
 
     Returns ``"live"`` or ``"stored"``, for a caller that logs which road it
     took. Raises ``RuntimeError`` when there is neither a session nor
-    persistence, rather than answering "delivered" about a dropped message.
+    persistence, rather than answering "delivered" about a dropped message,
+    and ``ValueError`` for an element that needs a blob uploaded.
 
     Args:
         thread_id (str): The conversation to deliver into.
@@ -91,6 +100,7 @@ async def deliver_to_thread(
         metadata (Optional[Mapping[str, Any]]): Stored and sent as given.
         user_identifier (Optional[str]): The thread's owner, when the caller knows it.
         actions (Optional[Sequence[Action]]): Buttons under the message.
+        elements (Optional[Sequence[Element]]): Elements under the message.
 
     Returns:
         str: ``"live"`` if a session was told, ``"stored"`` if a row was written.
@@ -103,6 +113,7 @@ async def deliver_to_thread(
         metadata=metadata,
         user_identifier=user_identifier,
         actions=actions,
+        elements=elements,
     )
 
 

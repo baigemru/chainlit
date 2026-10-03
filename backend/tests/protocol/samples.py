@@ -135,6 +135,9 @@ SERVER_SAMPLES: dict[str, s.ServerMsg] = {
         visible=True,
         rev=7,
     ),
+    "composer.state": s.ComposerState(
+        placeholder="Add a correction", hint="**41** of 60 left"
+    ),
     "toast": s.Toast(message="Saved", type="success"),
     "account.badge": s.AccountBadge(count=3),
 }

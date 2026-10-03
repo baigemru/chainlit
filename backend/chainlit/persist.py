@@ -36,6 +36,7 @@ from chainlit.persistence.writer import (
     SaveStep,
     SessionWriter,
 )
+from chainlit.ws.composer import COMPOSER_META_KEY, composer_meta
 from chainlit.ws.sidebar import SIDEBAR_META_KEY, sidebar_meta
 
 if TYPE_CHECKING:
@@ -48,6 +49,7 @@ __all__ = [
     "delete_step",
     "drop_elements",
     "open_thread",
+    "patch_composer",
     "patch_sidebar",
     "save_actions",
     "save_element",
@@ -63,7 +65,7 @@ __all__ = [
 # engine's own state and not from ``session.state``, ``split_engine_metadata``
 # takes them out before a resume hands the rest to the application, and the
 # share route keeps them off a public thread. One set, three readers.
-ENGINE_METADATA_KEYS = frozenset({SIDEBAR_META_KEY})
+ENGINE_METADATA_KEYS = frozenset({SIDEBAR_META_KEY, COMPOSER_META_KEY})
 
 # State keys that describe a live session, never a thread. ``transit`` is a
 # hand-off between two sessions and would resurrect on every resume; the
@@ -254,6 +256,26 @@ def patch_sidebar(session: "Session") -> None:
     )
 
 
+def patch_composer(session: "Session") -> None:
+    """Write down what the composer says, as one metadata patch.
+
+    Immediate, like ``patch_sidebar``, and for the same reason: ``thread_state``
+    carries it on every later ``PatchThread`` too, but a session that dies
+    between ``cl.Composer.set`` and its next patch would otherwise resume
+    with the translation over a field the application had explained. The
+    default composer is written as ``None``, which deletes the key.
+    """
+    writer = writer_of(session)
+    if writer is None or not session.thread_id:
+        return
+    writer.submit(
+        PatchThread(
+            session.thread_id,
+            ThreadPatch(metadata={COMPOSER_META_KEY: composer_meta(session.composer)}),
+        )
+    )
+
+
 async def open_thread(session: "Session", name: str, *, announce: bool = True) -> None:
     """The thread's first interaction: name the row, then release the writes.
 
@@ -317,6 +339,7 @@ def thread_state(session: "Session") -> dict[str, Any]:
     # immediate patches of ``patch_sidebar`` insurance rather than the only
     # record.
     state[SIDEBAR_META_KEY] = sidebar_meta(session.sidebar)
+    state[COMPOSER_META_KEY] = composer_meta(session.composer)
     return _jsonable(state)
 
 

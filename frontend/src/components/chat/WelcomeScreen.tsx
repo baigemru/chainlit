@@ -10,6 +10,7 @@ import {
 import {
   ChainlitContext,
   FileSpec,
+  useChatData,
   useChatMessages,
   useChatSession,
   useConfig
@@ -18,6 +19,7 @@ import {
 import { Logo } from '@/components/Logo';
 import { Markdown } from '@/components/Markdown';
 
+import ComposerHint from './ComposerHint';
 import MessageComposer from './MessageComposer';
 import Starters from './Starters';
 
@@ -33,6 +35,7 @@ export default function WelcomeScreen(props: Props) {
   const { config } = useConfig();
   const { chatProfile } = useChatSession();
   const { messages } = useChatMessages();
+  const { composer } = useChatData();
   const [isVisible, setIsVisible] = useState(false);
 
   const chatProfiles = config?.chatProfiles;
@@ -110,13 +113,15 @@ export default function WelcomeScreen(props: Props) {
   }, [chatProfiles, chatProfile, showAvatar]);
 
   // The line under the composer, in the profile's own words: what pressing
-  // Enter will do. It is markdown because the applications that want one
-  // want a link in it, and it is drawn only on the empty screen — once the
-  // conversation has started the composer no longer needs explaining.
-  const composerHint = useMemo(
+  // Enter will do. The profile's hint is drawn only on the empty screen —
+  // once the conversation has started the composer no longer needs
+  // explaining. What the server said for this conversation wins over it,
+  // `''` included: that is how an application takes the profile's line away.
+  const profileHint = useMemo(
     () => chatProfiles?.find((cp) => cp.name === chatProfile)?.composer_hint,
     [chatProfiles, chatProfile]
   );
+  const composerHint = composer?.hint ?? profileHint;
 
   if (hasMessage(messages)) return null;
 
@@ -139,18 +144,7 @@ export default function WelcomeScreen(props: Props) {
       {logo}
       <MessageComposer {...props} />
       {composerHint ? (
-        <div className="composer-hint max-w-full -mt-2">
-          {/* The same register as the watermark: small, muted, one
-              paragraph with no margin of its own. */}
-          <Markdown
-            allowHtml={allowHtml}
-            latex={latex}
-            renderMarkdown={true}
-            className="text-xs text-muted-foreground text-center [&_p]:m-0 [&_div]:mt-0 [&_div]:leading-snug"
-          >
-            {composerHint}
-          </Markdown>
-        </div>
+        <ComposerHint className="-mt-2">{composerHint}</ComposerHint>
       ) : null}
       <Starters />
     </div>

@@ -262,6 +262,7 @@ export {
   addMessageToParent,
   addMessage,
   deleteMessageById,
+  findMessageById,
   hasMessageById,
   isLastMessage,
   nestMessages,

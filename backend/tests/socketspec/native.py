@@ -86,7 +86,7 @@ from chainlit.protocol.payloads import (
     Step,
     Wait,
 )
-from chainlit.protocol.server import Error
+from chainlit.protocol.server import ComposerState, Error
 from chainlit.runner import ApplicationRunner, ThreadStoreAdapter
 from chainlit.transit_store import TransitStore
 from chainlit.ws.connection import HEARTBEAT_INTERVAL_MS, _dispatch
@@ -453,6 +453,9 @@ class _Run:
             session.sidebar.hide()
         elif given.sidebar:
             session.sidebar.show()
+        session.composer = ComposerState(
+            placeholder=given.composer_placeholder, hint=given.composer_hint
+        )
         for step in given.transcript:
             wait = msgspec.convert(dict(step.wait), Wait) if step.wait else None
             entry = TranscriptEntry(
@@ -760,6 +763,7 @@ class _Run:
             ),
             "sidebar_active": session.sidebar.active if session else None,
             "sidebar_visible": session.sidebar.visible if session else False,
+            "composer": (msgspec.to_builtins(session.composer) if session else None),
             "deleted_steps": list(self.records.deleted_steps),
             "deleted_elements": list(self.records.deleted_elements),
         }

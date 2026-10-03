@@ -327,7 +327,16 @@ async def restore(
             session.send(ElementUpsert(element=element))
     session.send(state_frame(session.sidebar))
 
+    # The composer's words, whatever they are. The default is stated too, and
+    # for the panel's reason: a client that kept its atoms through a blip
+    # missed any ``cl.Composer.clear`` sent while it was away, and only a
+    # frame saying "nothing" corrects a hint left over from before.
+    session.send(session.composer)
+
     # Level-triggered, and last: the client's spinner is a boolean, and the
     # only honest value for it is the one that is true once everything else
-    # has been said.
-    session.send(TaskIndicator(running=session.is_busy))
+    # has been said. Both of its booleans, not the spinner alone: a frame
+    # without ``accepting`` decodes as ``True``, so a reload in the middle of
+    # an ordinary turn opened the composer -- and every button in the feed --
+    # under a run that was still holding the turn.
+    session.send(TaskIndicator(running=session.is_busy, accepting=session.accepting))

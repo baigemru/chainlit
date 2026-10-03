@@ -522,8 +522,17 @@ produces an error frame — the thread does not exist, or is someone else's, and
 profile from metadata, transcript loaded, `session.sidebar` rebuilt from `metadata["__sidebar"]`
 plus those rows, `first_interaction = "resume"`, `resumed_thread_id = T`, `chat_started = True`,
 `writer.open_gate()` → `session.ready` → `restore` sends `thread.resume` as a snapshot, then
-every step's buttons as `action.add`, then the panel's elements and `sidebar.state` → `on_ready` launches `on_chat_resume` followed by
+every step's buttons as `action.add`, then the panel's elements and `sidebar.state`, then `composer.state` → `on_ready` launches `on_chat_resume` followed by
 `on_thread_ready` in its own slot (the second runs even if the first raised).
+
+**The composer across a reload and a resume.** `cl.Composer.set(placeholder=, hint=)` replaces the
+thread's composer state whole — the placeholder of the input and the hint line under it — and
+`clear()` returns both to the configured defaults. Like the panel, the state is the engine's to
+restore: it is persisted under `__composer` in thread metadata (an engine key, so neither
+`user_session` nor `on_chat_resume` sees it), `_resume` reads it back, and `restore()` sends
+`composer.state` after `sidebar.state` on every replay — the default too, as a bare frame, so a
+client that missed a `clear()` while disconnected is corrected. The replayed `task.indicator`
+carries `accepting`, so a reconnect in the middle of a turn keeps the composer and the buttons shut.
 
 **The element panel across a cold resume.** Restoring the panel is the engine's job; an
 application that had to replay a recipe of its own in `on_chat_resume` was remembering what the

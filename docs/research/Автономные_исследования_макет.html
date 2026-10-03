@@ -1,0 +1,4960 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Автономные исследования</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@500;700&display=swap"
+/>
+
+<style>
+  /* ── Токены страницы. Те же, что в «Пути селлера»: две страницы — один набор. ── */
+  :root {
+    --bg: #151013;
+    --surface: #1d171b;
+    --surface-2: #261e23;
+    --line: #382c33;
+    --line-2: #4a3b43;
+    --text: #f4ecf0;
+    --dim: #baa9b3;
+    --faint: #8b7a84;
+
+    --accent: #ec1a5e;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(236, 26, 94, 0.16);
+    --accent-line: rgba(236, 26, 94, 0.42);
+
+    --fact: #4fc0a6; /* измерено */
+    --fact-soft: rgba(79, 192, 166, 0.14);
+    --est: #e2a442; /* оценка */
+    --est-soft: rgba(226, 164, 66, 0.14);
+    --bad: #ef6a52;
+    --bad-soft: rgba(239, 106, 82, 0.14);
+
+    --plate: #1a141a;
+    --plate-line: #372b33;
+
+    --r-frame: 12px;
+    --r-card: 10px;
+    --r-pill: 999px;
+
+    /* ── Токены макета. Продукт тёмный, поэтому экраны остаются тёмными и в
+     светлой теме страницы: это снимок приложения, а не элемент вёрстки.
+     Ниже их не переопределяет ни одна тема — так и задумано. ───────────── */
+    --m-bg: #131015;
+    --m-panel: #1b161a;
+    --m-surf: #241d23;
+    --m-line: #352a31;
+    --m-line2: #4a3b43;
+    --m-text: #f4ecf0;
+    --m-dim: #b6a5af;
+    --m-faint: #877681;
+    --m-acc: #ec1a5e;
+    --m-acc-ink: #ffffff;
+    --m-acc-soft: rgba(236, 26, 94, 0.17);
+    --m-acc-line: rgba(236, 26, 94, 0.45);
+    --m-fact: #4fc0a6;
+    --m-est: #e2a442;
+    --m-bad: #ef6a52;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme='dark']) {
+      --bg: #faf6f7;
+      --surface: #ffffff;
+      --surface-2: #f3edef;
+      --line: #e3d7dc;
+      --line-2: #cdbdc4;
+      --text: #1b1218;
+      --dim: #6b5a63;
+      --faint: #8d7c85;
+
+      --accent: #cf1350;
+      --accent-soft: rgba(207, 19, 80, 0.1);
+      --accent-line: rgba(207, 19, 80, 0.34);
+
+      --fact: #0f7566;
+      --fact-soft: rgba(15, 117, 102, 0.12);
+      --est: #8d5d13;
+      --est-soft: rgba(141, 93, 19, 0.13);
+      --bad: #bd3a26;
+      --bad-soft: rgba(189, 58, 38, 0.12);
+
+      --plate: #efe7ea;
+      --plate-line: #ddcfd5;
+    }
+  }
+
+  :root[data-theme='light'] {
+    --bg: #faf6f7;
+    --surface: #ffffff;
+    --surface-2: #f3edef;
+    --line: #e3d7dc;
+    --line-2: #cdbdc4;
+    --text: #1b1218;
+    --dim: #6b5a63;
+    --faint: #8d7c85;
+
+    --accent: #cf1350;
+    --accent-soft: rgba(207, 19, 80, 0.1);
+    --accent-line: rgba(207, 19, 80, 0.34);
+
+    --fact: #0f7566;
+    --fact-soft: rgba(15, 117, 102, 0.12);
+    --est: #8d5d13;
+    --est-soft: rgba(141, 93, 19, 0.13);
+    --bad: #bd3a26;
+    --bad-soft: rgba(189, 58, 38, 0.12);
+
+    --plate: #efe7ea;
+    --plate-line: #ddcfd5;
+  }
+
+  /* ── Основа ───────────────────────────────────────────────────────────── */
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family:
+      'Golos Text',
+      'Segoe UI',
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1100px;
+    margin-inline: auto;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 {
+    font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(29px, 5.2vw, 48px);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+    font-weight: 600;
+    font-size: clamp(20px, 2.9vw, 26px);
+    line-height: 1.16;
+    letter-spacing: -0.03em;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  p {
+    margin: 0;
+  }
+  ul {
+    margin: 0;
+    padding-left: 1.05em;
+  }
+  li {
+    margin-block: 2px;
+  }
+  a {
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .lead {
+    color: var(--dim);
+    max-width: 66ch;
+    font-size: 16.5px;
+  }
+  .note {
+    color: var(--faint);
+    font-size: 13.5px;
+    max-width: 74ch;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mono {
+    font-family:
+      'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+    vertical-align: 1px;
+  }
+  .tag-fact {
+    background: var(--fact-soft);
+    color: var(--fact);
+  }
+  .tag-est {
+    background: var(--est-soft);
+    color: var(--est);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    line-height: 1.3;
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .chip-acc {
+    background: var(--accent-soft);
+    border-color: transparent;
+    color: var(--accent);
+  }
+
+  /* ── Секции: корешок слева, как на первой странице ────────────────────── */
+  .sec {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 0 32px;
+    border-top: 1px solid var(--line);
+    padding-block: 44px 10px;
+  }
+  .spine {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding-top: 7px;
+  }
+  .sec-body {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    min-width: 0;
+  }
+  .sec-head {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  @media (max-width: 780px) {
+    .sec {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+    }
+    .spine {
+      padding-top: 0;
+    }
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 30px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    font-size: 13px;
+    color: var(--faint);
+    align-items: center;
+  }
+
+  /* ── Ярусы ────────────────────────────────────────────────────────────── */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .tier {
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .tier-n {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .tier p {
+    font-size: 13.5px;
+    color: var(--dim);
+  }
+  .tier .where {
+    margin-top: auto;
+    font-size: 12.5px;
+    color: var(--faint);
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .tier .where b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  @media (max-width: 760px) {
+    .tiers {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  table.t {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.t th,
+  table.t td {
+    text-align: left;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.t th {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+    border-bottom-color: var(--line-2);
+  }
+  table.t td.n {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  table.t td b {
+    font-weight: 600;
+  }
+  .t-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+  }
+  .t-wrap table.t {
+    min-width: 560px;
+  }
+  .t-wrap table.t tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ── Кадр сториборда ──────────────────────────────────────────────────── */
+  .shot {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .shot-eye {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .shot-eye .ltr {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .shot-eye .ttl {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .shot-eye .dev {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    padding: 1px 8px;
+  }
+  .scroller {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .stand {
+    background: var(--plate);
+    border: 1px solid var(--plate-line);
+    border-radius: var(--r-frame);
+    padding: 14px;
+  }
+  .stand.scroller {
+    padding: 14px;
+  }
+
+  .caps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    overflow: hidden;
+  }
+  .cap {
+    background: var(--surface);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .cap b {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+  }
+  .cap span {
+    font-size: 13px;
+    color: var(--dim);
+  }
+  @media (max-width: 700px) {
+    .caps {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .next {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .next em {
+    font-style: normal;
+    color: var(--faint);
+  }
+
+  /* ── Общая хромота приложения (один каркас на все экраны) ─────────────── */
+  .app {
+    width: 880px;
+    min-width: 880px;
+    display: grid;
+    grid-template-columns: 186px minmax(0, 1fr);
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line2);
+    border-radius: 14px;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .app.is-wide {
+    width: 100%;
+    min-width: 880px;
+  }
+  .app-side {
+    background: var(--m-panel);
+    border-right: 1px solid var(--m-line);
+    padding: 10px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .side-new {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 10px;
+    font-size: 12.5px;
+    color: var(--m-text);
+    font-weight: 500;
+  }
+  .side-lbl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--m-faint);
+    padding-inline: 3px;
+  }
+  .side-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .side-row {
+    padding: 5px 8px;
+    border-radius: 7px;
+    font-size: 12px;
+    color: var(--m-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .side-row.is-on {
+    background: var(--m-surf);
+    color: var(--m-text);
+  }
+  .side-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px 2px;
+    border-top: 1px solid var(--m-line);
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .cnt {
+    margin-left: auto;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    border-radius: var(--r-pill);
+    font-size: 10px;
+    padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .side-row .cnt {
+    float: right;
+  }
+
+  .app-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .app-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .logo {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.02em;
+  }
+  .hd-sp {
+    flex: 1;
+  }
+  .bal {
+    font-size: 12px;
+    color: var(--m-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .hd-ico {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--m-line2);
+    flex: none;
+  }
+  .av {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  /* Точка-счётчик на аватаре — единственный способ, которым продукт зовёт назад.
+   Белая на розовом кружке: розовая на розовом не видна вовсе. */
+  .av i {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--m-acc-ink);
+    border: 2px solid var(--m-bg);
+  }
+  .av.is-plain {
+    background: var(--m-line2);
+    color: var(--m-text);
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 300px;
+  }
+  .stage.has-panel {
+    grid-template-columns: minmax(0, 1fr) 262px;
+  }
+  .feed {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .feed.is-empty {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 14px;
+    padding-block: 34px;
+  }
+  .panel {
+    border-left: 1px solid var(--m-line);
+    background: var(--m-panel);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .panel-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .panel-h b {
+    font-size: 12.5px;
+    color: var(--m-text);
+    font-weight: 600;
+  }
+
+  /* Вкладки панели: человек перебирает объекты здесь, лента остаётся разговором. */
+  .tabs {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--m-line);
+    margin-bottom: 2px;
+  }
+  .tab {
+    flex: none;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--m-line2);
+    color: var(--m-dim);
+    white-space: nowrap;
+  }
+  .tab.is-on {
+    background: var(--m-surf);
+    color: var(--m-text);
+    border-color: var(--m-acc-line);
+    font-weight: 600;
+  }
+  .tab.is-new::after {
+    content: '';
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    margin-left: 5px;
+    vertical-align: 1px;
+  }
+
+  /* Строка шорт-листа — это вариант (SKU), а не карточка. */
+  .skurow {
+    display: flex;
+    gap: 8px;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px;
+    align-items: flex-start;
+    min-width: 0;
+  }
+  .skurow.is-on {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .skurow .meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .skurow .meta .nm {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .skurow .right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex: none;
+  }
+  .skurow .right .tot {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .skurow .right .sup {
+    font-size: 11px;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .skumore {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    padding-left: 8px;
+  }
+  .skurow.is-gone {
+    opacity: 0.38;
+  }
+  .skurow.is-gone .nm {
+    text-decoration: line-through;
+  }
+  .gsep {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding-top: 3px;
+  }
+  .gsep b {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .calc.is-narrow .crow {
+    grid-template-columns: minmax(0, 1fr) 52px 36px;
+    font-size: 10.5px;
+    padding: 3px 7px;
+    gap: 4px;
+  }
+  .calc.is-narrow .calc-h {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .calc.is-narrow .calc-foot {
+    font-size: 10px;
+    padding: 6px 7px;
+  }
+  .ro {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 9px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    font-size: 10.5px;
+    color: var(--m-dim);
+  }
+  .ro b {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--m-text);
+  }
+
+  .composer {
+    border-top: 1px solid var(--m-line);
+    padding: 9px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--m-line2);
+    background: var(--m-surf);
+    border-radius: var(--r-pill);
+    padding: 7px 7px 7px 14px;
+    color: var(--m-faint);
+    font-size: 12.5px;
+  }
+  .pill .grow {
+    flex: 1;
+    min-width: 0;
+  }
+  .pill .clip {
+    width: 15px;
+    height: 15px;
+    border: 1.5px solid var(--m-faint);
+    border-radius: 7px 7px 7px 2px;
+    flex: none;
+  }
+  .pill .send {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex: none;
+  }
+  .pill.is-typed {
+    color: var(--m-text);
+  }
+  /* Поле в фокусе: после нажатия плашки курсор уже здесь — вводить можно сразу. */
+  .pill.is-focus {
+    border-color: var(--m-acc-line);
+    box-shadow: 0 0 0 3px var(--m-acc-soft);
+  }
+  .pill.is-focus .caret {
+    width: 1px;
+    height: 15px;
+    background: var(--m-acc);
+    display: inline-block;
+  }
+  .ctr {
+    font-size: 11px;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctr.is-warn {
+    color: var(--m-est);
+  }
+
+  /* ── Содержимое ленты ─────────────────────────────────────────────────── */
+  .msg {
+    font-size: 13px;
+    color: var(--m-text);
+    max-width: 60ch;
+  }
+  .msg .sub {
+    color: var(--m-faint);
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+  }
+  .msg-u {
+    align-self: flex-end;
+    max-width: 58%;
+    background: var(--m-acc-soft);
+    border: 1px solid var(--m-acc-line);
+    border-radius: 12px 12px 3px 12px;
+    padding: 7px 11px;
+    font-size: 12.5px;
+  }
+  .zh {
+    font-size: 13px;
+    color: var(--m-text);
+    background: var(--m-surf);
+    border: 1px solid var(--m-line);
+    border-radius: 7px;
+    padding: 4px 9px;
+    display: inline-block;
+  }
+
+  .mcard {
+    border: 1px solid var(--m-line);
+    border-radius: var(--r-card);
+    background: var(--m-panel);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mcard.is-acc {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .mcard-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .mcard-h b {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .mcard-h .mono {
+    color: var(--m-faint);
+  }
+
+  .brow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .b {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--m-line2);
+    background: var(--m-surf);
+    color: var(--m-text);
+    border-radius: 8px;
+    padding: 5px 11px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .b-pri {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+    color: var(--m-acc-ink);
+    font-weight: 600;
+  }
+  .b-gh {
+    background: transparent;
+    border-color: transparent;
+    color: var(--m-dim);
+  }
+  .b-off {
+    color: var(--m-faint);
+    border-color: var(--m-line);
+    background: transparent;
+  }
+  .b-xs {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 7px;
+  }
+  .b .cost {
+    color: inherit;
+    opacity: 0.72;
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+  }
+  .b-pri .cost {
+    opacity: 0.85;
+  }
+
+  .mchips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  /* Полоса чипов на телефоне уезжает вбок — край гасим, чтобы обрезанный чип
+   читался как продолжение, а не как сломанная вёрстка. */
+  .mchips.is-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent);
+    mask-image: linear-gradient(90deg, #000 86%, transparent);
+  }
+  .mchip {
+    border: 1px solid var(--m-line2);
+    border-radius: var(--r-pill);
+    padding: 2px 9px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    white-space: nowrap;
+    flex: none;
+  }
+  .mchip.is-on {
+    background: var(--m-acc-soft);
+    border-color: var(--m-acc-line);
+    color: var(--m-acc);
+  }
+  .mchip.is-off {
+    border-style: dashed;
+    color: var(--m-faint);
+  }
+  .mchip.is-new {
+    background: rgba(79, 192, 166, 0.14);
+    border-color: transparent;
+    color: var(--m-fact);
+  }
+  .mchip.is-hit {
+    background: rgba(226, 164, 66, 0.15);
+    border-color: transparent;
+    color: var(--m-est);
+  }
+
+  .mtag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .mtag-est {
+    background: rgba(226, 164, 66, 0.15);
+    color: var(--m-est);
+  }
+  .mtag-fact {
+    background: rgba(79, 192, 166, 0.14);
+    color: var(--m-fact);
+  }
+  .mtag-own {
+    border: 1px solid var(--m-line2);
+    color: var(--m-faint);
+  }
+
+  .mlbl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--m-faint);
+  }
+  /* Цена сценария 1 не решена — «N» нарисовано как незаполненное значение, а не как число. */
+  .nq {
+    border-bottom: 1px dashed currentColor;
+  }
+
+  /* Экран входа */
+  .entry {
+    width: 560px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+  }
+  .entry-h {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -0.03em;
+    text-align: center;
+  }
+  .entry-s {
+    font-size: 12.5px;
+    color: var(--m-faint);
+    text-align: center;
+    margin-top: 3px;
+  }
+  .pill-lg {
+    padding: 10px 10px 10px 16px;
+    font-size: 13px;
+  }
+  .pill-lg .send {
+    width: 30px;
+    height: 30px;
+  }
+  .pill .go {
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    border-radius: var(--r-pill);
+    padding: 5px 12px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill-lg .go {
+    padding: 6px 13px;
+    font-size: 12px;
+  }
+  .bwrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bwrap .sub {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    padding-inline: 2px;
+  }
+  .hintline {
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+
+  /* Зона входа: одно действие, потом два пояснения. Пояснения не кнопки —
+   иначе человек снова выбирает режим руками, а роутинг сделан против этого. */
+  .zone {
+    border-top: 1px solid var(--m-line);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .zone-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .zone-h b {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  /* Зона «Сценарии»: плашка-кнопка — название, «что получишь», цена.
+   Роль поля и роль кнопки разведены: поле — «что», кнопка — «что сделать». */
+  .plates {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .pbtn {
+    border: 1px solid var(--m-line2);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .pbtn b {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .pbtn span {
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--m-faint);
+  }
+  .pbtn .cost {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--m-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .pbtn.is-main {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+    color: var(--m-acc-ink);
+  }
+  .pbtn.is-main span,
+  .pbtn.is-main .cost {
+    color: rgba(255, 255, 255, 0.84);
+  }
+
+  .tasklist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .taskrow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 5px 9px;
+    min-width: 0;
+  }
+  .taskrow b {
+    font-size: 11.5px;
+    font-weight: 600;
+    flex: none;
+  }
+  .taskrow span {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    flex: 1;
+    min-width: 0;
+  }
+  .taskrow .cost {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--m-dim);
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Фото товара — плашка, а не картинка: это макет. */
+  .ph {
+    background: repeating-linear-gradient(
+      45deg,
+      var(--m-surf) 0 6px,
+      var(--m-line) 6px 7px
+    );
+    border-radius: 7px;
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    font-size: 8.5px;
+    color: var(--m-faint);
+    padding-bottom: 3px;
+    text-align: center;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.02em;
+  }
+  .ph-64 {
+    width: 64px;
+    height: 64px;
+  }
+  .ph-48 {
+    width: 48px;
+    height: 48px;
+  }
+  .ph-40 {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Карточки выдачи в боковой панели */
+  .pcards {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+  }
+  .pcard {
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+  .pcard-b {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .pcard-b .nm {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .pcard-b .pr {
+    font-size: 12.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Рубли по курсу — крупно, юани 1688 — рядом мелко, как у строки-SKU. */
+  .pcard-b .pr .cny {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--m-faint);
+    margin-left: 4px;
+  }
+  .pcard-b .sl {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .ledge {
+    text-align: center;
+    font-size: 11px;
+    color: var(--m-faint);
+    border: 1px dashed var(--m-line2);
+    border-radius: 8px;
+    padding: 5px;
+  }
+
+  .sw {
+    width: 28px;
+    height: 16px;
+    border-radius: var(--r-pill);
+    background: var(--m-line2);
+    position: relative;
+    flex: none;
+    display: inline-block;
+  }
+  .sw i {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--m-faint);
+  }
+  .sw.is-on {
+    background: var(--m-acc);
+  }
+  .sw.is-on i {
+    left: auto;
+    right: 2px;
+    background: var(--m-acc-ink);
+  }
+
+  /* Прогон */
+  .bar {
+    height: 5px;
+    border-radius: var(--r-pill);
+    background: var(--m-surf);
+    overflow: hidden;
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--m-acc);
+  }
+
+  /* Калькулятор */
+  .calc {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  .calc-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .calc-col + .calc-col {
+    border-left: 1px solid var(--m-line);
+  }
+  .calc-h {
+    padding: 6px 10px;
+    background: var(--m-surf);
+    border-bottom: 1px solid var(--m-line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .crow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 62px 42px;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .crow span:nth-child(1) {
+    color: var(--m-dim);
+  }
+  .crow span:nth-child(2),
+  .crow span:nth-child(3) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .crow span:nth-child(3) {
+    color: var(--m-faint);
+  }
+  .crow.is-tot {
+    font-weight: 700;
+    border-bottom: none;
+    background: var(--m-panel);
+  }
+  .crow.is-tot span:nth-child(1) {
+    color: var(--m-text);
+  }
+  .crow.is-loss span:nth-child(2),
+  .crow.is-loss span:nth-child(3) {
+    color: var(--m-bad);
+  }
+  .calc-foot {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--m-line);
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--m-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  /* Кабинет — диалог над размытым чатом */
+  .over {
+    position: relative;
+  }
+  .over .blurred {
+    filter: blur(2.5px) saturate(0.8);
+    opacity: 0.5;
+  }
+  .over .veil {
+    position: absolute;
+    inset: 0;
+    background: rgba(9, 6, 9, 0.55);
+    border-radius: 14px;
+  }
+  .dlg {
+    position: absolute;
+    inset: 22px 42px;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 196px minmax(0, 1fr);
+    background: var(--m-bg);
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  }
+  .dlg-rail {
+    border-right: 1px solid var(--m-line);
+    background: var(--m-panel);
+    padding: 10px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .srch {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 5px 10px;
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+  .dlg-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-inline: 2px;
+  }
+  .dlg-user b {
+    font-size: 12px;
+    font-weight: 600;
+    display: block;
+  }
+  .dlg-user span {
+    font-size: 11px;
+    color: var(--m-faint);
+    display: block;
+  }
+  .dlg-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .dlg-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .dlg-h b {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .dlg-h p {
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+  .dlg-body {
+    padding: 11px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    overflow: hidden;
+  }
+  .dlg-foot {
+    margin-top: auto;
+    border-top: 1px solid var(--m-line);
+    padding: 8px 14px;
+    display: flex;
+    gap: 7px;
+  }
+  .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .fld {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .fld em {
+    font-style: normal;
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .fld b {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .fld.is-empty {
+    border-color: var(--m-est);
+    border-style: dashed;
+  }
+  .cards2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* Телефон */
+  .phone {
+    width: 360px;
+    min-width: 360px;
+    max-width: 100%;
+    border: 1px solid var(--m-line2);
+    border-radius: 26px;
+    padding: 8px;
+    background: var(--m-panel);
+  }
+  .pscr {
+    border-radius: 19px;
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .ptop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .pbody {
+    padding: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    min-width: 0;
+  }
+  .pfoot {
+    border-top: 1px solid var(--m-line);
+    padding: 8px 11px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .phones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .btn2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .btn2 .b {
+    justify-content: center;
+  }
+
+  /* Две карточки экрана M — рядом, но каждая со своей прокруткой */
+  .pair {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  /* На узком экране рамка телефона тянется по ширине, иначе страница уезжает вбок. */
+  @media (max-width: 470px) {
+    .stand {
+      padding: 8px;
+      border-radius: 10px;
+    }
+    .phone {
+      min-width: 0;
+      width: 100%;
+    }
+    .caps {
+      border-radius: 8px;
+    }
+  }
+
+  /* Ничего не двигается само; правило — на случай будущей анимации. */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+  /* ── Макет быстрого поиска после комментариев ── */
+  .page {
+    max-width: 1240px;
+  }
+  .chg {
+    box-shadow: inset 0 -2px 0 var(--m-acc);
+  }
+  .qtiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .qtile {
+    border: 1px solid var(--m-line2);
+    border-radius: 9px;
+    background: transparent;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .qtile b {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .qtile .cost {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--m-dim);
+  }
+  .app.is-xl {
+    width: 1040px;
+    min-width: 1040px;
+  }
+  .stage.has-panel.xl {
+    grid-template-columns: minmax(0, 1fr) 480px;
+  }
+  .gone {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: baseline;
+    font-size: 11px;
+    color: var(--m-faint);
+    border: 1px dashed var(--m-line2);
+    border-radius: 8px;
+    padding: 6px 9px;
+  }
+  .gone s {
+    text-decoration-color: var(--m-bad);
+  }
+  .rhead {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .rhead > b {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--m-text);
+  }
+  .rhead .sub {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .bigcard {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 6px 12px;
+  }
+  .bigph {
+    width: 120px;
+    height: 120px;
+    grid-row: span 1;
+    font-size: 10px;
+  }
+  .bc-b {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bc-nm {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .bc-zh {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .bc-pr {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 6px;
+  }
+  .bc-pr .cny {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--m-faint);
+  }
+  .bc-moq {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--m-dim);
+  }
+  .bc-moq::before {
+    content: '· ';
+    color: var(--m-faint);
+  }
+  .bc-sku {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .bc-sep {
+    height: 1px;
+    background: var(--m-line);
+    margin: 3px 0;
+  }
+  .bc-sl {
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .bc-sl2 {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .bc-act {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .panel.solo {
+    width: 540px;
+    max-width: 100%;
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    color: var(--m-text);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .feed.solo {
+    width: 620px;
+    max-width: 100%;
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .grp {
+    font-size: 11.5px;
+    color: var(--m-dim);
+    font-weight: 600;
+    padding-top: 2px;
+  }
+  .det {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .det-top {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .detph {
+    width: 180px;
+    height: 180px;
+    font-size: 10px;
+  }
+  .thumbs {
+    display: flex;
+    gap: 6px;
+  }
+  .dt {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .dt th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--m-faint);
+    padding: 3px 5px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .dt td {
+    padding: 4px 5px;
+    border-bottom: 1px solid var(--m-line);
+    color: var(--m-dim);
+  }
+  .dt td b {
+    color: var(--m-text);
+  }
+  .dt td i {
+    font-style: normal;
+    color: var(--m-faint);
+    font-size: 10px;
+  }
+  .dt tr.is-on td {
+    background: var(--m-acc-soft);
+  }
+  .qs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 22px;
+    max-width: 80ch;
+    color: var(--dim);
+    font-size: 15px;
+  }
+  .qs b {
+    color: var(--text);
+  }
+
+  .b.is-busy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.75;
+    cursor: progress;
+  }
+  .spin {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--m-line2);
+    border-top-color: var(--m-acc);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -1px;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation: none;
+    }
+  }
+  .ph-24 {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 4px;
+  }
+  .ph.is-on {
+    outline: 2px solid var(--m-acc);
+    outline-offset: 1px;
+  }
+  .door {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+    border-top: 1px solid var(--m-line);
+    padding-top: 10px;
+    margin-top: 2px;
+  }
+  .door .sub,
+  .panel .sub {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .duo {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .duo .panel.solo {
+    width: 480px;
+  }
+  .props {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  @media (max-width: 900px) {
+    .props {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .prop {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .solo.mini {
+    width: auto;
+    padding: 12px;
+  }
+  .pnote {
+    font-size: 13.5px;
+    color: var(--dim);
+  }
+  .prog {
+    height: 4px;
+    border-radius: 99px;
+    background: var(--m-line);
+    overflow: hidden;
+    max-width: 320px;
+  }
+  .prog i {
+    display: block;
+    height: 100%;
+    background: var(--m-acc);
+  }
+  .bigcard.is-cand {
+    border-color: var(--m-acc-line);
+  }
+  .cand {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--m-acc);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ck {
+    font-size: 10.5px;
+    border: 1px solid var(--m-line2);
+    border-radius: 6px;
+    padding: 1px 7px;
+    color: var(--m-dim);
+  }
+  .ck.is-on {
+    border-color: var(--m-acc-line);
+    color: var(--m-acc);
+    background: var(--m-acc-soft);
+  }
+  .nl {
+    font-size: 12.5px;
+    color: var(--m-text);
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 60ch;
+  }
+  .b-off {
+    opacity: 0.55;
+  }
+  .skurow.is-pick {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .ck.is-x {
+    border-color: transparent;
+    color: var(--m-faint);
+  }
+  .divl {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    text-align: center;
+    border-top: 1px dashed var(--m-line2);
+    padding-top: 4px;
+  }
+  .branch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 9px;
+  }
+  .branch b {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(
+        0,
+        1fr
+      );
+    gap: 10px;
+    align-items: center;
+  }
+  @media (max-width: 900px) {
+    .flow {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .farr {
+      transform: rotate(90deg);
+      justify-self: center;
+    }
+  }
+  .fstep {
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 13px;
+    color: var(--dim);
+  }
+  .fstep b {
+    color: var(--text);
+    font-size: 14px;
+  }
+  .fstep i {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .fstep.is-to {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+  .fl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .farr {
+    font-size: 22px;
+    color: var(--accent);
+  }
+  .bc-cn {
+    font-size: 10px;
+    color: var(--m-faint);
+    opacity: 0.8;
+    line-height: 1.2;
+  }
+  /* ── Макет автономных исследований: поверх каркаса быстрого поиска ── */
+  .rplates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .rplate {
+    border: 1px solid var(--m-line2);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+  .rplate b {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .rplate span {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--m-dim);
+  }
+  .rplate .out {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    border-top: 1px solid var(--m-line);
+    padding-top: 5px;
+  }
+  .rplate .cost {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--m-text);
+  }
+  .rplate.is-main {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+  }
+  .rplate.is-main span,
+  .rplate.is-main .out {
+    color: rgba(255, 255, 255, 0.86);
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .rplate.is-main .cost {
+    color: #fff;
+  }
+  .was {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .was s {
+    text-decoration-color: var(--m-bad);
+  }
+
+  /* Форма запуска: одно обязательное поле, остальное подписано «необязательно». */
+  .upl {
+    border: 1.5px dashed var(--m-acc-line);
+    border-radius: 9px;
+    background: var(--m-acc-soft);
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .upl .grow {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .upl .grow b {
+    font-size: 12.5px;
+  }
+  .upl .grow span {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .txt {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 10px;
+    font-size: 12px;
+    color: var(--m-faint);
+    min-height: 44px;
+  }
+  .reqs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .req {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    min-width: 0;
+  }
+  .req .in {
+    margin-left: auto;
+    border-bottom: 1px dashed var(--m-line2);
+    min-width: 46px;
+    text-align: right;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .req.is-set {
+    border-color: var(--m-acc-line);
+    color: var(--m-text);
+  }
+  .req.is-set .in {
+    color: var(--m-text);
+    border-bottom-style: solid;
+  }
+  .opt {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    color: var(--m-faint);
+    border: 1px solid var(--m-line2);
+    border-radius: var(--r-pill);
+    padding: 0 6px;
+  }
+  .launch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--m-line);
+    padding-top: 9px;
+  }
+  .launch .b-pri {
+    padding: 7px 16px;
+    font-size: 12.5px;
+  }
+
+  /* Прогресс: этапы списком. Не кнопки — ни рамок, ни ховера. */
+  .rp-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .rp-h b {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--m-fact);
+  }
+  .live i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--m-fact);
+    box-shadow: 0 0 0 3px rgba(79, 192, 166, 0.2);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live i {
+      animation: none;
+    }
+  }
+  .calm {
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .stp {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--m-faint);
+    align-items: baseline;
+    margin: 0;
+  }
+  .stp .ic {
+    text-align: center;
+    font-size: 11px;
+  }
+  .stp.is-done {
+    color: var(--m-dim);
+  }
+  .stp.is-done .ic {
+    color: var(--m-fact);
+  }
+  .stp.is-now {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .stp.is-now .ic {
+    color: var(--m-acc);
+  }
+  .stp .now {
+    display: block;
+    font-weight: 400;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    margin-top: 1px;
+  }
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    border-top: 1px solid var(--m-line);
+    padding-top: 7px;
+  }
+  .facts b {
+    color: var(--m-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .dirs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--m-dim);
+    padding-left: 2px;
+  }
+  .dirs span::before {
+    content: '— ';
+    color: var(--m-faint);
+  }
+  .menu {
+    position: relative;
+  }
+  .menu-pop {
+    position: absolute;
+    right: 0;
+    top: 26px;
+    z-index: 3;
+    background: var(--m-panel);
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+    min-width: 190px;
+  }
+  .menu-pop div {
+    font-size: 11.5px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--m-bad);
+  }
+
+  /* Состояния прогона */
+  .st {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .st-run {
+    background: rgba(79, 192, 166, 0.14);
+    color: var(--m-fact);
+  }
+  .st-wait {
+    background: rgba(226, 164, 66, 0.15);
+    color: var(--m-est);
+  }
+  .st-bad {
+    background: rgba(239, 106, 82, 0.15);
+    color: var(--m-bad);
+  }
+  .st-ok {
+    background: var(--m-acc-soft);
+    color: var(--m-acc);
+  }
+
+  /* Результат: анализ агента */
+  .an {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 12.5px;
+    max-width: 64ch;
+  }
+  .an h5 {
+    margin: 3px 0 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--m-text);
+  }
+  .an ul {
+    padding-left: 1.05em;
+    color: var(--m-dim);
+    font-size: 12px;
+  }
+  .an ul li {
+    margin-block: 1px;
+  }
+  .an .asm {
+    font-size: 11.5px;
+    color: var(--m-faint);
+    border-left: 2px solid var(--m-est);
+    padding-left: 8px;
+  }
+  .obj {
+    border: 1px solid var(--m-acc-line);
+    background: var(--m-acc-soft);
+    border-radius: 10px;
+    padding: 9px 11px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 64ch;
+  }
+  .obj .ic {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--m-acc);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex: none;
+  }
+  .obj .grow {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .obj .grow b {
+    font-size: 12.5px;
+  }
+  .obj .grow span {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+
+  /* Шорт-лист: карточка = большая карточка выдачи + «почему» и риски */
+  .why {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--m-dim);
+    border-left: 2px solid var(--m-acc);
+    padding-left: 8px;
+  }
+  .why b {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .rsk {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--m-est);
+  }
+  .grph {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding-top: 4px;
+  }
+  .grph b {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .grph span {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .bigcard.is-gone {
+    opacity: 0.4;
+  }
+  .bigcard.is-gone .bc-nm {
+    text-decoration: line-through;
+  }
+  .bigcard.is-add {
+    border-color: var(--m-fact);
+  }
+  .bigcard.is-out {
+    border-style: dashed;
+  }
+  .xr {
+    font-size: 10.5px;
+    color: var(--m-bad);
+  }
+  .sumbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+  }
+  .sumbar b {
+    color: var(--m-text);
+  }
+  .sumbar .hd-sp {
+    flex: 1;
+  }
+  .b.is-dis {
+    opacity: 0.45;
+  }
+
+  /* Поставщики */
+  .supl {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .supl-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .supl-h b {
+    font-size: 12.5px;
+  }
+  .supl-h .hd-sp {
+    flex: 1;
+  }
+  .supl .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .supl .row b {
+    color: var(--m-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .supl .plus {
+    font-size: 11px;
+    color: var(--m-fact);
+  }
+  .supl .minus {
+    font-size: 11px;
+    color: var(--m-est);
+  }
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .inc {
+    columns: 2;
+    column-gap: 18px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    padding-left: 1.05em;
+    max-width: 60ch;
+  }
+
+  table.t tr.is-new td {
+    border-top: 2px solid var(--accent-line);
+  }
+  .supl-h .bc-zh {
+    flex-basis: 100%;
+    order: 9;
+    margin-top: -3px;
+  }
+  /* Ред. 2: свёрнутая форма, анализ по SKU, PDF в панели */
+  .launched {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 7px 11px;
+    font-size: 12px;
+    color: var(--m-dim);
+    max-width: 600px;
+  }
+  .launched b {
+    color: var(--m-fact);
+    font-weight: 600;
+  }
+  .ska {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 4px 10px;
+    max-width: 64ch;
+    padding: 8px 0;
+    border-top: 1px solid var(--m-line);
+  }
+  .ska:first-of-type {
+    border-top: 0;
+  }
+  .ska .ph {
+    grid-row: span 3;
+  }
+  .ska .nm {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .ska .sl {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .ska .tx {
+    font-size: 12.5px;
+    color: var(--m-text);
+    line-height: 1.5;
+  }
+  .ska .tg {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    color: var(--m-acc);
+    margin-right: 6px;
+    text-transform: uppercase;
+  }
+  .full {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-panel);
+    padding: 9px 11px;
+    max-width: 64ch;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .full ul {
+    columns: 2;
+    column-gap: 18px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    padding-left: 1.05em;
+  }
+  .vs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .vs > div {
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .vs > div.is-full {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .vs b {
+    font-size: 12px;
+  }
+  .vs ul {
+    font-size: 11px;
+    color: var(--m-dim);
+    padding-left: 1.05em;
+  }
+</style>
+<div class="page">
+  <header class="hero">
+    <p class="eyebrow">
+      PANDAPOISK · автономные исследования после комментариев
+    </p>
+    <h1>Автономные исследования: запуск, работа, результат</h1>
+    <p class="lead">
+      Как выглядит исследование, если учесть «Автономные исследования —
+      изменения интерфейса». Человек делает одно обязательное действие:
+      загружает фото. Описание и требования необязательны. Дальше агент работает
+      сам и ничего не спрашивает. На выходе: анализ в ленте, бесплатный
+      сокращённый шорт-лист, 72 карточки выборки и поставщики справа. Каркас,
+      карточки, вкладки и кнопки взяты из макета быстрого поиска, чтобы два
+      сценария выглядели одним продуктом.
+    </p>
+    <p class="lead">
+      <b>Редакция 2 — после живого прогона 01.10.</b> Форма сворачивается без
+      пузыря. Лимит запросов показан один раз и «в этом исследовании». В ленте —
+      короткий анализ агента по каждому SKU, без сухих цифр и юаней, иероглифы с
+      латиницей. «Открыть шорт-лист» показывает PDF в панели с кнопкой
+      «Скачать». Над покупкой виден состав полной версии. «Частично» — только
+      при реальном обрыве.
+    </p>
+    <div class="legend">
+      <span
+        >Цена: рубли крупно, юани рядом мелко, по курсу 11,95 ₽/¥ — как в
+        быстром поиске.</span
+      >
+      <span
+        ><span class="chg" style="color: var(--text)">розовая линия</span> — что
+        изменилось по сравнению с сегодняшним экраном</span
+      >
+      <span
+        ><span class="tag tag-est">вопрос</span> — решение за вами, список в
+        конце</span
+      >
+    </div>
+  </header>
+
+  <!-- ───────────── R1 Главная ───────────── -->
+  <section class="sec">
+    <div class="spine">Главная</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Сценарии» стали «Автономными исследованиями от ИИ-агента»</h2>
+        <p class="lead">
+          Раскладка главной та же: поле, быстрый поиск, ниже крупные плашки.
+          Меняются заголовок блока, подзаголовок и сами плашки. На каждой
+          написано, что человек получит на выходе, и цена.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R1</span
+          ><span class="ttl">Вход, блок исследований</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row">ночник капибара</div>
+                <div class="side-row">термокружка 450 мл</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 35 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage">
+                <div class="feed is-empty">
+                  <div class="entry" style="width: 620px">
+                    <div>
+                      <p class="entry-h">Что ищем на 1688?</p>
+                      <p class="entry-s">
+                        Напишите, приложите фото или нажмите кнопку — дальше
+                        подскажу
+                      </p>
+                    </div>
+                    <div class="pill pill-lg">
+                      <span class="clip"></span
+                      ><span class="grow">Фото, название или ссылка</span
+                      ><span class="send">↑</span>
+                    </div>
+                    <div class="zone">
+                      <div class="zone-h">
+                        <b>Быстрый поиск</b
+                        ><span class="mlbl">без изменений</span>
+                      </div>
+                      <div class="qtiles">
+                        <div class="qtile">
+                          <b>📷 Найти по фото</b
+                          ><span class="cost">5 кредитов</span>
+                        </div>
+                        <div class="qtile">
+                          <b>✍️ Описать товар</b
+                          ><span class="cost">5 кредитов</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="zone">
+                      <div class="zone-h">
+                        <b class="chg">Автономные исследования от ИИ-агента</b>
+                      </div>
+                      <p class="hintline chg" style="align-self: flex-start">
+                        Загрузите товар и укажите требования — ПандаПоиск сам
+                        проведёт исследование и вернёт лучшие варианты.
+                      </p>
+                      <div class="rplates">
+                        <div class="rplate is-main">
+                          <b class="chg">Найти лучшие условия закупки</b>
+                          <span
+                            >Исследую товар глазами байера: найду сопоставимые
+                            предложения, разберу SKU и поставщиков, покажу
+                            дешёвые и надёжные варианты.</span
+                          >
+                          <span class="out"
+                            >На выходе: анализ, сокращённый шорт-лист из 7
+                            товаров, 60–80 карточек из выборки, SKU и
+                            поставщики.</span
+                          >
+                          <span class="cost">12 кредитов</span>
+                        </div>
+                        <div class="rplate">
+                          <b class="chg">Расширить ассортимент</b>
+                          <span
+                            >Найду связанные товарные направления и позиции,
+                            которыми можно дополнить текущий ассортимент.</span
+                          >
+                          <span class="out"
+                            >На выходе: анализ направлений, сокращённый
+                            шорт-лист, 60–80 карточек, SKU, поставщики и
+                            риски.</span
+                          >
+                          <span class="cost">15 кредитов</span>
+                        </div>
+                      </div>
+                      <p class="was">
+                        было: <s>Сценарии</s> ·
+                        <s>Ваш товар глазами байера</s> ·
+                        <s>Расширьте линейку</s>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что поменялось</b
+            ><span
+              >Заголовок блока, подзаголовок, имена плашек. «Глазами байера»
+              осталось в описании первой плашки. Строка «На выходе» обещает
+              конкретный результат до нажатия.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что не трогаем</b
+            ><span
+              >Положение блока под быстрым поиском, размер плашек, розовая
+              главная плашка, цена в углу.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Дальше</b
+            ><span
+              >Нажатие на плашку открывает короткую форму запуска (R2).
+              Отдельного экрана с планом нет.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R2 Запуск ───────────── -->
+  <section class="sec">
+    <div class="spine">Запуск</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Одно обязательное поле и кнопка с ценой</h2>
+        <p class="lead">
+          Форма появляется в ленте нового чата. Обязательно только фото или
+          ссылка, остальное подписано «необязательно». Требования заданы полями
+          и переключателями, а не опросом. Кнопка запускает исследование сразу.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R2</span
+          ><span class="ttl"
+            >Нажал «Найти лучшие условия закупки», фото загружено</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">новое исследование</div>
+                <div class="side-row">ночник капибара</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 35 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage">
+                <div class="feed">
+                  <div class="mcard" style="max-width: 600px">
+                    <div class="mcard-h">
+                      <b>Найти лучшие условия закупки</b
+                      ><span class="mono"
+                        >~5 минут · можно закрыть вкладку</span
+                      >
+                    </div>
+                    <p class="mlbl">Фото или ссылка на товар</p>
+                    <div class="upl">
+                      <span class="ph ph-48">фото</span>
+                      <div class="grow">
+                        <b>capybara_lamp.jpg ✓</b
+                        ><span>или вставьте ссылку на 1688, WB, Ozon</span>
+                      </div>
+                      <span class="b b-xs b-gh">Заменить</span>
+                    </div>
+                    <p class="mlbl">
+                      Описание <span class="opt">необязательно</span>
+                    </p>
+                    <div class="txt">Что это за товар и что для вас важно</div>
+                    <p class="mlbl">
+                      Дополнительные требования
+                      <span class="opt">необязательно</span>
+                    </p>
+                    <div class="reqs">
+                      <div class="req">
+                        <span class="sw"><i></i></span>Только фабрики
+                      </div>
+                      <div class="req is-set">
+                        MOQ до<span class="in">100 шт</span>
+                      </div>
+                      <div class="req">Цена до<span class="in">— ₽</span></div>
+                      <div class="req">
+                        Объём партии<span class="in">— шт</span>
+                      </div>
+                      <div class="req">
+                        Нужные характеристики<span class="in">—</span>
+                      </div>
+                      <div class="req">
+                        Нежелательные материалы<span class="in">—</span>
+                      </div>
+                    </div>
+                    <p class="hintline">
+                      Ничего не указали — начну с разумных настроек и в конце
+                      покажу, какие допущения использовал.
+                    </p>
+                    <div class="launch">
+                      <span class="b b-pri"
+                        >Начать исследование
+                        <span class="cost">· 12 кредитов</span></span
+                      >
+                      <span class="hintline"
+                        >спишутся после запуска · ничего подтверждать не
+                        нужно</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow">Или опишите товар своими словами…</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Короткую форму: зона фото, поле описания, 6 требований в две
+              колонки, цену на кнопке. Указан только MOQ — остальное пусто, и
+              это нормально.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Загрузить фото или вставить ссылку, при желании дописать и
+              включить требования, нажать «Начать исследование». Пока нет фото,
+              кнопка неактивна.</span
+            >
+          </div>
+          <div class="cap">
+            <b>После нажатия</b
+            ><span class="chg"
+              >Форма сворачивается в одну строку «✓ Исследование запущено · …».
+              Отдельного сообщения с фото и текстом нет. Не хватает кредитов или
+              нет фото — причина видна внутри формы.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R3 Агент работает ───────────── -->
+  <section class="sec">
+    <div class="spine">Работа</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>
+          Один блок прогресса: этапы, живые цифры, «ничего нажимать не нужно»
+        </h2>
+        <p class="lead">
+          Вместо «Шаг 1 из 8», нулевого счётчика и пяти направлений с крестиками
+          показываем один блок. В нём список этапов, у текущего этапа реальные
+          цифры, время последнего обновления и одна главная кнопка. Процента
+          нет: честно посчитать его нельзя.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R3</span
+          ><span class="ttl">Исследование идёт, этап 3 из 6</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">исследование: ночник капибара</div>
+                <div class="side-row">ночник капибара</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 23 кредита</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage">
+                <div class="feed">
+                  <div class="launched chg">
+                    <span class="ph ph-24"></span
+                    ><b>✓ Исследование запущено</b> · ночник капибара · MOQ до
+                    100 шт
+                  </div>
+                  <div class="mcard is-acc" style="max-width: 600px">
+                    <div class="rp-h">
+                      <b>Исследование идёт</b
+                      ><span class="live"><i></i>работает</span
+                      ><span class="hd-sp" style="flex: 1"></span>
+                      <span class="menu"
+                        ><span class="b b-xs b-gh">⋯</span></span
+                      >
+                    </div>
+                    <p class="calm chg">
+                      Ничего нажимать не нужно. Можно закрыть вкладку —
+                      результат сохранится в этом чате.
+                    </p>
+                    <ul class="steps">
+                      <li class="stp is-done">
+                        <span class="ic">✓</span
+                        ><span>Понял товар и требования</span>
+                      </li>
+                      <li class="stp is-done">
+                        <span class="ic">✓</span
+                        ><span>Сформировал направления поиска</span>
+                      </li>
+                      <li class="stp is-now">
+                        <span class="ic">●</span
+                        ><span
+                          >Собираю предложения 1688
+                          <span class="now"
+                            >сейчас: синонимы и китайские названия, 3-е
+                            направление из 5</span
+                          ></span
+                        >
+                      </li>
+                      <li class="stp">
+                        <span class="ic">○</span
+                        ><span>Разбираю товары и SKU</span>
+                      </li>
+                      <li class="stp">
+                        <span class="ic">○</span
+                        ><span>Сравниваю поставщиков</span>
+                      </li>
+                      <li class="stp">
+                        <span class="ic">○</span
+                        ><span>Формирую шорт-лист и итоговую выборку</span>
+                      </li>
+                    </ul>
+                    <div class="facts">
+                      <span>Собрано <b>46</b> предложений</span
+                      ><span>Последнее обновление <b>8 секунд</b> назад</span
+                      ><span class="chg"
+                        >Запросы к 1688 в этом исследовании:
+                        <b>осталось 41 из 60</b></span
+                      >
+                    </div>
+                    <p class="hintline" style="margin-top: -4px">
+                      Запросы тратит агент, они входят в 12 кредитов. Если
+                      кончатся, сбор остановится на собранном, и я скажу об
+                      этом.
+                    </p>
+                    <div class="brow">
+                      <span class="b b-pri">Закрыть и продолжить в фоне</span>
+                    </div>
+                  </div>
+                  <div class="mcard" style="max-width: 600px">
+                    <div class="mcard-h">
+                      <b>Ищу по направлениям</b
+                      ><span class="mono">для информации</span>
+                    </div>
+                    <div class="dirs">
+                      <span>Копии по фото капибары</span
+                      ><span>Точные слова из описания</span
+                      ><span>Синонимы и китайские названия</span
+                      ><span>Производители и фабрики</span
+                      ><span>Нижний ценовой сегмент</span>
+                    </div>
+                  </div>
+                  <div class="gone" style="max-width: 600px">
+                    <span class="mlbl">убрано с экрана</span>
+                    <s>Шаг 1 из 8</s> <s>собрано 0 из 240 карточек</s>
+                    <s>× у каждого направления</s>
+                    <s>поправить можно на ходу</s>
+                    <s>пузырь с фото и текстом после формы</s>
+                    <s>«⏳ Обработка файла…»</s>
+                    <s>строка лимита под полем ввода</s>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <p class="mlbl">
+                  Добавить уточнение <span class="opt">необязательно</span>
+                </p>
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow"
+                    >Например: «только с пультом» — учту на следующем
+                    этапе</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Зелёную точку «работает», 2 галочки, активный этап с тем, что
+              делается прямо сейчас, число собранных предложений и свежесть
+              обновления. Направления — простым списком без крестиков.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Главное — закрыть и уйти. По желанию дописать уточнение. Отмена
+              спрятана в меню «⋯» и спрашивает подтверждение. Экран не прыгает:
+              служебные сообщения не забирают прокрутку.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Почему так</b
+            ><span
+              >Счётчик «0 из 240» читался как зависание, крестики — как
+              обязательный выбор, пустое поле — как «агент ждёт ответа». Лимит
+              60 запросов на исследование остаётся и показан один раз, в блоке:
+              кто их тратит и что будет, когда кончатся.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R3.1</span><span class="ttl">Меню «⋯»</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="feed solo" style="width: 360px; min-height: 150px">
+              <div class="rp-h">
+                <b>Исследование идёт</b
+                ><span class="hd-sp" style="flex: 1"></span>
+                <span class="menu"
+                  ><span class="b b-xs">⋯</span>
+                  <div class="menu-pop">
+                    <div>Отменить исследование…</div>
+                  </div></span
+                >
+              </div>
+              <p class="calm" style="margin-top: 44px">
+                Отмена: «Остановить исследование? Собранное сохранится, 12
+                кредитов не вернутся» · <span class="b b-xs">Остановить</span>
+                <span class="b b-xs b-gh">Продолжить</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R4 Не зависнуть ───────────── -->
+  <section class="sec">
+    <div class="spine">Пауза и сбой</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Тот же блок объясняет паузу, восстановление и ошибку</h2>
+        <p class="lead">
+          Задача шлёт сигнал активности, даже когда цифры не меняются. Блок
+          показывает, что происходит, словами. «Выполняется» не висит
+          бесконечно: если задача молчит, система сама повторяет безопасный шаг,
+          не списывая кредиты.
+        </p>
+      </div>
+      <div class="props">
+        <div class="prop">
+          <p class="mlbl">1 · цифры стоят, задача жива</p>
+          <div class="feed solo mini">
+            <div class="rp-h">
+              <b>Исследование идёт</b><span class="st st-run">работает</span>
+            </div>
+            <ul class="steps">
+              <li class="stp is-now">
+                <span class="ic">●</span
+                ><span
+                  >Собираю предложения 1688
+                  <span class="now"
+                    >Проверяю ответы 1688. Это может занять немного времени, от
+                    вас ничего не требуется.</span
+                  ></span
+                >
+              </li>
+            </ul>
+            <div class="facts">
+              <span>Собрано <b>46</b></span
+              ><span>Обновление <b>3 секунды</b> назад</span>
+            </div>
+          </div>
+          <p class="pnote">
+            Число 46 не меняется уже 40 секунд, но время обновления свежее.
+            Человек видит, что задача жива.
+          </p>
+        </div>
+        <div class="prop">
+          <p class="mlbl">2 · задача замолчала</p>
+          <div class="feed solo mini">
+            <div class="rp-h">
+              <b>Восстанавливаю исследование</b
+              ><span class="st st-wait">повтор этапа</span>
+            </div>
+            <ul class="steps">
+              <li class="stp is-now">
+                <span class="ic">↻</span
+                ><span
+                  >Собираю предложения 1688
+                  <span class="now"
+                    >Повторяю этап с того места, где остановился. Собранные 46
+                    предложений на месте.</span
+                  ></span
+                >
+              </li>
+            </ul>
+            <div class="facts">
+              <span>Кредиты повторно <b>не списываются</b></span>
+            </div>
+          </div>
+          <p class="pnote">
+            Нет сигнала дольше порога — система сама повторяет безопасный шаг.
+            Человек ничего не делает.
+          </p>
+        </div>
+        <div class="prop">
+          <p class="mlbl">3 · восстановить не вышло</p>
+          <div class="feed solo mini">
+            <div class="rp-h">
+              <b>Исследование остановилось</b
+              ><span class="st st-bad">ошибка</span>
+            </div>
+            <p class="calm">
+              1688 не отвечает на поиск по фото. Собранное сохранено: 46
+              предложений, 2 этапа.
+            </p>
+            <div class="brow">
+              <span class="b b-pri"
+                >Повторить этап <span class="cost">· бесплатно</span></span
+              ><span class="b b-xs b-gh">Показать, что собрано</span>
+            </div>
+          </div>
+          <p class="pnote">
+            Понятная ошибка и одна кнопка. Повтор продолжает тот же прогон, а не
+            запускает новый за 12 кредитов.
+          </p>
+        </div>
+      </div>
+      <p class="note">
+        <b>Что хранит задача и отдаёт интерфейсу:</b> текущий этап, последнее
+        действие, время последней активности, сколько собрано, сколько
+        обработано, состояние фоновой задачи. Из этих шести полей строится
+        каждый вид блока выше.
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────── R5 Результат ───────────── -->
+  <section class="sec">
+    <div class="spine">Результат</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Слева короткий анализ по SKU, справа все кандидаты и цифры</h2>
+        <p class="lead">
+          В ленте — короткий анализ агента: почему выбрал каждый SKU среди всего
+          увиденного. Сухие цифры — цена, MOQ, итог на складе — в панели.
+          Иероглифы всегда с латиницей, юаней в тексте нет. Над кнопкой покупки
+          — что войдёт в полную версию. Справа та же панель, что в шорт-листе
+          быстрого поиска (Q6.2):
+          <b>кандидат — карточка, строка — её лучший SKU</b>. Сразу показаны все
+          24 кандидата, метка «в шорт-листе» стоит у 7, и человек её
+          переставляет. Нажатие на строку открывает «Расчёт».
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R5</span
+          ><span class="ttl">Исследование готово, вкладка «Шорт-лист»</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app is-xl">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row is-on">исследование: ночник капибара</div>
+                <div class="side-row">ночник капибара</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 23 кредита</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage has-panel xl">
+                <div class="feed">
+                  <div class="rp-h">
+                    <span class="st st-ok">готово</span
+                    ><span class="mlbl">6 этапов из 6 · 4 мин 52 с</span>
+                  </div>
+                  <div class="msg">
+                    <b
+                      >Готово: 7 вариантов от 7 поставщиков, выбрал из 240
+                      предложений.</b
+                    >
+                    <span class="sub">Учёл: MOQ до 100 шт.</span>
+                  </div>
+                  <div class="msg chg">
+                    Рынок плотный: капибар много, и почти все — копии одной
+                    формы. Разница не в виде, а в питании, режимах света и в
+                    том, кто продаёт — фабрика или перекупщик. Поэтому смотрел,
+                    у кого USB и аккумулятор и кто работает напрямую.
+                  </div>
+                  <div>
+                    <div class="ska">
+                      <span class="ph ph-48">фото</span>
+                      <span class="nm"
+                        >Ночник-капибара с аккумулятором · серый, 3 режима</span
+                      >
+                      <span class="sl"
+                        >Ningbo Kaixin Lighting · 宁波凯欣照明 (Ningbo Kaixin
+                        Zhaoming) · фабрика</span
+                      >
+                      <span class="tx"
+                        ><span class="tg">надёжный</span>Самый предсказуемый
+                        поставщик из увиденных: давно на 1688, к нему
+                        возвращаются покупатели, у товара три режима и
+                        аккумулятор. Дороже соседей — это плата за стабильную
+                        партию. Перед заказом попросите образец в
+                        упаковке.</span
+                      >
+                    </div>
+                    <div class="ska">
+                      <span class="ph ph-48">фото</span>
+                      <span class="nm"
+                        >Ночник-капибара, силикон · белый, USB-C</span
+                      >
+                      <span class="sl"
+                        >Shenzhen Mingliang · 深圳市明亮科技 (Shenzhen Mingliang
+                        Keji) · фабрика</span
+                      >
+                      <span class="tx"
+                        ><span class="tg">надёжный</span>Тот же силикон и USB-C,
+                        что у дорогих моделей, но цена ниже большинства
+                        предложений, а заказать можно от пары штук — удобно для
+                        пробной партии. О яркости отзывов мало: проверьте
+                        свечение на образце.</span
+                      >
+                    </div>
+                    <div class="ska">
+                      <span class="ph ph-48">фото</span>
+                      <span class="nm"
+                        >Силиконовый ночник «капибара с апельсином» · тёплый
+                        белый</span
+                      >
+                      <span class="sl"
+                        >Yiwu Leqi Trading · 义乌乐琪贸易 (Yiwu Leqi Maoyi) ·
+                        посредник</span
+                      >
+                      <span class="tx"
+                        ><span class="tg">дешевле всех</span>Самый дешёвый из
+                        подходящих, но это посредник: производителя не называет,
+                        отзывов почти нет. Подойдёт, чтобы проверить спрос малой
+                        партией; для постоянных закупок лучше найти его
+                        фабрику.</span
+                      >
+                    </div>
+                    <p class="ledge">
+                      ещё 4 позиции ниже · у каждой фото и 1–2 предложения
+                    </p>
+                  </div>
+                  <div class="full chg">
+                    <span class="mlbl">В полной версии · PDF и Excel</span>
+                    <ul>
+                      <li>сравнение 7 SKU по всем характеристикам</li>
+                      <li>цены, MOQ, остатки, объём, вес</li>
+                      <li>подробно о 7 поставщиках</li>
+                      <li>отзывы и риски по каждой позиции</li>
+                      <li>критерии отбора и причины включения</li>
+                      <li>Excel со всеми 72 карточками выборки</li>
+                      <li>ссылки на карточки 1688</li>
+                    </ul>
+                  </div>
+                  <div class="brow">
+                    <span class="b">Открыть шорт-лист</span>
+                    <span class="b b-pri"
+                      >Купить полный шорт-лист
+                      <span class="cost">· 4 кредита</span></span
+                    >
+                    <span class="b b-gh">Задать вопрос об исследовании</span>
+                  </div>
+                  <div class="gone">
+                    <span class="mlbl">убрано из ленты</span
+                    ><s>Собрал / Нет данных / Менее надёжно</s>
+                    <s>Как я выбирал</s> <s>Допущения</s>
+                    <s>цифры и юани в тексте</s> — критерии и риски теперь в
+                    полной версии
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="tabs">
+                    <span class="tab is-on is-new">Шорт-лист</span
+                    ><span class="tab">Расчёт</span
+                    ><span class="tab">Выборка агента · 72</span
+                    ><span class="tab">Поставщики · 41</span>
+                  </div>
+                  <div class="panel-h">
+                    <b>Шорт-лист</b
+                    ><span class="mono">24 кандидата · в шорт-листе 7</span>
+                  </div>
+                  <p class="mlbl">
+                    Кандидат — карточка, строка — её лучший SKU в наличии ·
+                    справа цена SKU и итог на складе
+                  </p>
+                  <div class="mchips">
+                    <span class="mchip is-on">все · 24</span
+                    ><span class="mchip">в шорт-листе · 7</span
+                    ><span class="mchip">дешевле всех · 2</span
+                    ><span class="mchip">надёжные · 3</span
+                    ><span class="mchip">баланс · 2</span
+                    ><span class="mchip is-off">убраны вами · 0</span>
+                  </div>
+                  <div class="sumbar">
+                    <span>В шорт-листе <b>7</b> · изменений нет</span
+                    ><span class="hd-sp"></span
+                    ><span class="b b-xs is-dis"
+                      >Сформировать шорт-лист заново</span
+                    >
+                  </div>
+                  <div class="pcards">
+                    <div class="skurow is-pick">
+                      <div class="ph ph-64">фото SKU</div>
+                      <div class="meta">
+                        <span class="nm"
+                          >Ночник-капибара с аккумулятором, 3 режима</span
+                        >
+                        <span class="mlbl"
+                          >серый · 3 режима · Ningbo Kaixin · фабрика · MOQ
+                          5</span
+                        ><span class="bc-zh"
+                          >宁波凯欣照明有限公司 (Ningbo Kaixin Zhaoming)</span
+                        >
+                        <span class="why" style="grid-column: auto"
+                          >надёжная: фабрика 9 лет, 4,5 из 5, 24 %
+                          повторных</span
+                        >
+                        <div class="brow">
+                          <span class="ck is-on">✓ в шорт-листе</span
+                          ><span class="ck">Подробнее</span
+                          ><span class="ck">Все варианты · 4</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                      </div>
+                      <div class="right">
+                        <span class="sup">13,9 ¥ · 166 ₽</span
+                        ><span class="tot">251 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 88</span>
+                      </div>
+                    </div>
+                    <div class="skurow is-pick is-on">
+                      <div class="ph ph-64">фото SKU</div>
+                      <div class="meta">
+                        <span class="nm">Ночник-капибара, силикон, USB-C</span>
+                        <span class="mlbl"
+                          >белый · USB-C · Shenzhen Mingliang · фабрика · MOQ
+                          2</span
+                        ><span class="bc-zh"
+                          >深圳市明亮科技有限公司 (Shenzhen Mingliang
+                          Keji)</span
+                        >
+                        <span class="why" style="grid-column: auto"
+                          >надёжная: фабрика 8 лет, цена на 6 % ниже
+                          медианы</span
+                        >
+                        <div class="brow">
+                          <span class="ck is-on">✓ в шорт-листе</span
+                          ><span class="ck">Подробнее</span
+                          ><span class="ck">Все варианты · 4</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                      </div>
+                      <div class="right">
+                        <span class="sup">11,2 ¥ · 134 ₽</span
+                        ><span class="tot">219 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 81</span>
+                      </div>
+                    </div>
+                    <div class="skurow is-pick">
+                      <div class="ph ph-64">фото SKU</div>
+                      <div class="meta">
+                        <span class="nm"
+                          >Силиконовый ночник «капибара с апельсином»</span
+                        >
+                        <span class="mlbl"
+                          >тёплый белый · аккумулятор · Yiwu Leqi · посредник ·
+                          MOQ 10</span
+                        ><span class="bc-zh"
+                          >义乌市乐琪贸易有限公司 (Yiwu Leqi Maoyi)</span
+                        >
+                        <span class="why" style="grid-column: auto"
+                          >дешевле всех: на 22 % ниже медианы · риск: посредник,
+                          4 отзыва</span
+                        >
+                        <div class="brow">
+                          <span class="ck is-on">✓ в шорт-листе</span
+                          ><span class="ck">Подробнее</span
+                          ><span class="ck">Все варианты · 7</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                      </div>
+                      <div class="right">
+                        <span class="sup">9,3 ¥ · 111 ₽</span
+                        ><span class="tot">198 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 64</span>
+                      </div>
+                    </div>
+                    <p class="divl">
+                      ещё 4 в шорт-листе ниже · дальше 17 кандидатов без метки
+                    </p>
+                    <div class="skurow">
+                      <div class="ph ph-64">фото SKU</div>
+                      <div class="meta">
+                        <span class="nm"
+                          >Ночник-капибара с пультом, 16 цветов</span
+                        >
+                        <span class="mlbl"
+                          >розовый · пульт · Jieyang Meile · фабрика · MOQ
+                          30</span
+                        ><span class="bc-zh"
+                          >揭阳市美乐玩具有限公司 (Jieyang Meile Wanju)</span
+                        >
+                        <div class="brow">
+                          <span class="ck">+ в шорт-лист</span
+                          ><span class="ck">Подробнее</span
+                          ><span class="ck">Все варианты · 16</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                      </div>
+                      <div class="right">
+                        <span class="sup">12,1 ¥ · 145 ₽</span
+                        ><span class="tot">232 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 61</span>
+                      </div>
+                    </div>
+                    <div class="skurow">
+                      <div class="ph ph-64">фото SKU</div>
+                      <div class="meta">
+                        <span class="nm">Мини-ночник капибара, батарейки</span>
+                        <span class="mlbl"
+                          >коричневый · мини · Jinhua Duoduo · посредник · MOQ
+                          20</span
+                        ><span class="bc-zh"
+                          >金华市多多日用品有限公司 (Jinhua Duoduo
+                          Riyongpin)</span
+                        >
+                        <div class="brow">
+                          <span class="ck">+ в шорт-лист</span
+                          ><span class="ck">Подробнее</span
+                          ><span class="ck">Все варианты · 2</span
+                          ><span class="ck is-x">× исключить продавца</span>
+                        </div>
+                      </div>
+                      <div class="right">
+                        <span class="sup">6,8 ¥ · 81 ₽</span
+                        ><span class="tot">176 ₽</span
+                        ><span class="mtag mtag-est">оценка</span
+                        ><span class="sup">доверие 49</span>
+                      </div>
+                    </div>
+                    <p class="ledge">
+                      ещё 15 кандидатов ниже · порядок по баллу
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="pill">
+                  <span class="clip"></span
+                  ><span class="grow">Спросите об исследовании…</span
+                  ><span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Слева итог одной строкой, общую мысль о рынке и по 1–2
+              предложения на каждый SKU — голосом байера, без цифр и юаней,
+              оригинальные названия с латиницей. Над кнопками — состав полной
+              версии. Справа все 24 кандидата строками SKU: у 7 метка и
+              подсветка, у каждого цена SKU мелко, итог на складе крупно,
+              доверие.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Переставить метки, исключить продавца, открыть «Подробнее» или
+              «Все варианты» с лоадером, как в быстром поиске. Нажать строку —
+              откроется «Расчёт» этого SKU. Кнопка «Сформировать заново»
+              включается после первой правки.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что бесплатно</b
+            ><span
+              >Анализ, шорт-лист, расчёт, выборка, поставщики и бесплатный PDF
+              шорт-листа — его открывает «Открыть шорт-лист» во вкладке «Отчёт»
+              с кнопкой «Скачать» (R5.2). Полная версия — 4 кредита.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R5.1</span
+          ><span class="ttl">Нажал строку SKU — вкладка «Расчёт»</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo" style="width: 520px">
+            <div class="tabs">
+              <span class="tab">Шорт-лист</span
+              ><span class="tab is-on">Расчёт</span
+              ><span class="tab">Выборка агента · 72</span
+              ><span class="tab">Поставщики · 41</span>
+            </div>
+            <div class="skurow is-on">
+              <div class="ph ph-40">фото SKU</div>
+              <div class="meta">
+                <span class="nm">Ночник-капибара, силикон, USB-C</span
+                ><span class="mlbl"
+                  >белый · USB-C · Shenzhen Mingliang · фабрика</span
+                ><span class="bc-zh"
+                  >深圳市明亮科技有限公司 (Shenzhen Mingliang Keji)</span
+                >
+              </div>
+              <div class="right">
+                <span class="sup">11,2 ¥ · 134 ₽</span
+                ><span class="tot">219 ₽</span
+                ><span class="mtag mtag-est">оценка</span>
+              </div>
+            </div>
+            <div class="calc is-narrow">
+              <div class="calc-col">
+                <div class="calc-h">
+                  <span>Карго</span
+                  ><span class="mtag mtag-est">оценка по рынку</span>
+                </div>
+                <div class="crow">
+                  <span>Цена SKU · 11,2 ¥</span><span>134 ₽</span
+                  ><span>61 %</span>
+                </div>
+                <div class="crow">
+                  <span>Доставка до склада</span><span>31 ₽</span
+                  ><span>14 %</span>
+                </div>
+                <div class="crow">
+                  <span>Пошлина и НДС</span><span>0 ₽</span><span>0 %</span>
+                </div>
+                <div class="crow">
+                  <span>Комиссия площадки</span><span>38 ₽</span
+                  ><span>18 %</span>
+                </div>
+                <div class="crow">
+                  <span>Реклама на штуку</span><span>16 ₽</span><span>7 %</span>
+                </div>
+                <div class="crow is-tot">
+                  <span>Итог на складе</span><span>219 ₽</span
+                  ><span>100 %</span>
+                </div>
+                <div class="crow is-tot">
+                  <span>Прибыль с штуки</span><span>80 ₽</span><span>27 %</span>
+                </div>
+              </div>
+              <div class="calc-col">
+                <div class="calc-h">
+                  <span>Белый ввоз</span
+                  ><span class="mtag mtag-own">ваш тариф</span>
+                </div>
+                <div class="crow">
+                  <span>Цена SKU · 11,2 ¥</span><span>134 ₽</span
+                  ><span>51 %</span>
+                </div>
+                <div class="crow">
+                  <span>Доставка до склада</span><span>22 ₽</span
+                  ><span>8 %</span>
+                </div>
+                <div class="crow">
+                  <span>Пошлина и НДС</span><span>52 ₽</span><span>20 %</span>
+                </div>
+                <div class="crow">
+                  <span>Комиссия площадки</span><span>38 ₽</span
+                  ><span>15 %</span>
+                </div>
+                <div class="crow">
+                  <span>Реклама на штуку</span><span>16 ₽</span><span>6 %</span>
+                </div>
+                <div class="crow is-tot">
+                  <span>Итог на складе</span><span>262 ₽</span
+                  ><span>100 %</span>
+                </div>
+                <div class="crow is-tot">
+                  <span>Прибыль с штуки</span><span>37 ₽</span><span>12 %</span>
+                </div>
+              </div>
+              <div class="calc-foot">
+                <span
+                  >Вес 0,18 кг и объём 1,1 л — этого SKU
+                  <span class="mtag mtag-fact">с карточки</span></span
+                >
+                <span>MOQ 2 — на всю карточку</span>
+                <span
+                  >Цена продажи 299 ₽ — медиана WB по запросу
+                  <span class="mtag mtag-est">оценка по рынку</span></span
+                >
+                <span>Не входит: возвраты, хранение, упаковка, приёмка</span>
+              </div>
+            </div>
+            <p class="mlbl">Ставки уровня списка — только для чтения</p>
+            <div class="ro">
+              <span>Курс <b>11,95 ₽/¥</b></span
+              ><span>Карго <b>305 ₽/кг</b></span
+              ><span>Площадка <b>Wildberries</b></span
+              ><span>Режим <b>УСН Д−Р</b></span
+              ><span
+                >Доля выкупа
+                <b style="color: var(--m-est)">не заполнено</b></span
+              ><span style="color: var(--m-acc)">настроить в кабинете →</span>
+            </div>
+            <div class="brow">
+              <span class="b b-xs">Подробнее по карточке</span
+              ><span class="b b-xs">Все варианты · 4</span>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Калькулятор из текущего прогона, экран F сториборда: тот же SKU
+              сверху, две колонки — карго и белый ввоз — с долями и прибылью.
+              Убыток был бы красным.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Вернуться на «Шорт-лист», перейти к «Подробнее» или вариантам
+              этой карточки. Ставки правятся в кабинете, и тогда пересчитывается
+              весь список.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Откуда числа</b
+            ><span
+              >Итог на складе в строке шорт-листа — это итог колонки «Карго».
+              Метка «оценка» стоит, пока ставки не заполнены.</span
+            >
+          </div>
+        </div>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R5.2</span
+          ><span class="ttl">«Открыть шорт-лист» — бесплатный PDF в панели</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo" style="width: 540px">
+            <div class="tabs">
+              <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+              ><span class="tab">Выборка агента · 72</span
+              ><span class="tab">Поставщики · 41</span
+              ><span class="tab is-on is-new">Отчёт</span>
+            </div>
+            <div class="panel-h">
+              <b>Шорт-лист — ночник капибара</b
+              ><span class="mono">бесплатная версия · PDF</span>
+            </div>
+            <div class="ph" style="width: 100%; height: 230px">
+              страница PDF: 7 SKU с фото, ценой в ₽, MOQ, продавцом и «почему»
+            </div>
+            <div class="brow">
+              <span class="b b-pri">Скачать PDF</span
+              ><span class="sub"
+                >собран по текущему составу · после пересборки — новая
+                версия</span
+              >
+            </div>
+            <div class="vs">
+              <div>
+                <b>Бесплатная версия</b>
+                <ul>
+                  <li>7 SKU на одной странице</li>
+                  <li>фото, цена в ₽, MOQ</li>
+                  <li>продавец и «почему в шорт-листе»</li>
+                </ul>
+              </div>
+              <div class="is-full">
+                <b>Полная версия · 4 кредита</b>
+                <ul>
+                  <li>все варианты и характеристики</li>
+                  <li>остатки, объём, вес</li>
+                  <li>поставщики подробно</li>
+                  <li>отзывы и риски</li>
+                  <li>критерии отбора</li>
+                  <li>Excel со всей выборкой</li>
+                </ul>
+              </div>
+            </div>
+            <div class="brow">
+              <span class="b b-pri"
+                >Купить полный шорт-лист
+                <span class="cost">· 4 кредита</span></span
+              ><span class="sub"
+                >купленную версию скачать снова — бесплатно</span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Новую вкладку «Отчёт» с первой страницей PDF и кнопкой «Скачать».
+              Ниже — сравнение двух версий, чтобы решить глазами.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Скачать бесплатный PDF, купить полную версию, вернуться к
+              шорт-листу. Вкладки с цифрами открыты рядом.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Правило</b
+            ><span
+              >Список «что в полной версии» один на ленту и вкладку и сверяется
+              с тем, как собирается отчёт, — обещание не разойдётся с
+              файлом.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R6 Правка шорт-листа ───────────── -->
+  <section class="sec">
+    <div class="spine">Правка</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Переставил метки, «Сформировать шорт-лист заново»</h2>
+        <p class="lead">
+          Состав меняется метками прямо в списке кандидатов, как в быстром
+          поиске. Счётчик показывает, что поменялось. Пересборка работает по
+          собранной выборке: нового исследования нет, кредиты и запросы к 1688
+          не тратятся. Объект в ленте обновляется вместе с вкладкой.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R6</span
+          ><span class="ttl"
+            >Снял метку с Yiwu Leqi, поставил Jinhua Duoduo</span
+          ><span class="dev">панель и лента</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="panel solo">
+              <div class="tabs">
+                <span class="tab is-on">Шорт-лист</span
+                ><span class="tab">Расчёт</span
+                ><span class="tab">Выборка агента · 72</span
+                ><span class="tab">Поставщики · 41</span>
+              </div>
+              <div class="sumbar">
+                <span>В шорт-листе <b>7</b> · изменено: <b>−1 +1</b></span
+                ><span class="hd-sp"></span
+                ><span class="b b-xs b-pri"
+                  >Сформировать шорт-лист заново
+                  <span class="cost">· бесплатно</span></span
+                >
+              </div>
+              <div class="pcards">
+                <div class="skurow">
+                  <div class="ph ph-64">фото SKU</div>
+                  <div class="meta">
+                    <span class="nm"
+                      >Силиконовый ночник «капибара с апельсином»</span
+                    >
+                    <span class="mlbl"
+                      >тёплый белый · аккумулятор · Yiwu Leqi · посредник</span
+                    ><span class="bc-zh"
+                      >义乌市乐琪贸易有限公司 (Yiwu Leqi Maoyi)</span
+                    >
+                    <div class="brow">
+                      <span class="ck">+ в шорт-лист</span
+                      ><span class="mtag mtag-own">снято вами</span>
+                    </div>
+                  </div>
+                  <div class="right">
+                    <span class="sup">9,3 ¥ · 111 ₽</span
+                    ><span class="tot">198 ₽</span
+                    ><span class="sup">доверие 64</span>
+                  </div>
+                </div>
+                <div class="skurow is-pick">
+                  <div class="ph ph-64">фото SKU</div>
+                  <div class="meta">
+                    <span class="nm">Мини-ночник капибара, батарейки</span>
+                    <span class="mlbl"
+                      >коричневый · мини · Jinhua Duoduo · посредник</span
+                    ><span class="bc-zh"
+                      >金华市多多日用品有限公司 (Jinhua Duoduo Riyongpin)</span
+                    >
+                    <span class="why" style="grid-column: auto"
+                      >агент о нём: дешевле всех, но без USB — не совпадает с
+                      фото по питанию</span
+                    >
+                    <div class="brow">
+                      <span class="ck is-on">✓ в шорт-листе</span
+                      ><span class="mtag mtag-fact">добавлено вами</span>
+                    </div>
+                  </div>
+                  <div class="right">
+                    <span class="sup">6,8 ¥ · 81 ₽</span
+                    ><span class="tot">176 ₽</span
+                    ><span class="sup">доверие 49</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="feed solo" style="width: 440px">
+              <div class="msg-u">Сформировать шорт-лист заново</div>
+              <div class="msg">
+                Обновил шорт-лист: 7 SKU от 7 поставщиков. Мини-ночник Jinhua
+                Duoduo теперь в группе «Дешевле всех», учтите, что он без USB.
+                <span class="sub"
+                  >Работал по собранной выборке: новое исследование не запускал,
+                  кредиты и запросы не потрачены.</span
+                >
+              </div>
+              <div class="brow">
+                <span class="b b-xs">Открыть шорт-лист</span
+                ><span
+                  class="sub"
+                  style="font-size: 11px; color: var(--m-faint)"
+                  >PDF собран заново по новому составу</span
+                >
+              </div>
+              <div class="msg-u">а найди ещё таких же, но в форме кота</div>
+              <div class="msg">
+                В собранной выборке котов нет. Нужен новый поиск, это новое
+                исследование за 12 кредитов. Текущий результат останется в этом
+                чате.
+              </div>
+              <div class="brow">
+                <span class="b b-pri"
+                  >Новое исследование «ночник-кот»
+                  <span class="cost">· 12 кредитов</span></span
+                ><span class="b">Остаться в этом результате</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Строка со снятой меткой остаётся в списке с пометкой «снято
+              вами», новая получает метку «добавлено вами» и мнение агента. На
+              кнопке написано «бесплатно».</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Вернуть метку, переставить ещё, пересобрать. Карточку из «Выборки
+              агента» можно сделать кандидатом кнопкой «+ в шорт-лист».</span
+            >
+          </div>
+          <div class="cap">
+            <b>Правило</b
+            ><span
+              >Как в быстром поиске: новое списание сначала называется словами и
+              ценой на кнопке. Сам по себе платный поиск не стартует.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R6.5 Подробнее и варианты ───────────── -->
+  <section class="sec">
+    <div class="spine">Карточка и SKU</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Подробнее» и «Все варианты» — как в быстром поиске</h2>
+        <p class="lead">
+          Те же две вкладки, что в Q3 и Q4. «Все варианты» открывает SKU
+          карточки крупными карточками. «Подробнее» открывает вкладку с именем
+          товара со всей связкой: фото, ступени цены, все SKU, характеристики,
+          продавец, доставка. SKU, с которого нажали, подсвечен, и его фото
+          основное. Для финалистов данные уже догружены в прогоне, поэтому
+          вкладка открывается сразу, без лоадера.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R6.5</span
+          ><span class="ttl"
+            >«Все варианты · 4» и «Подробнее» у Shenzhen Mingliang</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="duo">
+            <div class="panel solo">
+              <div class="tabs">
+                <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+                ><span class="tab is-on is-new">Варианты: ночник USB-C ×</span>
+              </div>
+              <p class="mlbl">4 варианта · цена в ₽ по курсу 11,95 ₽/¥</p>
+              <div class="pcards">
+                <div class="bigcard is-cand">
+                  <div class="ph bigph">фото SKU</div>
+                  <div class="bc-b">
+                    <span class="cand">★ в шорт-листе</span>
+                    <span class="bc-nm">белый · USB-C</span>
+                    <span class="bc-pr"
+                      >134 ₽<span class="cny">11,2 ¥</span
+                      ><span class="bc-moq"
+                        >MOQ 2 шт · на всю карточку</span
+                      ></span
+                    >
+                    <span class="bc-sep"></span>
+                    <span class="bc-sl2">Остаток 6 200 шт</span>
+                    <span class="bc-sl2">Объём 12 × 9 × 10 см · 1,1 л</span>
+                    <span class="bc-sl2"
+                      >Вес 0,18 кг
+                      <span class="mtag mtag-fact">с карточки</span></span
+                    >
+                  </div>
+                  <div class="bc-act">
+                    <span class="b b-xs b-pri">Подробнее</span
+                    ><span class="b b-xs">Расчёт</span>
+                  </div>
+                </div>
+                <div class="bigcard">
+                  <div class="ph bigph">фото SKU</div>
+                  <div class="bc-b">
+                    <span class="bc-nm">коричневый · USB-C · с пультом</span>
+                    <span class="bc-pr"
+                      >151 ₽<span class="cny">12,6 ¥</span
+                      ><span class="bc-moq"
+                        >MOQ 2 шт · на всю карточку</span
+                      ></span
+                    >
+                    <span class="bc-sep"></span>
+                    <span class="bc-sl2">Остаток 1 900 шт</span>
+                    <span class="bc-sl2"
+                      >Объём —
+                      <span class="mtag mtag-own"
+                        >продавец не указал</span
+                      ></span
+                    >
+                    <span class="bc-sl2"
+                      >Вес 0,19 кг
+                      <span class="mtag mtag-fact">с карточки</span></span
+                    >
+                  </div>
+                  <div class="bc-act">
+                    <span class="b b-xs b-pri">Подробнее</span
+                    ><span class="b b-xs">Сделать SKU строкой шорт-листа</span>
+                  </div>
+                </div>
+                <p class="ledge">ещё 2 варианта</p>
+              </div>
+            </div>
+            <div class="panel solo">
+              <div class="tabs">
+                <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+                ><span class="tab is-on is-new">Ночник-капибара USB-C ×</span>
+              </div>
+              <div class="det">
+                <div class="det-top">
+                  <div class="ph detph">фото SKU<br />белый · USB-C</div>
+                  <div class="bc-b">
+                    <span class="bc-nm" style="font-size: 14px"
+                      >Ночник-капибара, силикон, USB-C</span
+                    >
+                    <span class="bc-zh"
+                      >卡皮巴拉硅胶小夜灯 Type-C充电 (kapibala guijiao
+                      xiaoyedeng Type-C chongdian)</span
+                    >
+                    <span class="bc-pr"
+                      >134 ₽<span class="cny">11,2 ¥</span
+                      ><span class="bc-moq">MOQ 2 шт</span></span
+                    >
+                    <span class="bc-sl2"
+                      >3 870 продаж за 30 дней · повторные 21 %</span
+                    >
+                    <div class="brow">
+                      <span class="b b-xs"
+                        >Ассортимент этого продавца
+                        <span class="cost">· 2 кредита</span></span
+                      ><span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="thumbs">
+                  <span class="ph ph-40 is-on">вар.</span
+                  ><span class="ph ph-40">1</span><span class="ph ph-40">2</span
+                  ><span class="ph ph-40">3</span
+                  ><span class="ph ph-40">4</span>
+                </div>
+                <p class="mlbl">Цена за штуку от партии</p>
+                <div class="ro">
+                  <span>2–99 шт <b>134 ₽</b> 11,2 ¥</span
+                  ><span>100–999 шт <b>124 ₽</b> 10,4 ¥</span
+                  ><span>1000+ шт <b>115 ₽</b> 9,6 ¥</span>
+                </div>
+                <p class="mlbl">
+                  Все варианты · 4 · нажмите строку — её фото станет основным
+                </p>
+                <table class="dt">
+                  <tr>
+                    <th>вариант</th>
+                    <th>цена</th>
+                    <th>остаток</th>
+                    <th>вес</th>
+                    <th>объём</th>
+                  </tr>
+                  <tr class="is-on">
+                    <td><span class="ph ph-24"></span>белый · USB-C</td>
+                    <td><b>134 ₽</b> <i>11,2 ¥</i></td>
+                    <td>6 200</td>
+                    <td>0,18 кг</td>
+                    <td>1,1 л</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span class="ph ph-24"></span>коричневый · USB-C · пульт
+                    </td>
+                    <td><b>151 ₽</b> <i>12,6 ¥</i></td>
+                    <td>1 900</td>
+                    <td>0,19 кг</td>
+                    <td>—</td>
+                  </tr>
+                  <tr>
+                    <td><span class="ph ph-24"></span>серый · USB-C</td>
+                    <td><b>134 ₽</b> <i>11,2 ¥</i></td>
+                    <td>2 450</td>
+                    <td>0,18 кг</td>
+                    <td>1,1 л</td>
+                  </tr>
+                  <tr>
+                    <td><span class="ph ph-24"></span>розовый · USB-C</td>
+                    <td><b>139 ₽</b> <i>11,6 ¥</i></td>
+                    <td>0</td>
+                    <td>0,18 кг</td>
+                    <td>1,1 л</td>
+                  </tr>
+                </table>
+                <p class="mlbl">Характеристики</p>
+                <div class="ro">
+                  <span>материал <b>силикон</b></span
+                  ><span>питание <b>USB-C, 1500 мА·ч</b></span
+                  ><span>свет <b>тёплый, 3 режима</b></span
+                  ><span>размер <b>12 × 9 × 10 см</b></span>
+                </div>
+                <p class="mlbl">Продавец</p>
+                <div class="ro">
+                  <span
+                    ><b>Shenzhen Mingliang</b> 深圳市明亮科技有限公司 (Shenzhen
+                    Mingliang Keji)</span
+                  ><span>фабрика</span><span>Гуандун, Шэньчжэнь</span
+                  ><span>8 лет на 1688</span><span>рейтинг <b>4,5 из 5</b></span
+                  ><span>заводская проверка</span>
+                </div>
+                <p class="mlbl">Доставка по Китаю</p>
+                <div class="ro">
+                  <span>из Шэньчжэня</span><span>отправка за <b>48 ч</b></span>
+                </div>
+                <p class="mlbl">Отзывы · 12 · собраны агентом, бесплатно</p>
+                <div class="ro">
+                  <span>средняя <b>4,6 из 5</b></span
+                  ><span>хвалят: <b>мягкий силикон, яркость</b></span
+                  ><span>жалобы: <b>2 из 12 — запах в первые дни</b></span
+                  ><span>фото от покупателей <b>5</b></span>
+                </div>
+                <p class="mlbl">Ветка 1688</p>
+                <div class="branch">
+                  <span>Дом и сад › Освещение › <b>Ночники</b></span
+                  ><span class="b b-pri"
+                    >Рядом по категории
+                    <span class="cost">· 3 кредита за 20 товаров</span></span
+                  >
+                </div>
+                <p class="mlbl">Почему в шорт-листе</p>
+                <p class="why">
+                  Надёжная фабрика: 8 лет, 4,5 из 5, заводская проверка. Цена
+                  SKU на 6 % ниже медианы, MOQ 2 шт. Риск: отзывов о свечении
+                  мало.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Слева SKU карточки в формате Q3: фото, цена, остаток, объём, вес;
+              SKU из шорт-листа помечен. Справа вкладка «Подробнее» в формате Q4
+              плюс блок «Почему в шорт-листе».</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Сделать другой SKU строкой шорт-листа, открыть расчёт SKU, нажать
+              строку таблицы — её фото станет основным. Отзывы и ассортимент
+              продавца стоят как в быстром поиске.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Данные</b
+            ><span
+              >У финалистов полная карточка уже запрошена внутри прогона. Для
+              остальных кандидатов и карточек выборки — один запрос по нажатию,
+              с лоадером на кнопке.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R7 Выборка агента ───────────── -->
+  <section class="sec">
+    <div class="spine">Выборка</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Выборка агента: 72 карточки в формате быстрого поиска</h2>
+        <p class="lead">
+          Не все 240 предложений, а то, что прошло первичный отбор. Карточка
+          такая же, как в результате быстрого поиска (Q2), с одной новой кнопкой
+          «+ в шорт-лист». «Подробнее» открывает ту же вкладку со всей связкой
+          (Q4).
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R7</span
+          ><span class="ttl">Вкладка «Выборка агента»</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo">
+            <div class="tabs">
+              <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+              ><span class="tab is-on">Выборка агента · 72</span
+              ><span class="tab">Поставщики · 41</span>
+            </div>
+            <div class="rhead">
+              <b>Выборка агента — 72 карточки</b>
+              <span class="sub"
+                >Агент проанализировал 240 предложений. В результат вошли 72
+                наиболее релевантные карточки.</span
+              >
+            </div>
+            <div class="mchips">
+              <span class="mchip is-off">только фабрики</span
+              ><span class="mchip is-on">MOQ до 100 ×</span
+              ><span class="mchip is-off">дешевле медианы</span
+              ><span class="mchip is-off">есть в наличии</span
+              ><span class="mchip">кандидаты · 24</span
+              ><span class="mchip">вошли в шорт-лист · 7</span
+              ><span class="mchip">исключены агентом · 19</span>
+            </div>
+            <div class="pcards">
+              <div class="bigcard is-cand">
+                <div class="ph bigph">фото товара</div>
+                <div class="bc-b">
+                  <span class="cand">★ в шорт-листе · самые надёжные</span>
+                  <span class="bc-nm">Ночник-капибара, силикон, USB-C</span>
+                  <span class="bc-pr"
+                    >134 ₽<span class="cny">11,2 ¥</span
+                    ><span class="bc-moq">MOQ 2 шт</span></span
+                  >
+                  <span class="bc-sku">показан вариант: белый · USB-C</span>
+                  <span class="bc-sep"></span>
+                  <span class="bc-sl">Shenzhen Mingliang</span
+                  ><span class="bc-zh"
+                    >深圳市明亮科技有限公司 (Shenzhen Mingliang Keji)</span
+                  >
+                  <span class="bc-sl2">фабрика · Шэньчжэнь</span>
+                  <span class="bc-sl2">8 лет на 1688 · рейтинг 4,5 из 5</span>
+                </div>
+                <div class="bc-act">
+                  <span class="b b-xs b-pri">Подробнее</span
+                  ><span class="b b-xs">Все варианты</span
+                  ><span class="b b-xs"
+                    >Ассортимент этого продавца
+                    <span class="cost">· 2 кредита</span></span
+                  ><span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                </div>
+              </div>
+              <div class="bigcard">
+                <div class="ph bigph">фото товара</div>
+                <div class="bc-b">
+                  <span class="bc-nm"
+                    >Ночник-капибара с пультом, 16 цветов</span
+                  >
+                  <span class="bc-pr"
+                    >145 ₽<span class="cny">12,1 ¥</span
+                    ><span class="bc-moq">MOQ 30 шт</span></span
+                  >
+                  <span class="bc-sku">показан вариант: розовый · пульт</span>
+                  <span class="bc-sep"></span>
+                  <span class="bc-sl">Jieyang Meile Toys</span
+                  ><span class="bc-zh"
+                    >揭阳市美乐玩具有限公司 (Jieyang Meile Wanju)</span
+                  >
+                  <span class="bc-sl2">фабрика · Цзеян</span>
+                  <span class="bc-sl2">5 лет на 1688 · рейтинг 4,0 из 5</span>
+                </div>
+                <div class="bc-act">
+                  <span class="b b-xs b-pri">Подробнее</span
+                  ><span class="b b-xs">Все варианты</span
+                  ><span class="b b-xs"
+                    >Запросить отзывы <span class="cost">· 1 кредит</span></span
+                  ><span class="b b-xs">+ в шорт-лист</span
+                  ><span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                </div>
+              </div>
+              <div class="bigcard is-out">
+                <div class="ph bigph">фото товара</div>
+                <div class="bc-b">
+                  <span class="xr"
+                    >исключена агентом: MOQ 500 шт — больше вашего порога
+                    100</span
+                  >
+                  <span class="bc-nm">Ночник-капибара оптом, силикон</span>
+                  <span class="bc-pr"
+                    >96 ₽<span class="cny">8,0 ¥</span
+                    ><span class="bc-moq">MOQ 500 шт</span></span
+                  >
+                  <span class="bc-sep"></span>
+                  <span class="bc-sl">Shantou Xinyu Toys</span
+                  ><span class="bc-zh"
+                    >汕头市新宇玩具有限公司 (Shantou Xinyu Wanju)</span
+                  >
+                  <span class="bc-sl2"
+                    >фабрика · 4 года на 1688 · рейтинг 4,0 из 5</span
+                  >
+                </div>
+                <div class="bc-act">
+                  <span class="b b-xs b-pri">Подробнее</span
+                  ><span class="b b-xs">+ в шорт-лист</span
+                  ><span class="b b-xs b-gh">Ссылка на 1688 ↗</span>
+                </div>
+              </div>
+              <p class="ledge">
+                ещё 69 карточек ниже · прокрутка внутри панели
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Сколько обработано и сколько вошло. Карточки шорт-листа — с
+              розовой рамкой и группой, исключённые — пунктиром и с причиной
+              одной строкой.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Фильтровать шестью чипами, открыть «Подробнее» и «Все варианты» с
+              лоадером, как в быстром поиске, добавить карточку в шорт-лист,
+              даже исключённую.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Цена</b
+            ><span
+              >Варианты и «Подробнее» входят в исследование. Ассортимент
+              продавца — 2 кредита, как везде.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R8 Поставщики ───────────── -->
+  <section class="sec">
+    <div class="spine">Поставщики</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Поставщики: на чём агент построил выбор</h2>
+        <p class="lead">
+          Поставщики шорт-листа сверху, остальные из выборки ниже. У каждого
+          сильные стороны и риски, а недостающие данные названы прямо. Всё это
+          входит в стоимость исследования.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R8</span
+          ><span class="ttl">Вкладка «Поставщики»</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo">
+            <div class="tabs">
+              <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+              ><span class="tab">Выборка агента · 72</span
+              ><span class="tab is-on">Поставщики · 41</span>
+            </div>
+            <div class="mchips">
+              <span class="mchip is-on">из шорт-листа · 7</span
+              ><span class="mchip">все из выборки · 41</span
+              ><span class="mchip is-off">только фабрики</span>
+            </div>
+            <div class="pcards">
+              <div class="supl">
+                <div class="supl-h">
+                  <b>Ningbo Kaixin Lighting</b
+                  ><span class="bc-zh"
+                    >宁波凯欣照明有限公司 (Ningbo Kaixin Zhaoming)</span
+                  ><span class="mtag mtag-own">фабрика</span
+                  ><span class="hd-sp"></span
+                  ><span class="mono" style="color: var(--m-faint)"
+                    >в шорт-листе</span
+                  >
+                </div>
+                <div class="row">
+                  <span><b>9 лет</b> на 1688</span
+                  ><span>рейтинг <b>4,5 из 5</b></span
+                  ><span>повторные <b>24 %</b></span
+                  ><span>в исследовании <b>3 товара</b></span>
+                </div>
+                <div class="row">
+                  <span>лучший SKU: серый · 3 режима</span
+                  ><span><b>166 ₽</b> 13,9 ¥</span><span>MOQ <b>5 шт</b></span>
+                </div>
+                <span class="plus"
+                  >+ стабильные отзывы, отгрузка за 48 ч, низкий MOQ</span
+                >
+                <span class="minus">− цена выше медианы на 17 %</span>
+              </div>
+              <div class="supl">
+                <div class="supl-h">
+                  <b>Guangzhou Huacai Crafts</b
+                  ><span class="bc-zh"
+                    >广州华彩工艺品有限公司 (Guangzhou Huacai Gongyipin)</span
+                  ><span class="mtag mtag-own">фабрика</span
+                  ><span class="hd-sp"></span
+                  ><span class="mono" style="color: var(--m-faint)"
+                    >в шорт-листе</span
+                  >
+                </div>
+                <div class="row">
+                  <span><b>7 лет</b> на 1688</span
+                  ><span>рейтинг <b>4,5 из 5</b></span
+                  ><span>в исследовании <b>2 товара</b></span>
+                </div>
+                <div class="row">
+                  <span>лучший SKU: коричневый · малый</span
+                  ><span><b>156 ₽</b> 13,1 ¥</span><span>MOQ <b>10 шт</b></span>
+                </div>
+                <span class="plus"
+                  >+ заводская проверка 1688, большой ассортимент</span
+                >
+                <span class="minus"
+                  >− материал в карточке «силикон», на фото похоже на ПВХ —
+                  подтвердить · упаковка не указана</span
+                >
+              </div>
+              <div class="supl">
+                <div class="supl-h">
+                  <b>Yiwu Leqi Trading</b
+                  ><span class="bc-zh"
+                    >义乌市乐琪贸易有限公司 (Yiwu Leqi Maoyi)</span
+                  ><span class="mtag mtag-own">посредник</span
+                  ><span class="hd-sp"></span
+                  ><span class="mono" style="color: var(--m-faint)"
+                    >в шорт-листе</span
+                  >
+                </div>
+                <div class="row">
+                  <span><b>3 года</b> на 1688</span
+                  ><span>рейтинг <b>4,0 из 5</b></span
+                  ><span>в исследовании <b>1 товар</b></span>
+                </div>
+                <div class="row">
+                  <span>лучший SKU: тёплый белый · аккумулятор</span
+                  ><span><b>111 ₽</b> 9,3 ¥</span><span>MOQ <b>10 шт</b></span>
+                </div>
+                <span class="plus">+ самая низкая цена среди подходящих</span>
+                <span class="minus"
+                  >− посредник · 4 содержательных отзыва · нет данных о
+                  производителе</span
+                >
+              </div>
+              <p class="ledge">
+                ещё 4 из шорт-листа · 34 поставщика выборки — фильтром «все из
+                выборки»
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R9 Платная выгрузка ───────────── -->
+  <section class="sec">
+    <div class="spine">Выгрузка</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Купить полный шорт-лист»: PDF и Excel за 4 кредита</h2>
+        <p class="lead">
+          Платная только полная выгрузка. Файлы приходят в ленту и в кабинет.
+          Повторное скачивание бесплатно. Если шорт-лист потом пересобран, новая
+          выгрузка снова стоит 4 кредита. Это вопрос к вам, см. ниже.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R9</span
+          ><span class="ttl">После «Купить полный шорт-лист · 4 кредита»</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="msg-u">Купить полный шорт-лист</div>
+            <div class="msg">
+              Готово: полная версия шорт-листа, 7 товаров от 7 поставщиков.
+              Списано 4 кредита.
+            </div>
+            <div class="files">
+              <span class="b b-xs">📄 Шорт-лист — ночник капибара.pdf</span
+              ><span class="b b-xs">📊 Шорт-лист — ночник капибара.xlsx</span>
+            </div>
+            <p class="mlbl">Что внутри</p>
+            <ul class="inc">
+              <li>сравнение 7 товаров и SKU</li>
+              <li>все характеристики вариантов</li>
+              <li>цены, MOQ, остатки, объём, вес</li>
+              <li>подробно о поставщиках</li>
+              <li>критерии и причины включения</li>
+              <li>отзывы и риски</li>
+              <li>ссылки на карточки 1688</li>
+              <li>выводы и рекомендации агента</li>
+            </ul>
+            <span class="sub" style="font-size: 11px; color: var(--m-faint)"
+              >Файлы сохранены в кабинете, раздел «Отчёты». Скачать снова —
+              бесплатно.</span
+            >
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >2 файла и список того, что в них. Кредиты спишутся, только когда
+              оба файла готовы, как в быстром поиске.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что не меняется</b
+            ><span
+              >Бесплатная версия в интерфейсе остаётся. Платная выгрузка
+              дополняет её, а не заменяет.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Цена</b
+            ><span
+              >4 кредита, как полный отчёт быстрого поиска. Повторное скачивание
+              той же версии бесплатно.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── R10 Частично готово ───────────── -->
+  <section class="sec">
+    <div class="spine">Частично</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Частично» — только если исследование реально оборвалось</h2>
+        <p class="lead">
+          Пробелы в данных поставщиков (нет рейтинга, нет доли повторных) — не
+          повод писать «частично»: это уходит в полную версию. «Частично» —
+          только когда прогон не дошёл до конца: таймаут, ошибка, кончились
+          запросы. Тогда одна нейтральная строка, повтор, если он возможен, и
+          всё, что успели собрать, с той же покупкой.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">R10</span
+          ><span class="ttl"
+            >Исследование остановилось по времени на этапе 5</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="rp-h">
+              <span class="st st-wait">частично</span
+              ><span class="mlbl">5 этапов из 6</span>
+            </div>
+            <div class="msg">
+              <b
+                >Собрал не всё: исследование остановилось по времени на этапе
+                «Сравниваю поставщиков».</b
+              >
+              <span class="sub"
+                >Шорт-лист из 6 SKU уже можно использовать. Повтор продолжит с
+                того же места, кредиты не спишутся.</span
+              >
+            </div>
+            <div class="ska">
+              <span class="ph ph-48">фото</span>
+              <span class="nm">Ночник-капибара, силикон · белый, USB-C</span>
+              <span class="sl"
+                >Shenzhen Mingliang · 深圳市明亮科技 (Shenzhen Mingliang Keji) ·
+                фабрика</span
+              >
+              <span class="tx"
+                ><span class="tg">надёжный</span>Тот же силикон и USB-C, что у
+                дорогих моделей, но дешевле большинства — удобно для пробной
+                партии.</span
+              >
+            </div>
+            <p class="ledge">ещё 5 позиций</p>
+            <div class="brow">
+              <span class="b b-pri"
+                >Повторить «Сравниваю поставщиков»
+                <span class="cost">· бесплатно</span></span
+              ><span class="b">Открыть шорт-лист</span
+              ><span class="b"
+                >Купить полный шорт-лист
+                <span class="cost">· 4 кредита</span></span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Одну строку, на каком этапе остановилось, и то, что уже готово.
+              Никаких «нет данных у 23 поставщиков».</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что может сделать</b
+            ><span
+              >Повторить этап бесплатно (если запросы не кончились), открыть
+              PDF, купить полную версию.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Правило</b
+            ><span
+              >Техническая ошибка не списывает повторно. Слабыми вариантами
+              шорт-лист не добиваем — 6, значит 6.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Данные ───────────── -->
+  <section class="sec">
+    <div class="spine">Все данные</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Всё из быстрого поиска и сверх того — и где это лежит</h2>
+        <p class="lead">
+          Исследование собирает всё, что даёт быстрый поиск, и ещё много сверху.
+          Чтобы ничего не потерялось и панель не превратилась в простыню, у
+          каждого вида данных одно место. Лента — разговор и выводы. Панель —
+          объекты по вкладкам. Постоянных вкладок 4, а «Варианты» и «Подробнее»
+          появляются по нажатию, как в быстром поиске.
+        </p>
+      </div>
+      <div class="t-wrap">
+        <table class="t">
+          <tr>
+            <th>данные</th>
+            <th>есть в быстром поиске</th>
+            <th>в исследовании</th>
+            <th>где видно</th>
+          </tr>
+          <tr>
+            <td>
+              <b>Карточки 1688</b>: фото, название, цена ₽/¥, MOQ, показанный
+              SKU
+            </td>
+            <td>20 карточек</td>
+            <td>72 из 240 обработанных</td>
+            <td>«Выборка агента», карточки Q2</td>
+          </tr>
+          <tr>
+            <td>
+              <b>Продавец на карточке</b>: фабрика/посредник, город, стаж,
+              рейтинг
+            </td>
+            <td>да</td>
+            <td>да</td>
+            <td>на карточке и в строке кандидата</td>
+          </tr>
+          <tr>
+            <td><b>Все SKU карточки</b>: цена, остаток, объём, вес</td>
+            <td>по нажатию, с лоадером</td>
+            <td>
+              у 24 кандидатов догружены в прогоне, у остальных — по нажатию
+            </td>
+            <td>вкладка «Варианты» (Q3)</td>
+          </tr>
+          <tr>
+            <td>
+              <b>Полная карточка</b>: ступени цены, характеристики, доставка,
+              ветка 1688, продажи за 30 дней
+            </td>
+            <td>по нажатию</td>
+            <td>у финалистов уже есть</td>
+            <td>вкладка «Подробнее» (Q4)</td>
+          </tr>
+          <tr>
+            <td><b>Отзывы</b></td>
+            <td>1 кредит за карточку</td>
+            <td>
+              у финалистов собраны агентом, бесплатно; у остальных — 1 кредит
+            </td>
+            <td>«Подробнее», блок «Отзывы»</td>
+          </tr>
+          <tr>
+            <td><b>Ассортимент продавца</b></td>
+            <td>2 кредита</td>
+            <td>2 кредита</td>
+            <td>«Подробнее», «Выборка агента»</td>
+          </tr>
+          <tr>
+            <td><b>Рядом по категории</b></td>
+            <td>3 кредита, новый чат</td>
+            <td>то же</td>
+            <td>строка «Ветка 1688» в «Подробнее»</td>
+          </tr>
+          <tr>
+            <td>
+              <b>Кандидаты</b>: лучший SKU на поставщика, балл, доверие, метка
+              «в шорт-листе»
+            </td>
+            <td>после «Собрать шорт-лист»</td>
+            <td>24 кандидата, у 7 метка</td>
+            <td>вкладка «Шорт-лист»</td>
+          </tr>
+          <tr>
+            <td><b>Итог на складе</b>: карго и белый ввоз, доли, прибыль</td>
+            <td>после шорт-листа</td>
+            <td>у всех 24 кандидатов</td>
+            <td>«Расчёт», итог — в строке кандидата</td>
+          </tr>
+          <tr class="is-new">
+            <td>
+              <b>Короткий анализ по SKU</b>: почему выбрал, кому подходит, что
+              проверить
+            </td>
+            <td>—</td>
+            <td>да, голосом байера, без цифр и юаней</td>
+            <td>лента</td>
+          </tr>
+          <tr>
+            <td><b>Бесплатный PDF шорт-листа</b></td>
+            <td>бесплатная версия отчёта</td>
+            <td>да, по текущему составу</td>
+            <td>«Открыть шорт-лист» → вкладка «Отчёт», «Скачать PDF»</td>
+          </tr>
+          <tr>
+            <td><b>Критерии, допущения, пробелы данных</b></td>
+            <td>—</td>
+            <td>да</td>
+            <td>только полная версия</td>
+          </tr>
+          <tr>
+            <td>
+              <b>«Почему в шорт-листе»</b> и группа: дешевле всех / надёжные /
+              баланс
+            </td>
+            <td>—</td>
+            <td>у каждого из 7</td>
+            <td>строка кандидата, «Подробнее»</td>
+          </tr>
+          <tr>
+            <td><b>Риски по позиции</b> и недостающие данные</td>
+            <td>—</td>
+            <td>да</td>
+            <td>строка кандидата, «Поставщики»</td>
+          </tr>
+          <tr>
+            <td><b>Исключённые карточки</b> с причиной</td>
+            <td>—</td>
+            <td>да</td>
+            <td>«Выборка агента», фильтр «исключены агентом»</td>
+          </tr>
+          <tr>
+            <td>
+              <b>Поставщики</b>: товары в исследовании, лучший SKU, сильные
+              стороны, риски
+            </td>
+            <td>—</td>
+            <td>41 поставщик</td>
+            <td>вкладка «Поставщики»</td>
+          </tr>
+          <tr>
+            <td><b>Направления поиска</b> и сколько дало каждое</td>
+            <td>—</td>
+            <td>5 направлений</td>
+            <td>
+              лента, блок прогресса; после результата — свёрнуто под анализом
+            </td>
+          </tr>
+          <tr>
+            <td><b>Запросы к 1688</b></td>
+            <td>—</td>
+            <td>60 на исследование, тратит агент</td>
+            <td>только блок прогресса</td>
+          </tr>
+          <tr>
+            <td><b>Полная выгрузка</b> PDF и Excel</td>
+            <td>полный отчёт · 4 кредита</td>
+            <td>полный шорт-лист · 4 кредита</td>
+            <td>лента и кабинет</td>
+          </tr>
+        </table>
+      </div>
+      <p class="note">
+        <b>Правило раскладки:</b> новое по сравнению с быстрым поиском не
+        получает новых вкладок, а встаёт в уже знакомые места. Анализ идёт в
+        ленту, «почему» и риск — в строку кандидата и «Подробнее», расчёт — во
+        вкладку «Расчёт». Поэтому человек, который пользовался быстрым поиском,
+        находит всё на тех же местах, просто полнее.
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────── Вопросы ───────────── -->
+  <section class="sec">
+    <div class="spine">Вопросы</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Что я додумал и что решать вам</h2>
+        <p class="lead">
+          В задании этого нет, а для макета решение понадобилось. Везде принята
+          рекомендация, её можно поменять.
+        </p>
+      </div>
+      <ol class="qs">
+        <li>
+          <b>Решено 01.10.</b> Нет пузыря после формы; лимит один раз и «в этом
+          исследовании»; «Изменить направления» не делаем; анализ — по SKU, без
+          цифр и юаней, иероглифы с латиницей; «Открыть шорт-лист» — PDF в
+          панели со «Скачать»; состав полной версии виден до покупки; «частично»
+          — только при обрыве.
+        </li>
+        <li>
+          <b>Лимит 60.</b> Теперь считаются сетевые запросы (поиск по фото = 2).
+          Оставить 60 или поднять — скажу точное число после живого прогона.
+        </li>
+        <li>
+          <b>Никто не прошёл требования.</b> Шорт-лист пустой, и в ленте прямо:
+          «ни один поставщик не прошёл требования: …», без подстановки «лучших
+          по баллу».
+        </li>
+        <li>
+          <b>Кнопки «Глазами байера»</b> в 6 местах (под быстрым поиском,
+          кабинет, «Подробнее», витрина) — переименовать или оставить?
+        </li>
+        <li>
+          <b>Транслитерация и запрет юаней</b> — только в анализе исследования
+          или во всех ответах агента?
+        </li>
+      </ol>
+    </div>
+  </section>
+</div>

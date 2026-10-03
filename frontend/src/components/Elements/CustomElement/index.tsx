@@ -31,6 +31,7 @@ import {
   IAction,
   ICustomElement,
   IElement,
+  IFileRef,
   askUserState,
   sessionIdState,
   useAuth,
@@ -53,7 +54,8 @@ type Handlers = {
   sendUserMessage: (
     message: string,
     payload?: UserMessagePayload,
-    command?: string
+    command?: string,
+    files?: IFileRef[]
   ) => unknown;
   submitElement: (props: Record<string, unknown>) => void;
   cancelElement: () => void;
@@ -122,9 +124,15 @@ const CustomElement = memo(function CustomElement({
       if (!sessionId) return;
       return apiClient.callAction(action, sessionId);
     },
-    sendUserMessage: (message, payload, command) =>
+    // `files` are the ids `useChatInteract().uploadFile` resolved to. They
+    // ride beside the step, not in it: the server turns them into
+    // `message.elements` only from `fileReferences`, so an element that put
+    // them in the payload would hand `on_message` a string where the
+    // composer's path hands it an Image.
+    sendUserMessage: (message, payload, command, files) =>
       sendMessage(
-        buildUserMessage(message, user?.identifier || 'User', payload, command)
+        buildUserMessage(message, user?.identifier || 'User', payload, command),
+        files
       ),
     submitElement: (props) => {
       if (
@@ -176,8 +184,9 @@ const CustomElement = memo(function CustomElement({
         sendUserMessage: (
           message: string,
           payload?: UserMessagePayload,
-          command?: string
-        ) => latest.current.sendUserMessage(message, payload, command),
+          command?: string,
+          files?: IFileRef[]
+        ) => latest.current.sendUserMessage(message, payload, command, files),
         submitElement: (props: Record<string, unknown>) =>
           latest.current.submitElement(props),
         cancelElement: () => latest.current.cancelElement()

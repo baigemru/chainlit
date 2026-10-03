@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { useRecoilValue } from 'recoil';
 
+import { composerState } from './composerState';
 import { useChatTransport } from './context';
 import {
   acceptingState,
@@ -25,6 +26,7 @@ const useChatData = () => {
   const tasklists = useRecoilValue(tasklistState);
   const actions = useRecoilValue(actionState);
   const askUser = useRecoilValue(askUserState);
+  const composer = useRecoilValue(composerState);
 
   // Read straight from the transport rather than from a mirror in the store:
   // the connection is a live object, and every copy of its state that lived
@@ -53,6 +55,8 @@ const useChatData = () => {
     accepting,
     actions,
     askUser,
+    // What the server said the composer says; `{}` is the configured default.
+    composer,
     connected,
     disabled,
     elements,

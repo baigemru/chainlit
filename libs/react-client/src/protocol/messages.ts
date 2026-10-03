@@ -113,6 +113,12 @@ export interface AudioElement {
   autoPlay?: boolean;
 }
 
+export interface ComposerState {
+  t: 'composer.state';
+  placeholder?: string | null;
+  hint?: string | null;
+}
+
 export interface CustomElement {
   type: 'custom';
   id: string;
@@ -556,6 +562,7 @@ export type ServerMsg =
   | ThreadOpen
   | SessionHandoff
   | SidebarState
+  | ComposerState
   | Toast
   | AccountBadge;
 
@@ -582,6 +589,7 @@ export type ServerMsgTag =
   | 'thread.open'
   | 'session.handoff'
   | 'sidebar.state'
+  | 'composer.state'
   | 'toast'
   | 'account.badge';
 

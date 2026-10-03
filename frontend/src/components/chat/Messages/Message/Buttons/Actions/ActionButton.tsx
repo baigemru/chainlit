@@ -54,7 +54,7 @@ interface ActionProps {
 }
 
 const ActionButton = ({ action }: ActionProps) => {
-  const { loading, askUser } = useContext(MessageContext);
+  const { accepting, askUser } = useContext(MessageContext);
   const isMobile = useIsMobile();
   const apiClient = useContext(ChainlitContext);
   const sessionId = useRecoilValue(sessionIdState);
@@ -121,7 +121,11 @@ const ActionButton = ({ action }: ActionProps) => {
         // message width instead of reaching past it.
         stretched && 'w-full min-w-0 justify-start'
       )}
-      disabled={loading || isRunning}
+      // The turn, not the spinner: a `cl.run_in_background` run lights the
+      // spinner and leaves the turn open, and its own buttons ("carry on in
+      // the background", the commands under a partial result) are the ones
+      // meant to be pressed while it runs. Absent means open.
+      disabled={accepting === false || isRunning}
       title={isMobile ? content : undefined}
     >
       {icon}

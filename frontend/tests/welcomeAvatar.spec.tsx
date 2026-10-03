@@ -25,6 +25,8 @@ vi.mock('@chainlit/react-client', () => ({
   ChainlitContext: createContext<any>({
     buildEndpoint: (path: string) => path
   }),
+  // What the server said the composer says: nothing, here.
+  useChatData: () => ({ composer: {} }),
   useChatMessages: () => ({ messages: [] }),
   useChatSession: () => mockUseChatSession(),
   useConfig: () => mockUseConfig()

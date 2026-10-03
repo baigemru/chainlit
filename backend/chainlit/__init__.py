@@ -22,6 +22,7 @@ from chainlit.account import (
 from chainlit.action import Action
 from chainlit.background import run_in_background
 from chainlit.chat_context import chat_context
+from chainlit.composer import Composer
 from chainlit.context import context
 
 # Renamed on the way out: inside the controller it is one of two spellings of
@@ -118,6 +119,7 @@ __all__ = [
     "AskUserMessage",
     "Audio",
     "ChatProfile",
+    "Composer",
     "CustomElement",
     "Dataframe",
     "ErrorMessage",

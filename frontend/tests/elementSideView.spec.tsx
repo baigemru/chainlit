@@ -1,4 +1,5 @@
 import { fireEvent, render } from '@testing-library/react';
+import { RecoilRoot } from 'recoil';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -45,7 +46,19 @@ let state: IElementSidebarState;
 // while you were elsewhere" -- is the package's and is tested there; here
 // it is only what the strip draws for it.
 let fresh: ReadonlySet<string> = new Set();
-vi.mock('@chainlit/react-client', () => ({
+// Real atoms: the panel reads whether an ask claims the screen through a
+// selector over `askUserState` and `messagesState`, and the defaults (no ask,
+// no messages) are what these tests mean.
+// From the package's source, not its build: the build resolves `recoil`
+// from its own `node_modules`, and an atom registered with that copy is
+// missing from this `RecoilRoot`.
+vi.mock('@chainlit/react-client', async () => ({
+  ...(await vi.importActual<typeof import('../../libs/react-client/src/state')>(
+    '../../libs/react-client/src/state'
+  )),
+  ...(await vi.importActual<
+    typeof import('../../libs/react-client/src/utils/message')
+  >('../../libs/react-client/src/utils/message')),
   useElementSidebar: () => ({ state, dispatch: mockDispatch }),
   useFreshSlots: () => fresh
 }));
@@ -71,7 +84,9 @@ const mount = () =>
   render(
     <ResizablePanelGroup direction="horizontal">
       <ElementSideView />
-    </ResizablePanelGroup>
+    </ResizablePanelGroup>,
+    // `rerender` keeps the wrapper, so the store survives it.
+    { wrapper: RecoilRoot }
   );
 
 const body = (id: string) =>

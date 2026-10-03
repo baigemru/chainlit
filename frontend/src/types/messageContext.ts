@@ -16,6 +16,14 @@ interface IMessageContext {
   showStepDetails: boolean;
   askUser?: IAsk;
   loading: boolean;
+  /**
+   * Whether it is the user's turn: `task.indicator.accepting`, not
+   * `loading`. The two differ during a `cl.run_in_background` run, which
+   * lights the spinner while the person may still type and press buttons.
+   * Optional because absent means open, as on the wire: a provider that
+   * says nothing about the turn must not lock what it renders.
+   */
+  accepting?: boolean;
   showFeedbackButtons: boolean;
   uiName: string;
   allowHtml?: boolean;

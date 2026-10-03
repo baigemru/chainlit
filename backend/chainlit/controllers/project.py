@@ -103,6 +103,7 @@ from chainlit.persistence.storage.disposition import content_disposition, elemen
 from chainlit.persistence.writer import SessionWriter
 from chainlit.protocol.payloads import Element
 from chainlit.security import AuthedRequest
+from chainlit.ws.composer import COMPOSER_META_KEY
 from chainlit.ws.sidebar import SIDEBAR_META_KEY
 
 __all__ = (
@@ -144,10 +145,11 @@ Language = Annotated[
 
 # Metadata keys that belong to the running session and must never travel out
 # on a shared thread: they carry the app's own configuration and the user's
-# environment -- and the engine's own records (the element panel's, today),
-# which describe a screen the reader of a shared thread is not shown.
+# environment -- and the engine's own records (the element panel's and the
+# composer's), which describe a screen the reader of a shared thread is not
+# shown.
 PRIVATE_METADATA_KEYS = frozenset({"chat_profile", "chat_settings", "env"}) | frozenset(
-    {SIDEBAR_META_KEY}
+    {SIDEBAR_META_KEY, COMPOSER_META_KEY}
 )
 
 # The only element type a client is allowed to write. Everything else is

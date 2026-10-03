@@ -1,6 +1,7 @@
 import { useCallback, useContext, useMemo, useRef } from 'react';
 import { useRecoilCallback, useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
+import { composerFromFrame, composerState } from 'src/composerState';
 import {
   acceptingState,
   accountBadgeState,
@@ -96,6 +97,7 @@ const useChatSession = () => {
   const setActions = useSetRecoilState(actionState);
   const setProtocolError = useSetRecoilState(protocolErrorState);
   const setAccountBadge = useSetRecoilState(accountBadgeState);
+  const setComposer = useSetRecoilState(composerState);
   // The setter alone, not `useAuthState()`: ten components call this hook, and
   // that hook subscribes its caller to `userState` and `authState` for a value
   // nothing here reads. Same setter, no re-render.
@@ -459,6 +461,13 @@ const useChatSession = () => {
         applySidebarFrame(msg);
       },
 
+      'composer.state': (msg) => {
+        // The whole state, from this frame alone: an absent field is the
+        // configured default, so spreading the previous value would keep a
+        // hint the server has just taken away.
+        setComposer(composerFromFrame(msg));
+      },
+
       // ---- misc ------------------------------------------------------
       'account.badge': ({ count }) => {
         // Whatever the hook said, written as given. The server recomputes
@@ -503,6 +512,7 @@ const useChatSession = () => {
       setActions,
       setAskUser,
       setChatProfile,
+      setComposer,
       setCurrentThreadId,
       setElements,
       setFirstUserInteraction,

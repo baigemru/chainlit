@@ -11,6 +11,7 @@ const mockSpontaneousUpload = vi.fn();
 const mockSidebarAvailable = vi.fn();
 const mockParentThreadId = vi.fn();
 const mockSidebarDispatch = vi.fn();
+const mockComposer = vi.fn();
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mockUseIsMobile()
@@ -26,7 +27,12 @@ vi.mock('@chainlit/react-client', () => ({
     user: undefined,
     data: mockSidebarAvailable() ? { requireLogin: true } : undefined
   }),
-  useChatData: () => ({ askUser: undefined, disabled: false, loading: false }),
+  useChatData: () => ({
+    askUser: undefined,
+    composer: mockComposer(),
+    disabled: false,
+    loading: false
+  }),
   useChatInteract: () => ({
     sendMessage: vi.fn(),
     replyMessage: vi.fn(),
@@ -98,6 +104,7 @@ beforeEach(() => {
   mockSpontaneousUpload.mockReturnValue(true);
   mockSidebarAvailable.mockReturnValue(false);
   mockParentThreadId.mockReturnValue(undefined);
+  mockComposer.mockReturnValue({});
 });
 
 describe('MessageComposer, one pill on every width', () => {
@@ -217,5 +224,26 @@ describe('MessageComposer on a wide screen', () => {
     expect(submit().parentElement!.contains(input())).toBe(true);
     expect(submit().className).toContain('h-10');
     expect(chevron()!.parentElement!.contains(submit())).toBe(true);
+  });
+});
+
+describe('the placeholder', () => {
+  it('is the translation while the server has said nothing', () => {
+    mockUseIsMobile.mockReturnValue(false);
+
+    renderComposer();
+
+    expect(input().getAttribute('placeholder')).toBe('chat.input.placeholder');
+  });
+
+  it('is the conversation’s own once the server has said one', () => {
+    // `composer.state`: an application explaining what typing does now —
+    // a correction to a running job rather than a new question.
+    mockUseIsMobile.mockReturnValue(false);
+    mockComposer.mockReturnValue({ placeholder: 'Add a correction' });
+
+    renderComposer();
+
+    expect(input().getAttribute('placeholder')).toBe('Add a correction');
   });
 });

@@ -58,6 +58,7 @@ from chainlit.protocol.payloads import (
     FileRef,
     Step as StepPayload,
 )
+from chainlit.ws.composer import ComposerState
 from chainlit.ws.outbound import Outbound
 from chainlit.ws.sidebar import SidebarState
 
@@ -310,6 +311,12 @@ class Session:
         #: every reconnect. It used to be the last frame anybody sent, which
         #: is why closing the panel destroyed what was in it.
         self.sidebar = SidebarState()
+
+        #: What the composer says in this conversation -- placeholder and the
+        #: line under it. Session state for the panel's reason: a reload that
+        #: forgot it would put the translation back over a field the
+        #: application had just explained.
+        self.composer = ComposerState()
 
         self.files: Dict[str, Dict[str, Any]] = {}
         self.files_spec: Dict[str, Any] = {}

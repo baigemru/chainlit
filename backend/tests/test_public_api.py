@@ -58,6 +58,7 @@ EXPECTED_EXPORTS = {
     "AskUserMessage",
     "Audio",
     "ChatProfile",
+    "Composer",
     "CustomElement",
     "Dataframe",
     "ErrorMessage",

@@ -47,7 +47,7 @@ interface Props {
 const MessagesContainer = ({ navigate }: Props) => {
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
-  const { elements, askUser, loading, actions } = useChatData();
+  const { elements, askUser, loading, accepting, actions } = useChatData();
   const { messages } = useChatMessages();
   const { uploadFile: _uploadFile } = useChatInteract();
   const setMessages = useSetRecoilState(messagesState);
@@ -169,6 +169,7 @@ const MessagesContainer = ({ navigate }: Props) => {
       latex: config?.features?.latex,
       renderUserMarkdown: config?.features?.user_message_markdown,
       loading,
+      accepting,
       showFeedbackButtons: enableFeedback,
       uiName: config?.ui?.name || '',
       cot: config?.ui?.cot || 'hidden',
@@ -184,6 +185,7 @@ const MessagesContainer = ({ navigate }: Props) => {
     askUser,
     enableFeedback,
     loading,
+    accepting,
     activeWaitStepId,
     config?.ui?.name,
     config?.ui?.cot,
@@ -254,6 +256,9 @@ const MessagesContainer = ({ navigate }: Props) => {
     () => ({
       ...memoizedContext,
       loading: false,
+      // Nobody's turn is running in a chat that ended, so its action
+      // buttons stay pressable while the live chat answers.
+      accepting: true,
       // A kept transcript can contain a copy of the step that is currently
       // in wait mode in the live conversation; ended sections never shimmer.
       activeWaitStepId: undefined,

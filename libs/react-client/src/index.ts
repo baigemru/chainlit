@@ -9,6 +9,7 @@ export * from './breakpoint';
 export * from './types';
 export * from './context';
 export * from './state';
+export * from './composerState';
 export * from './protocol';
 export * from './socket';
 export * from './transport';

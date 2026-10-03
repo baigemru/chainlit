@@ -106,7 +106,15 @@ const EXPECTED = [
   'my-0.5',
   'opacity-80',
   'tracking-widest',
-  'font-mono'
+  'font-mono',
+  // A research block: the live dot and the fact / partial colours.
+  'animate-pulse',
+  'text-success',
+  'text-warning',
+  'bg-warning/10',
+  'border-warning/40',
+  // The offer plaque on the panel surface (panda ResearchShortlist).
+  'bg-panel'
 ];
 
 /**
@@ -135,7 +143,9 @@ const ARBITRARY: [string, string][] = [
   ['rounded-[7px]', 'border-radius: 7px'],
   ['text-[11.5px]', 'font-size: 11.5px'],
   ['px-[9px]', 'padding-left: 9px'],
-  ['py-[2px]', 'padding-top: 2px']
+  ['py-[2px]', 'padding-top: 2px'],
+  // A PDF page previewed inside a panel tab (panda ResearchReport).
+  ['h-[60vh]', 'height: 60vh']
 ];
 
 /** The CSS selector for a class, with the characters CSS escapes. */

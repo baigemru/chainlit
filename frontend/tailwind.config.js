@@ -70,7 +70,12 @@ export default {
           border: 'hsl(var(--sidebar-border))',
           ring: 'hsl(var(--sidebar-ring))'
         },
-        command: '#0066FF'
+        command: '#0066FF',
+        // A fact and an estimate, the two states panda's elements tell apart
+        // besides `destructive`. The fallback keeps the class meaningful on a
+        // host whose theme never defines the variable.
+        success: 'hsl(var(--success, 158 64% 32%) / <alpha-value>)',
+        warning: 'hsl(var(--warning, 38 92% 40%) / <alpha-value>)'
       },
       keyframes: {
         'accordion-down': {
@@ -195,6 +200,17 @@ export default {
     'bg-primary/5',
     'bg-card',
     'transition-colors',
+    // The live dot of a running research and the fact / partial colours of
+    // its block (panda RunProgress, SupplierRows).
+    'animate-pulse',
+    // The side panel's own surface, which an offer plaque in the feed sits
+    // on (panda ResearchShortlist), and the height of a PDF page previewed
+    // inside a panel tab (panda ResearchReport).
+    'bg-panel',
+    'h-[60vh]',
+    {
+      pattern: /^(?:text|bg|border)-(?:success|warning)(?:\/(?:10|15|20|40))?$/
+    },
     { pattern: /^bg-primary\/10$/, variants: ['dark'] },
     // A card casts a shadow only on a light page; in the dark one it reads
     // as a smudge. `dark:` cannot be a plain string entry, hence the pattern.

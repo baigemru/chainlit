@@ -1,9 +1,13 @@
 import { cn } from '@/lib/utils';
 import { ArrowLeft, X } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import { selector, useRecoilValue } from 'recoil';
 
 import {
   IElementSidebarSlot,
+  askUserState,
+  findMessageById,
+  messagesState,
   useElementSidebar,
   useFreshSlots
 } from '@chainlit/react-client';
@@ -38,7 +42,47 @@ import { Button } from './ui/button';
  * simply has no tab strip. Rendering a lone slot outside `Tabs` and moving it
  * in when a second appeared would remount it on the way — the exact thing the
  * paragraph above is about.
+ *
+ * **On a phone, an ask that claims the screen outranks the sheet.** The
+ * sheet is modal: its overlay covers the feed. Most asks can wait behind it
+ * -- the user raised the sheet and closes it when they choose. An ask whose
+ * message is anchored to the top (`metadata.anchor === "top"`, the
+ * application's `anchor="top"`) has said it wants to be read now, and an
+ * anchor that scrolls the question to the top of a feed nobody can see is
+ * no anchor at all. While such an ask stands the sheet is closed by its
+ * `open` prop -- a prop change, which Radix's `useControllableState` never
+ * reports through `onOpenChange`, so no `hide` reaches the server and the
+ * sheet comes back by itself, on the same tab, when the ask ends. The
+ * accepted cost is the one exception to the first rule: a closed Radix
+ * dialog unmounts its content, so element-local state in the sheet does not
+ * survive such an ask. Keeping it would need a force-mounted portal, and a
+ * modal dialog that is force-mounted still aria-hides the feed. The desktop
+ * panel sits beside the feed and is left alone.
  */
+
+/**
+ * "An ask anchored to the top stands", as one boolean.
+ *
+ * A selector, not `useChatMessages()` in the panel: that subscribed the
+ * whole panel -- every slot body, every custom element in it -- to the feed,
+ * so each `step.update` of a streaming answer re-rendered the sheet and ran
+ * a recursive lookup over the transcript. Recoil only reports a selector to
+ * its readers when its value changes, and its dependencies are the atoms it
+ * read on the last run: with no ask standing it never reads `messagesState`
+ * at all, and with one it re-renders the panel only when the answer flips.
+ * The ask's `stepId` is the id of the message that asks it.
+ */
+const askClaimsScreenState = selector<boolean>({
+  key: 'ElementSideView/AskClaimsScreen',
+  get: ({ get }) => {
+    const ask = get(askUserState);
+    if (!ask) return false;
+    return (
+      findMessageById(get(messagesState), ask.spec.stepId)?.metadata?.anchor ===
+      'top'
+    );
+  }
+});
 
 /**
  * The slot bodies, kept mounted, with only the active one visible.
@@ -211,6 +255,7 @@ export default function ElementSideView() {
   const { state, dispatch } = useElementSidebar();
   const fresh = useFreshSlots();
   const isMobile = useIsMobile();
+  const askClaimsScreen = useRecoilValue(askClaimsScreenState);
   const [isVisible, setIsVisible] = useState(false);
 
   const active = state.active ?? state.slots[0]?.id ?? '';
@@ -259,7 +304,10 @@ export default function ElementSideView() {
 
   if (isMobile) {
     return (
-      <Sheet open onOpenChange={(open) => !open && dispatch({ op: 'hide' })}>
+      <Sheet
+        open={!askClaimsScreen}
+        onOpenChange={(open) => !open && dispatch({ op: 'hide' })}
+      >
         {/* Almost the whole screen: the sheet's default three quarters left a
             product card squeezed against a 175px image on a phone. */}
         <SheetContent

@@ -201,7 +201,7 @@ INTENTIONALLY_DROPPED: dict[str, str] = {
 
 # Tags with no counterpart in today's protocol — additions, not renames.
 NEW_SERVER_TAGS: frozenset[str] = frozenset(
-    {"session.ready", "error", "hb", "account.badge"}
+    {"session.ready", "error", "hb", "account.badge", "composer.state"}
 )
 NEW_CLIENT_TAGS: frozenset[str] = frozenset({"hb.ack", "sidebar.user"})
 

@@ -31,7 +31,12 @@ from chainlit.controllers.project import hide_resume_deleted
 from chainlit.emitter import Emitter
 from chainlit.logger import logger
 from chainlit.persistence.config import isolated
-from chainlit.persistence.records import StepRecord, ThreadDetail, ThreadPatch
+from chainlit.persistence.records import (
+    ElementRecord,
+    StepRecord,
+    ThreadDetail,
+    ThreadPatch,
+)
 from chainlit.persistence.writer import (
     PatchThread,
     SaveStep,
@@ -47,6 +52,10 @@ from chainlit.protocol.payloads import (
     Step,
 )
 from chainlit.utils import utc_now
+from chainlit.ws.composer import (
+    COMPOSER_META_KEY,
+    state_from_meta as composer_from_meta,
+)
 from chainlit.ws.handshake import Arrival
 from chainlit.ws.registry import SessionRegistry
 from chainlit.ws.session import PendingAsk, Session, TranscriptEntry
@@ -54,6 +63,7 @@ from chainlit.ws.sidebar import SIDEBAR_META_KEY, state_from_meta
 
 if TYPE_CHECKING:
     from chainlit.action import Action
+    from chainlit.element import Element as ElementObject
     from chainlit.persistence.config import Persistence
     from chainlit.protocol.client import Hello
     from chainlit.transit_store import TransitStore
@@ -428,6 +438,10 @@ class ApplicationRunner:
                 for row in all_rows
             ],
         )
+        # Beside the panel and for its reason: what the composer said is the
+        # engine's record, and an application that set it once should not
+        # have to say it again in ``on_chat_resume``.
+        session.composer = composer_from_meta(engine_metadata.get(COMPOSER_META_KEY))
         session.first_interaction = "resume"
         session.resumed_thread_id = thread_id
         # A resume *is* the start of this chat.
@@ -922,6 +936,15 @@ class ApplicationRunner:
         if callback is None:
             raise LookupError(action.get("name", ""))
         self._bind(session)
+        if not session.first_interaction:
+            # A click is the user's first move as much as a message is. The
+            # writer holds a fresh thread's rows until this moment and
+            # forgets them if it never comes, so a conversation started from
+            # a button (a form that uploads its file and calls an action)
+            # ran to the end without ever reaching the history.
+            await persist.open_thread(
+                session, str(action.get("label") or action.get("name") or "action")
+            )
         return await callback(Action(**dict(action)))
 
     # ------------------------------------------------- delivery from outside
@@ -936,6 +959,7 @@ class ApplicationRunner:
         metadata: Optional[Mapping[str, Any]] = None,
         user_identifier: Optional[str] = None,
         actions: Optional[Sequence["Action"]] = None,
+        elements: Optional[Sequence["ElementObject"]] = None,
     ) -> str:
         """Put a message in a conversation from outside any session.
 
@@ -970,12 +994,37 @@ class ApplicationRunner:
         closed tab with its "what next" buttons dropped is a result the
         person reads and cannot act on.
 
+        ``elements`` take the same two roads and land as the rows an element
+        sent from ``on_message`` would have left: ``forId`` the delivered
+        step, ``threadId`` the thread, ``id`` the element's own -- so the
+        resume files them under the message, and a later ``update()`` (or a
+        second delivery) of the same id overwrites the row instead of adding
+        one. Only elements whose row is the whole element are accepted: a
+        ``CustomElement`` (its props are what the client draws) or one given
+        a ``url``. A blob element is refused on both roads, before either is
+        taken -- the stored road has no session to spool it through, and a
+        caller whose delivery works only while the tab happens to be open
+        has a bug that shows up in production.
+
         What it does not do is decide whether the message should be sent
         twice. A caller retrying a webhook owns that question and the answer
         is its own: pass a deterministic ``id`` and the row is upserted
         rather than doubled.
         """
+        from chainlit.element import CustomElement
         from chainlit.message import Message
+
+        for element in elements or ():
+            if not isinstance(element, CustomElement) and (
+                not element.url
+                or element.path is not None
+                or element.content is not None
+            ):
+                raise ValueError(
+                    f"deliver_to_thread cannot carry element {element.name!r}: "
+                    "only a CustomElement or an element given a url can be "
+                    "stored without a session to upload its blob through."
+                )
 
         session = self.registry.find_thread(thread_id)
         if session is not None:
@@ -986,6 +1035,7 @@ class ApplicationRunner:
                 id=id,
                 metadata=dict(metadata) if metadata is not None else None,
                 actions=list(actions) if actions else None,
+                elements=list(elements) if elements else None,
             ).send()
             return "live"
 
@@ -1012,6 +1062,21 @@ class ApplicationRunner:
             ]
             for action in actions:
                 action.forId = step_id
+        element_records: list[ElementRecord] = []
+        for element in elements or ():
+            # The caller's object is told where it landed, as the buttons
+            # are: ``update()`` on it later re-sends under this step.
+            element.for_id = step_id
+            element.thread_id = thread_id
+            # Absent rather than null for what the element does not have, so
+            # a redelivery over a row a live session already wrote leaves
+            # that row's blob columns alone.
+            element_records.append(
+                msgspec.convert(
+                    {k: v for k, v in element.to_dict().items() if v is not None},
+                    ElementRecord,
+                )
+            )
         record = StepRecord(
             id=step_id,
             type="assistant_message",
@@ -1023,7 +1088,9 @@ class ApplicationRunner:
             end=moment,
             metadata=stored_metadata,
         )
-        await isolated(self._store_delivery(thread_id, record, user_identifier))
+        await isolated(
+            self._store_delivery(thread_id, record, user_identifier, element_records)
+        )
         return "stored"
 
     async def _store_delivery(
@@ -1031,6 +1098,7 @@ class ApplicationRunner:
         thread_id: str,
         record: StepRecord,
         user_identifier: Optional[str],
+        elements: Sequence[ElementRecord] = (),
     ) -> None:
         assert self.persistence is not None
         async with self.persistence.uow() as unit:
@@ -1039,6 +1107,10 @@ class ApplicationRunner:
                     thread_id, ThreadPatch(user_identifier=user_identifier)
                 )
             await unit.steps.save(record)
+            # After the step: it is what creates the thread row the
+            # elements' ``threadId`` foreign key points at.
+            for element in elements:
+                await unit.elements.save(element)
             # After the step, not instead of it: the owner patch above already
             # bumped ``updatedAt``, and the history is sorted by it, so a
             # thread whose last write is this message has to sort as of now.

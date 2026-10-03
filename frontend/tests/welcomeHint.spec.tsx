@@ -8,12 +8,14 @@ import WelcomeScreen from '@/components/chat/WelcomeScreen';
 
 const mockUseConfig = vi.fn();
 const mockUseChatSession = vi.fn();
+const mockUseChatData = vi.fn();
 
 vi.mock('@chainlit/react-client', () => ({
   MOBILE_BREAKPOINT: 768,
   ChainlitContext: createContext<any>({
     buildEndpoint: (path: string) => path
   }),
+  useChatData: () => mockUseChatData(),
   useChatMessages: () => ({ messages: [] }),
   useChatSession: () => mockUseChatSession(),
   useConfig: () => mockUseConfig()
@@ -54,6 +56,7 @@ const withProfiles = (profiles: ChatProfile[], current?: string) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockUseChatData.mockReturnValue({ composer: {} });
 });
 
 describe('the composer hint', () => {
@@ -95,6 +98,33 @@ describe('the composer hint', () => {
 
   it('draws nothing before a profile is settled', () => {
     withProfiles([profile('Entry', { composer_hint: 'a hint' })], undefined);
+
+    const { container } = render(<WelcomeScreen {...props} />);
+
+    expect(container.querySelector('.composer-hint')).toBeNull();
+  });
+
+  it('gives way to what the server said for this conversation', () => {
+    withProfiles(
+      [profile('Entry', { composer_hint: 'Enter is a quick search' })],
+      'Entry'
+    );
+    mockUseChatData.mockReturnValue({ composer: { hint: 'Research is on' } });
+
+    render(<WelcomeScreen {...props} />);
+
+    expect(screen.getByText('Research is on')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Enter is a quick search')
+    ).not.toBeInTheDocument();
+  });
+
+  it('is taken away by an empty hint from the server', () => {
+    withProfiles(
+      [profile('Entry', { composer_hint: 'Enter is a quick search' })],
+      'Entry'
+    );
+    mockUseChatData.mockReturnValue({ composer: { hint: '' } });
 
     const { container } = render(<WelcomeScreen {...props} />);
 

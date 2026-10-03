@@ -1920,3 +1920,205 @@ async def test_live_a_background_run_keeps_its_handle_and_its_composer(
 
             after = await drain_live(sock)
             assert last_indicator(after) == (False, True)
+
+
+# --------------------------------------------------------------------------
+# Live uvicorn: the composer's words and the turn, across a reload and a resume
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_reload_gets_the_composer_back(ws_impl: str) -> None:
+    """F5 over a socket that really closed, with the composer explained.
+
+    The placeholder used to be a translation and the hint a profile
+    property: nothing on the server remembered what the application had said
+    about the field, so a reload put the translation back over a running job.
+    Here the browser's connection goes, the handler unwinds for real, and the
+    reload is told what the composer says -- after the panel, before the
+    spinner, once. Then the composer is cleared while nobody is connected,
+    and the next reload is told *that*, as a bare frame: a client holding the
+    old hint has nothing else to correct it.
+    """
+    from chainlit.protocol.server import ComposerState
+
+    handler, _middleware, registry = build()
+
+    async with live_server(Litestar([handler]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url) as first:
+            await open_live(first, pageLoad=True, threadId=THREAD)
+            session = await wait_for_session(registry)
+            # No application behind ``build``: the model a
+            # ``cl.Composer.set(...)`` would have left is written directly.
+            session.composer = ComposerState(
+                placeholder="Add a correction", hint="41 of 60 left"
+            )
+
+        await asyncio.sleep(0.2)
+        assert session.connected is False
+
+        async with connect(url) as second:
+            await second.send(hello(pageLoad=True, threadId=THREAD))
+            replay = await read_live(second, "task.indicator")
+
+        order = [f["t"] for f in replay]
+        assert order.count("composer.state") == 1, order
+        assert order.index("sidebar.state") < order.index("composer.state")
+        assert order.index("composer.state") < order.index("task.indicator")
+        [frame] = [f for f in replay if f["t"] == "composer.state"]
+        assert frame == {
+            "t": "composer.state",
+            "placeholder": "Add a correction",
+            "hint": "41 of 60 left",
+        }
+
+        await asyncio.sleep(0.2)
+        session.composer = ComposerState()
+
+        async with connect(url) as third:
+            await third.send(hello(pageLoad=True, threadId=THREAD))
+            replay = await read_live(third, "task.indicator")
+
+        assert [f for f in replay if f["t"] == "composer.state"] == [
+            {"t": "composer.state"}
+        ]
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_reload_in_the_middle_of_a_turn_keeps_the_composer_shut(
+    ws_impl: str,
+) -> None:
+    """The replay's spinner frame says whose turn it is, not only that work runs.
+
+    ``task.indicator`` carries two booleans, and the replay used to send one:
+    ``accepting`` was left to its default, which decodes as true. So a reload
+    in the middle of an ordinary -- foreground -- turn came back with the
+    spinner lit *and* the composer open, and every button in the feed
+    clickable under a run still holding the turn, until the next resync.
+    """
+    handler, _middleware, registry = build()
+    turn = asyncio.ensure_future(asyncio.sleep(30))
+
+    try:
+        async with live_server(Litestar([handler]), ws=ws_impl) as port:
+            url = f"ws://127.0.0.1:{port}/ws"
+            async with connect(url) as first:
+                await open_live(first, pageLoad=True, threadId=THREAD)
+                session = await wait_for_session(registry)
+                # A turn being answered: what ``on_message`` leaves in the slot.
+                session.current_task = turn
+
+            await asyncio.sleep(0.2)
+            assert session.connected is False
+
+            async with connect(url) as second:
+                await second.send(hello(pageLoad=True, threadId=THREAD))
+                replay = await read_live(second, "task.indicator")
+
+            assert replay[-1] == {
+                "t": "task.indicator",
+                "running": True,
+                "accepting": False,
+            }
+
+            # And the turn ending is what opens it, on the very next reload.
+            turn.cancel()
+            await asyncio.sleep(0.05)
+            async with connect(url) as third:
+                await third.send(hello(pageLoad=True, threadId=THREAD))
+                replay = await read_live(third, "task.indicator")
+            assert replay[-1] == {"t": "task.indicator", "running": False}
+    finally:
+        turn.cancel()
+
+
+@pytest.mark.parametrize("ws_impl", WS_IMPLEMENTATIONS)
+async def test_live_a_cold_resume_gets_the_composer_back(
+    ws_impl: str,
+    make_plugin: Callable[..., ChainlitPlugin],  # noqa: F811
+    test_config: Any,
+    auth: ChainlitAuth,  # noqa: F811
+    db_url: str,  # noqa: F811
+) -> None:
+    """The conversation is reopened after its session is gone, composer and all.
+
+    Not a reload: the reaper has been, and what is left is the thread row.
+    So the composer comes back from the ``__composer`` record, by the engine,
+    with an application whose ``on_chat_resume`` says nothing about it -- and
+    the record stays the engine's: not in ``user_session``, not in the dict
+    the hook is handed, not in the snapshot the client is sent.
+    """
+    plugin = make_plugin()
+    resumed: List[Dict[str, Any]] = []
+
+    async def on_chat_start() -> None:
+        await cl.Composer.set(placeholder="Add a correction", hint="41 of 60 left")
+
+    async def on_message(msg: cl.Message) -> None:
+        await cl.Message(content=f"echo {msg.content}").send()
+
+    async def on_chat_resume(thread: Dict[str, Any]) -> None:
+        resumed.append(
+            {
+                "metadata": dict(thread.get("metadata", {})),
+                "in_session": cl.user_session.get("__composer"),
+                "state": cl.Composer.state(),
+            }
+        )
+
+    test_config.code.on_chat_start = on_chat_start
+    test_config.code.on_message = on_message
+    test_config.code.on_chat_resume = on_chat_resume
+
+    await asyncio.to_thread(seed_user, db_url, ALICE)
+    cookie = {"Cookie": f"{auth.key}={auth.create_token(ALICE)}"}
+
+    async with live_server(Litestar(plugins=[plugin]), ws=ws_impl) as port:
+        url = f"ws://127.0.0.1:{port}/ws"
+        async with connect(url, additional_headers=cookie) as first:
+            opening = await open_live(first, pageLoad=True, threadId=None)
+            thread_id = opening[0]["threadId"]
+            await read_live(first, "composer.state")
+            # Spoken in, or the writer's gate never opens and nothing is
+            # written -- correct, and useless here.
+            await first.send(user_message("hello"))
+            await read_live(first, "thread.first_interaction")
+            plugin.runner.session_timeout = 0.05
+
+        await _reaped(plugin, thread_id)
+        detail = await asyncio.to_thread(
+            wait_for_thread,
+            db_url,
+            thread_id,
+            lambda d: "__composer" in (d.metadata or {}),
+        )
+        assert detail.metadata["__composer"] == {
+            "placeholder": "Add a correction",
+            "hint": "41 of 60 left",
+        }
+
+        async with connect(url, additional_headers=cookie) as second:
+            replay = await open_live(second, pageLoad=True, threadId=thread_id)
+            deadline = time.monotonic() + 5
+            while not resumed and time.monotonic() < deadline:
+                await asyncio.sleep(0.02)
+
+    assert [f for f in replay if f["t"] == "error"] == [], [f["t"] for f in replay]
+    order = [f["t"] for f in replay]
+    assert order.index("thread.resume") < order.index("composer.state")
+    assert order.index("sidebar.state") < order.index("composer.state")
+    assert order.index("composer.state") < order.index("task.indicator")
+    [frame] = [f for f in replay if f["t"] == "composer.state"]
+    assert frame == {
+        "t": "composer.state",
+        "placeholder": "Add a correction",
+        "hint": "41 of 60 left",
+    }
+    [snapshot] = [f for f in replay if f["t"] == "thread.resume"]
+    assert "__composer" not in snapshot["thread"].get("metadata", {})
+
+    [hook] = resumed
+    assert "__composer" not in hook["metadata"]
+    assert hook["in_session"] is None
+    assert hook["state"].placeholder == "Add a correction"

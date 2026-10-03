@@ -124,6 +124,24 @@ describe('MessageComposer, one pill on every width', () => {
     expect(row.className).toContain('items-end');
   });
 
+  it('centres a single line of text on the row the icons sit on', () => {
+    mockUseIsMobile.mockReturnValue(false);
+
+    renderComposer();
+
+    // Read off the classes because jsdom lays nothing out: `scrollHeight` is
+    // 0 here. The row is bottom-aligned and 40px tall, so a line is level
+    // with the icons only if the textarea pads it equally above and below:
+    // 8 + 24 + 8. Unpadded, the text sat in the top 24px of the box.
+    const c = input().className.split(/\s+/);
+    expect(c).toEqual(
+      expect.arrayContaining(['py-2', 'leading-6', 'h-[40px]'])
+    );
+    for (const cls of ['p-0', 'py-0', 'pt-0', 'pb-0']) {
+      expect(c).not.toContain(cls);
+    }
+  });
+
   it('gives the send button a thumb-sized tap target', () => {
     mockUseIsMobile.mockReturnValue(true);
 
@@ -201,6 +219,42 @@ describe('MessageComposer, one pill on every width', () => {
     expect(mockSidebarDispatch).toHaveBeenCalledWith({ op: 'show' });
   });
 
+  it('is the same button as the paperclip: variant, size and hover', () => {
+    // A bare <button> of its own 32px box sat off the paperclip's centre and
+    // lit nothing on hover; the two must be one kind of control.
+    for (const mobile of [true, false]) {
+      mockUseIsMobile.mockReturnValue(mobile);
+      const { unmount } = renderComposer();
+
+      const own = chevron()!.className.split(/\s+/);
+      const clip = document
+        .querySelector('#upload-button')!
+        .className.split(/\s+/);
+      expect(own).toEqual(
+        expect.arrayContaining(['h-9', 'w-9', 'hover:bg-muted'])
+      );
+      expect(own.sort()).toEqual(clip.sort());
+      unmount();
+    }
+  });
+
+  it('centres the left controls in a slot one line of text tall', () => {
+    mockUseIsMobile.mockReturnValue(true);
+    mockParentThreadId.mockReturnValue('parent-thread');
+
+    renderComposer();
+
+    const slot = chevron()!.parentElement!;
+    for (const cls of ['flex', 'h-10', 'items-center']) {
+      expect(slot.className.split(/\s+/)).toContain(cls);
+    }
+    expect(slot.contains(document.querySelector('#upload-button'))).toBe(true);
+    expect(slot.contains(document.querySelector('#open-parent-thread'))).toBe(
+      true
+    );
+    expect(slot.contains(input())).toBe(false);
+  });
+
   it('names itself for a screen reader', () => {
     mockUseIsMobile.mockReturnValue(true);
 
@@ -223,7 +277,7 @@ describe('MessageComposer on a wide screen', () => {
     expect(composer().className).not.toContain('min-h-24');
     expect(submit().parentElement!.contains(input())).toBe(true);
     expect(submit().className).toContain('h-10');
-    expect(chevron()!.parentElement!.contains(submit())).toBe(true);
+    expect(submit().parentElement!.contains(chevron())).toBe(true);
   });
 });
 

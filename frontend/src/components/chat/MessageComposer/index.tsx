@@ -237,12 +237,20 @@ export default function MessageComposer({
           line the buttons must stay on the pill's bottom edge, next to the
           line being typed. */}
       <div className="flex items-end gap-1">
-        {uploadButton}
-        <OpenParentThreadButton />
-        {/* Last in the left slot, after whichever of the two above render:
-            the panel is the one control here that is always available, and
-            it must not shift the buttons whose position people learn. */}
-        <ComposerChevron />
+        {/* One 40px slot for the left controls, the height of the textarea's
+            first line and of the send button: bottom-aligned bare, the 36px
+            buttons sat 2px under the text and the send button's centre. */}
+        <div
+          id="composer-left-slot"
+          className="flex h-10 flex-none items-center gap-1"
+        >
+          {uploadButton}
+          <OpenParentThreadButton />
+          {/* Last in the left slot, after whichever of the two above render:
+              the panel is the one control here that is always available, and
+              it must not shift the buttons whose position people learn. */}
+          <ComposerChevron />
+        </div>
         {textarea}
         {submitButton}
       </div>

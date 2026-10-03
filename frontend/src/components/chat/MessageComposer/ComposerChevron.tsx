@@ -1,4 +1,3 @@
-import { cn } from '@/lib/utils';
 import { ChevronRight } from 'lucide-react';
 // Deliberately the raw hook, for the reason spelled out in
 // OpenParentThreadButton.tsx: the local Translator wrapper answers '...' for a
@@ -7,9 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useElementSidebar } from '@chainlit/react-client';
 
-// The same 32px box in both layouts: the pill's geometry must not move.
-const BOX =
-  'flex h-8 w-8 flex-none items-center justify-center text-muted-foreground';
+import { Button } from '@/components/ui/button';
 
 /**
  * The way back to the element panel, next to the thumb.
@@ -27,16 +24,21 @@ export default function ComposerChevron() {
   const { t } = useTranslation();
 
   return (
-    <button
+    // The paperclip's button exactly -- ghost, `size="icon"`, the same hover
+    // fill. A bare <button> of its own box was 4px off the paperclip's centre
+    // and lit nothing on hover, so it read as a glyph, not a control.
+    <Button
       id="composer-chevron"
       type="button"
+      variant="ghost"
+      size="icon"
       onClick={() => dispatch({ op: 'show' })}
       aria-label={t('chat.input.actions.openSidePanel', {
         defaultValue: 'Open the side panel'
       })}
-      className={cn(BOX, 'rounded-full hover:text-foreground')}
+      className="hover:bg-muted"
     >
       <ChevronRight className="!size-6" />
-    </button>
+    </Button>
   );
 }

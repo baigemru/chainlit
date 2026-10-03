@@ -42,7 +42,10 @@ export const UploadButton = ({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-block">
+          {/* `flex`, not `inline-block`: on a text baseline the span grew a
+              descender's gap under the button and lifted it off the centre
+              of the composer's left slot. */}
+          <span className="flex">
             <input
               id="upload-button-input"
               className="hidden"

@@ -93,8 +93,12 @@ const AutoResizeTextarea = ({
       onKeyDown={handleKeyDown}
       onCompositionStart={handleCompositionStart}
       onCompositionEnd={handleCompositionEnd}
+      // A textarea never centres its line: unpadded, one 24px line sat in the
+      // top of the 40px box and read as floating above the composer's icons.
+      // 8 + 24 + 8 is the 40px the resize effect starts from, so one line is
+      // centred and every further line grows the box downwards by 24px.
       className={cn(
-        'p-0 min-h-[40px] h-[40px] rounded-none resize-none border-none overflow-y-auto shadow-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0',
+        'px-0 py-2 leading-6 min-h-[40px] h-[40px] rounded-none resize-none border-none overflow-y-auto shadow-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0',
         className
       )}
       placeholder={placeholder}

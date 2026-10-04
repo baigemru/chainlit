@@ -305,19 +305,21 @@ export default function ScrollContainer({
         <div ref={spacerRef} className="flex-shrink-0" />
       </div>
 
-      {/* A row of its own after the feed, not an overlay on it. Floated over
-          the feed's bottom edge, the arrow covered whatever the last message
-          showed there — the launch button of a tall custom element — and its
-          full-width row took every click aimed at it. In the flow, the feed
-          gives up the row's height while the arrow is shown and gets it back
-          at the bottom, where the arrow hides. */}
+      {/* Floats over the feed, as in Telegram, so the feed keeps every pixel
+          of its height — a reserved row cut a strip off it whenever the arrow
+          showed. It used to float centred, under a full-width row that took
+          every click aimed at the last message beneath it (the launch button
+          of a tall custom element, 04.10.2026). Now the row lets clicks
+          through and only the circle takes them; it sits in the bottom-right
+          corner, outside a max-width column on a wide screen, and right-6
+          keeps it clear of a classic 15px scrollbar on the desktop. */}
       {showScrollButton ? (
-        <div className="flex flex-shrink-0 justify-center py-2">
+        <div className="pointer-events-none absolute bottom-4 right-6 flex justify-end max-md:bottom-3 max-md:right-3">
           <Button
             id="scroll-down-button"
             size="icon"
             variant="outline"
-            className="rounded-full"
+            className="pointer-events-auto rounded-full"
             onClick={scrollToBottom}
           >
             <ArrowDown className="size-4" />

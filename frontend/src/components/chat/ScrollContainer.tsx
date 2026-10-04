@@ -305,9 +305,16 @@ export default function ScrollContainer({
         <div ref={spacerRef} className="flex-shrink-0" />
       </div>
 
+      {/* A row of its own after the feed, not an overlay on it. Floated over
+          the feed's bottom edge, the arrow covered whatever the last message
+          showed there — the launch button of a tall custom element — and its
+          full-width row took every click aimed at it. In the flow, the feed
+          gives up the row's height while the arrow is shown and gets it back
+          at the bottom, where the arrow hides. */}
       {showScrollButton ? (
-        <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+        <div className="flex flex-shrink-0 justify-center py-2">
           <Button
+            id="scroll-down-button"
             size="icon"
             variant="outline"
             className="rounded-full"

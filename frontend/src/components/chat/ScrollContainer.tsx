@@ -305,16 +305,14 @@ export default function ScrollContainer({
         <div ref={spacerRef} className="flex-shrink-0" />
       </div>
 
-      {/* Floats over the feed, as in Telegram, so the feed keeps every pixel
-          of its height — a reserved row cut a strip off it whenever the arrow
-          showed. It used to float centred, under a full-width row that took
-          every click aimed at the last message beneath it (the launch button
-          of a tall custom element, 04.10.2026). Now the row lets clicks
-          through and only the circle takes them; it sits in the bottom-right
-          corner, outside a max-width column on a wide screen, and right-6
-          keeps it clear of a classic 15px scrollbar on the desktop. */}
+      {/* Floats centred over the feed, as it always did, so the feed keeps
+          every pixel of its height — a reserved row cut a strip off it. The
+          full-width row under the circle used to take every click aimed at
+          the last message beneath it (the launch button of a tall custom
+          element, 04.10.2026): the row now lets clicks through and only the
+          circle takes them. */}
       {showScrollButton ? (
-        <div className="pointer-events-none absolute bottom-4 right-6 flex justify-end max-md:bottom-3 max-md:right-3">
+        <div className="pointer-events-none absolute bottom-4 left-0 right-0 flex justify-center">
           <Button
             id="scroll-down-button"
             size="icon"

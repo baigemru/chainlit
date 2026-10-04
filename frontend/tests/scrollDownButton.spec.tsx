@@ -14,8 +14,8 @@ vi.mock('@chainlit/react-client', () => ({
  * message beneath it (the research launch form, 04.10.2026). A row of its own
  * fixed that by cutting a strip off the feed, which the owner refused. What is
  * held here: it floats (the feed keeps its height), the row lets clicks
- * through, only the circle takes them, and it keeps to the right-hand corner
- * instead of the middle of the message column.
+ * through and only the circle takes them. It stays centred: the owner refused
+ * the corner too («словно уехала кнопка»).
  */
 const patched: Array<[string, PropertyDescriptor | undefined]> = [];
 const patch = (name: string, descriptor: PropertyDescriptor) => {
@@ -46,7 +46,7 @@ afterAll(() => {
 });
 
 describe('scroll-to-bottom arrow', () => {
-  it('floats in the corner and takes clicks only on the circle', () => {
+  it('floats centred and takes clicks only on the circle', () => {
     render(
       <ScrollContainer>
         <div data-testid="feed-content">
@@ -75,15 +75,6 @@ describe('scroll-to-bottom arrow', () => {
     expect(row.classList.contains('pointer-events-none')).toBe(true);
     expect(arrow.classList.contains('pointer-events-auto')).toBe(true);
 
-    const classes = Array.from(row.classList);
-    expect(classes.some((c) => /^right-/.test(c))).toBe(true);
-    for (const centring of [
-      'left-0',
-      'inset-x-0',
-      'justify-center',
-      'mx-auto'
-    ]) {
-      expect(classes).not.toContain(centring);
-    }
+    expect(row.classList.contains('justify-center')).toBe(true);
   });
 });

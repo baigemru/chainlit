@@ -1,0 +1,3787 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Расширить ассортимент</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@500;700&display=swap"
+/>
+
+<style>
+  /* ── Токены страницы. Те же, что в «Пути селлера»: две страницы — один набор. ── */
+  :root {
+    --bg: #151013;
+    --surface: #1d171b;
+    --surface-2: #261e23;
+    --line: #382c33;
+    --line-2: #4a3b43;
+    --text: #f4ecf0;
+    --dim: #baa9b3;
+    --faint: #8b7a84;
+
+    --accent: #ec1a5e;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(236, 26, 94, 0.16);
+    --accent-line: rgba(236, 26, 94, 0.42);
+
+    --fact: #4fc0a6; /* измерено */
+    --fact-soft: rgba(79, 192, 166, 0.14);
+    --est: #e2a442; /* оценка */
+    --est-soft: rgba(226, 164, 66, 0.14);
+    --bad: #ef6a52;
+    --bad-soft: rgba(239, 106, 82, 0.14);
+
+    --plate: #1a141a;
+    --plate-line: #372b33;
+
+    --r-frame: 12px;
+    --r-card: 10px;
+    --r-pill: 999px;
+
+    /* ── Токены макета. Продукт тёмный, поэтому экраны остаются тёмными и в
+     светлой теме страницы: это снимок приложения, а не элемент вёрстки.
+     Ниже их не переопределяет ни одна тема — так и задумано. ───────────── */
+    --m-bg: #131015;
+    --m-panel: #1b161a;
+    --m-surf: #241d23;
+    --m-line: #352a31;
+    --m-line2: #4a3b43;
+    --m-text: #f4ecf0;
+    --m-dim: #b6a5af;
+    --m-faint: #877681;
+    --m-acc: #ec1a5e;
+    --m-acc-ink: #ffffff;
+    --m-acc-soft: rgba(236, 26, 94, 0.17);
+    --m-acc-line: rgba(236, 26, 94, 0.45);
+    --m-fact: #4fc0a6;
+    --m-est: #e2a442;
+    --m-bad: #ef6a52;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme='dark']) {
+      --bg: #faf6f7;
+      --surface: #ffffff;
+      --surface-2: #f3edef;
+      --line: #e3d7dc;
+      --line-2: #cdbdc4;
+      --text: #1b1218;
+      --dim: #6b5a63;
+      --faint: #8d7c85;
+
+      --accent: #cf1350;
+      --accent-soft: rgba(207, 19, 80, 0.1);
+      --accent-line: rgba(207, 19, 80, 0.34);
+
+      --fact: #0f7566;
+      --fact-soft: rgba(15, 117, 102, 0.12);
+      --est: #8d5d13;
+      --est-soft: rgba(141, 93, 19, 0.13);
+      --bad: #bd3a26;
+      --bad-soft: rgba(189, 58, 38, 0.12);
+
+      --plate: #efe7ea;
+      --plate-line: #ddcfd5;
+    }
+  }
+
+  :root[data-theme='light'] {
+    --bg: #faf6f7;
+    --surface: #ffffff;
+    --surface-2: #f3edef;
+    --line: #e3d7dc;
+    --line-2: #cdbdc4;
+    --text: #1b1218;
+    --dim: #6b5a63;
+    --faint: #8d7c85;
+
+    --accent: #cf1350;
+    --accent-soft: rgba(207, 19, 80, 0.1);
+    --accent-line: rgba(207, 19, 80, 0.34);
+
+    --fact: #0f7566;
+    --fact-soft: rgba(15, 117, 102, 0.12);
+    --est: #8d5d13;
+    --est-soft: rgba(141, 93, 19, 0.13);
+    --bad: #bd3a26;
+    --bad-soft: rgba(189, 58, 38, 0.12);
+
+    --plate: #efe7ea;
+    --plate-line: #ddcfd5;
+  }
+
+  /* ── Основа ───────────────────────────────────────────────────────────── */
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family:
+      'Golos Text',
+      'Segoe UI',
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1100px;
+    margin-inline: auto;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 {
+    font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(29px, 5.2vw, 48px);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+    font-weight: 600;
+    font-size: clamp(20px, 2.9vw, 26px);
+    line-height: 1.16;
+    letter-spacing: -0.03em;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  p {
+    margin: 0;
+  }
+  ul {
+    margin: 0;
+    padding-left: 1.05em;
+  }
+  li {
+    margin-block: 2px;
+  }
+  a {
+    color: var(--accent);
+    text-underline-offset: 2px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .lead {
+    color: var(--dim);
+    max-width: 66ch;
+    font-size: 16.5px;
+  }
+  .note {
+    color: var(--faint);
+    font-size: 13.5px;
+    max-width: 74ch;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mono {
+    font-family:
+      'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+    vertical-align: 1px;
+  }
+  .tag-fact {
+    background: var(--fact-soft);
+    color: var(--fact);
+  }
+  .tag-est {
+    background: var(--est-soft);
+    color: var(--est);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    line-height: 1.3;
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .chip-acc {
+    background: var(--accent-soft);
+    border-color: transparent;
+    color: var(--accent);
+  }
+
+  /* ── Секции: корешок слева, как на первой странице ────────────────────── */
+  .sec {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 0 32px;
+    border-top: 1px solid var(--line);
+    padding-block: 44px 10px;
+  }
+  .spine {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding-top: 7px;
+  }
+  .sec-body {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    min-width: 0;
+  }
+  .sec-head {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  @media (max-width: 780px) {
+    .sec {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+    }
+    .spine {
+      padding-top: 0;
+    }
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 30px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    font-size: 13px;
+    color: var(--faint);
+    align-items: center;
+  }
+
+  /* ── Ярусы ────────────────────────────────────────────────────────────── */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .tier {
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .tier-n {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .tier p {
+    font-size: 13.5px;
+    color: var(--dim);
+  }
+  .tier .where {
+    margin-top: auto;
+    font-size: 12.5px;
+    color: var(--faint);
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .tier .where b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  @media (max-width: 760px) {
+    .tiers {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  table.t {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.t th,
+  table.t td {
+    text-align: left;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.t th {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+    border-bottom-color: var(--line-2);
+  }
+  table.t td.n {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  table.t td b {
+    font-weight: 600;
+  }
+  .t-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+  }
+  .t-wrap table.t {
+    min-width: 560px;
+  }
+  .t-wrap table.t tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ── Кадр сториборда ──────────────────────────────────────────────────── */
+  .shot {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .shot-eye {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .shot-eye .ltr {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+  }
+  .shot-eye .ttl {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .shot-eye .dev {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    padding: 1px 8px;
+  }
+  .scroller {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .stand {
+    background: var(--plate);
+    border: 1px solid var(--plate-line);
+    border-radius: var(--r-frame);
+    padding: 14px;
+  }
+  .stand.scroller {
+    padding: 14px;
+  }
+
+  .caps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    overflow: hidden;
+  }
+  .cap {
+    background: var(--surface);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .cap b {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+  }
+  .cap span {
+    font-size: 13px;
+    color: var(--dim);
+  }
+  @media (max-width: 700px) {
+    .caps {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .next {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .next em {
+    font-style: normal;
+    color: var(--faint);
+  }
+
+  /* ── Общая хромота приложения (один каркас на все экраны) ─────────────── */
+  .app {
+    width: 880px;
+    min-width: 880px;
+    display: grid;
+    grid-template-columns: 186px minmax(0, 1fr);
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line2);
+    border-radius: 14px;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .app.is-wide {
+    width: 100%;
+    min-width: 880px;
+  }
+  .app-side {
+    background: var(--m-panel);
+    border-right: 1px solid var(--m-line);
+    padding: 10px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .side-new {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 10px;
+    font-size: 12.5px;
+    color: var(--m-text);
+    font-weight: 500;
+  }
+  .side-lbl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--m-faint);
+    padding-inline: 3px;
+  }
+  .side-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .side-row {
+    padding: 5px 8px;
+    border-radius: 7px;
+    font-size: 12px;
+    color: var(--m-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .side-row.is-on {
+    background: var(--m-surf);
+    color: var(--m-text);
+  }
+  .side-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px 2px;
+    border-top: 1px solid var(--m-line);
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .cnt {
+    margin-left: auto;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    border-radius: var(--r-pill);
+    font-size: 10px;
+    padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .side-row .cnt {
+    float: right;
+  }
+
+  .app-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .app-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .logo {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.02em;
+  }
+  .hd-sp {
+    flex: 1;
+  }
+  .bal {
+    font-size: 12px;
+    color: var(--m-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .hd-ico {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--m-line2);
+    flex: none;
+  }
+  .av {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  /* Точка-счётчик на аватаре — единственный способ, которым продукт зовёт назад.
+   Белая на розовом кружке: розовая на розовом не видна вовсе. */
+  .av i {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--m-acc-ink);
+    border: 2px solid var(--m-bg);
+  }
+  .av.is-plain {
+    background: var(--m-line2);
+    color: var(--m-text);
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 300px;
+  }
+  .stage.has-panel {
+    grid-template-columns: minmax(0, 1fr) 262px;
+  }
+  .feed {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .feed.is-empty {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 14px;
+    padding-block: 34px;
+  }
+  .panel {
+    border-left: 1px solid var(--m-line);
+    background: var(--m-panel);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .panel-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .panel-h b {
+    font-size: 12.5px;
+    color: var(--m-text);
+    font-weight: 600;
+  }
+
+  /* Вкладки панели: человек перебирает объекты здесь, лента остаётся разговором. */
+  .tabs {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--m-line);
+    margin-bottom: 2px;
+  }
+  .tab {
+    flex: none;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--m-line2);
+    color: var(--m-dim);
+    white-space: nowrap;
+  }
+  .tab.is-on {
+    background: var(--m-surf);
+    color: var(--m-text);
+    border-color: var(--m-acc-line);
+    font-weight: 600;
+  }
+  .tab.is-new::after {
+    content: '';
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    margin-left: 5px;
+    vertical-align: 1px;
+  }
+
+  /* Строка шорт-листа — это вариант (SKU), а не карточка. */
+  .skurow {
+    display: flex;
+    gap: 8px;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px;
+    align-items: flex-start;
+    min-width: 0;
+  }
+  .skurow.is-on {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .skurow .meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .skurow .meta .nm {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .skurow .right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex: none;
+  }
+  .skurow .right .tot {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .skurow .right .sup {
+    font-size: 11px;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .skumore {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    padding-left: 8px;
+  }
+  .skurow.is-gone {
+    opacity: 0.38;
+  }
+  .skurow.is-gone .nm {
+    text-decoration: line-through;
+  }
+  .gsep {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding-top: 3px;
+  }
+  .gsep b {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .calc.is-narrow .crow {
+    grid-template-columns: minmax(0, 1fr) 52px 36px;
+    font-size: 10.5px;
+    padding: 3px 7px;
+    gap: 4px;
+  }
+  .calc.is-narrow .calc-h {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .calc.is-narrow .calc-foot {
+    font-size: 10px;
+    padding: 6px 7px;
+  }
+  .ro {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 9px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    font-size: 10.5px;
+    color: var(--m-dim);
+  }
+  .ro b {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--m-text);
+  }
+
+  .composer {
+    border-top: 1px solid var(--m-line);
+    padding: 9px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--m-line2);
+    background: var(--m-surf);
+    border-radius: var(--r-pill);
+    padding: 7px 7px 7px 14px;
+    color: var(--m-faint);
+    font-size: 12.5px;
+  }
+  .pill .grow {
+    flex: 1;
+    min-width: 0;
+  }
+  .pill .clip {
+    width: 15px;
+    height: 15px;
+    border: 1.5px solid var(--m-faint);
+    border-radius: 7px 7px 7px 2px;
+    flex: none;
+  }
+  .pill .send {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex: none;
+  }
+  .pill.is-typed {
+    color: var(--m-text);
+  }
+  /* Поле в фокусе: после нажатия плашки курсор уже здесь — вводить можно сразу. */
+  .pill.is-focus {
+    border-color: var(--m-acc-line);
+    box-shadow: 0 0 0 3px var(--m-acc-soft);
+  }
+  .pill.is-focus .caret {
+    width: 1px;
+    height: 15px;
+    background: var(--m-acc);
+    display: inline-block;
+  }
+  .ctr {
+    font-size: 11px;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctr.is-warn {
+    color: var(--m-est);
+  }
+
+  /* ── Содержимое ленты ─────────────────────────────────────────────────── */
+  .msg {
+    font-size: 13px;
+    color: var(--m-text);
+    max-width: 60ch;
+  }
+  .msg .sub {
+    color: var(--m-faint);
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+  }
+  .msg-u {
+    align-self: flex-end;
+    max-width: 58%;
+    background: var(--m-acc-soft);
+    border: 1px solid var(--m-acc-line);
+    border-radius: 12px 12px 3px 12px;
+    padding: 7px 11px;
+    font-size: 12.5px;
+  }
+  .zh {
+    font-size: 13px;
+    color: var(--m-text);
+    background: var(--m-surf);
+    border: 1px solid var(--m-line);
+    border-radius: 7px;
+    padding: 4px 9px;
+    display: inline-block;
+  }
+
+  .mcard {
+    border: 1px solid var(--m-line);
+    border-radius: var(--r-card);
+    background: var(--m-panel);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mcard.is-acc {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .mcard-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .mcard-h b {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .mcard-h .mono {
+    color: var(--m-faint);
+  }
+
+  .brow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .b {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--m-line2);
+    background: var(--m-surf);
+    color: var(--m-text);
+    border-radius: 8px;
+    padding: 5px 11px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .b-pri {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+    color: var(--m-acc-ink);
+    font-weight: 600;
+  }
+  .b-gh {
+    background: transparent;
+    border-color: transparent;
+    color: var(--m-dim);
+  }
+  .b-off {
+    color: var(--m-faint);
+    border-color: var(--m-line);
+    background: transparent;
+  }
+  .b-xs {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 7px;
+  }
+  .b .cost {
+    color: inherit;
+    opacity: 0.72;
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+  }
+  .b-pri .cost {
+    opacity: 0.85;
+  }
+
+  .mchips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  /* Полоса чипов на телефоне уезжает вбок — край гасим, чтобы обрезанный чип
+   читался как продолжение, а не как сломанная вёрстка. */
+  .mchips.is-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent);
+    mask-image: linear-gradient(90deg, #000 86%, transparent);
+  }
+  .mchip {
+    border: 1px solid var(--m-line2);
+    border-radius: var(--r-pill);
+    padding: 2px 9px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    white-space: nowrap;
+    flex: none;
+  }
+  .mchip.is-on {
+    background: var(--m-acc-soft);
+    border-color: var(--m-acc-line);
+    color: var(--m-acc);
+  }
+  .mchip.is-off {
+    border-style: dashed;
+    color: var(--m-faint);
+  }
+  .mchip.is-new {
+    background: rgba(79, 192, 166, 0.14);
+    border-color: transparent;
+    color: var(--m-fact);
+  }
+  .mchip.is-hit {
+    background: rgba(226, 164, 66, 0.15);
+    border-color: transparent;
+    color: var(--m-est);
+  }
+
+  .mtag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .mtag-est {
+    background: rgba(226, 164, 66, 0.15);
+    color: var(--m-est);
+  }
+  .mtag-fact {
+    background: rgba(79, 192, 166, 0.14);
+    color: var(--m-fact);
+  }
+  .mtag-own {
+    border: 1px solid var(--m-line2);
+    color: var(--m-faint);
+  }
+
+  .mlbl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--m-faint);
+  }
+  /* Цена сценария 1 не решена — «N» нарисовано как незаполненное значение, а не как число. */
+  .nq {
+    border-bottom: 1px dashed currentColor;
+  }
+
+  /* Экран входа */
+  .entry {
+    width: 560px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+  }
+  .entry-h {
+    font-family: 'Unbounded', system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -0.03em;
+    text-align: center;
+  }
+  .entry-s {
+    font-size: 12.5px;
+    color: var(--m-faint);
+    text-align: center;
+    margin-top: 3px;
+  }
+  .pill-lg {
+    padding: 10px 10px 10px 16px;
+    font-size: 13px;
+  }
+  .pill-lg .send {
+    width: 30px;
+    height: 30px;
+  }
+  .pill .go {
+    background: var(--m-acc);
+    color: var(--m-acc-ink);
+    border-radius: var(--r-pill);
+    padding: 5px 12px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill-lg .go {
+    padding: 6px 13px;
+    font-size: 12px;
+  }
+  .bwrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bwrap .sub {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    padding-inline: 2px;
+  }
+  .hintline {
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+
+  /* Зона входа: одно действие, потом два пояснения. Пояснения не кнопки —
+   иначе человек снова выбирает режим руками, а роутинг сделан против этого. */
+  .zone {
+    border-top: 1px solid var(--m-line);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .zone-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .zone-h b {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  /* Зона «Сценарии»: плашка-кнопка — название, «что получишь», цена.
+   Роль поля и роль кнопки разведены: поле — «что», кнопка — «что сделать». */
+  .plates {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .pbtn {
+    border: 1px solid var(--m-line2);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .pbtn b {
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .pbtn span {
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--m-faint);
+  }
+  .pbtn .cost {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--m-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .pbtn.is-main {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+    color: var(--m-acc-ink);
+  }
+  .pbtn.is-main span,
+  .pbtn.is-main .cost {
+    color: rgba(255, 255, 255, 0.84);
+  }
+
+  .tasklist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .taskrow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 5px 9px;
+    min-width: 0;
+  }
+  .taskrow b {
+    font-size: 11.5px;
+    font-weight: 600;
+    flex: none;
+  }
+  .taskrow span {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    flex: 1;
+    min-width: 0;
+  }
+  .taskrow .cost {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--m-dim);
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Фото товара — плашка, а не картинка: это макет. */
+  .ph {
+    background: repeating-linear-gradient(
+      45deg,
+      var(--m-surf) 0 6px,
+      var(--m-line) 6px 7px
+    );
+    border-radius: 7px;
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    font-size: 8.5px;
+    color: var(--m-faint);
+    padding-bottom: 3px;
+    text-align: center;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.02em;
+  }
+  .ph-64 {
+    width: 64px;
+    height: 64px;
+  }
+  .ph-48 {
+    width: 48px;
+    height: 48px;
+  }
+  .ph-40 {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Карточки выдачи в боковой панели */
+  .pcards {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+  }
+  .pcard {
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+  .pcard-b {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .pcard-b .nm {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .pcard-b .pr {
+    font-size: 12.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Рубли по курсу — крупно, юани 1688 — рядом мелко, как у строки-SKU. */
+  .pcard-b .pr .cny {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--m-faint);
+    margin-left: 4px;
+  }
+  .pcard-b .sl {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .ledge {
+    text-align: center;
+    font-size: 11px;
+    color: var(--m-faint);
+    border: 1px dashed var(--m-line2);
+    border-radius: 8px;
+    padding: 5px;
+  }
+
+  .sw {
+    width: 28px;
+    height: 16px;
+    border-radius: var(--r-pill);
+    background: var(--m-line2);
+    position: relative;
+    flex: none;
+    display: inline-block;
+  }
+  .sw i {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--m-faint);
+  }
+  .sw.is-on {
+    background: var(--m-acc);
+  }
+  .sw.is-on i {
+    left: auto;
+    right: 2px;
+    background: var(--m-acc-ink);
+  }
+
+  /* Прогон */
+  .bar {
+    height: 5px;
+    border-radius: var(--r-pill);
+    background: var(--m-surf);
+    overflow: hidden;
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--m-acc);
+  }
+
+  /* Калькулятор */
+  .calc {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  .calc-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .calc-col + .calc-col {
+    border-left: 1px solid var(--m-line);
+  }
+  .calc-h {
+    padding: 6px 10px;
+    background: var(--m-surf);
+    border-bottom: 1px solid var(--m-line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .crow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 62px 42px;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .crow span:nth-child(1) {
+    color: var(--m-dim);
+  }
+  .crow span:nth-child(2),
+  .crow span:nth-child(3) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .crow span:nth-child(3) {
+    color: var(--m-faint);
+  }
+  .crow.is-tot {
+    font-weight: 700;
+    border-bottom: none;
+    background: var(--m-panel);
+  }
+  .crow.is-tot span:nth-child(1) {
+    color: var(--m-text);
+  }
+  .crow.is-loss span:nth-child(2),
+  .crow.is-loss span:nth-child(3) {
+    color: var(--m-bad);
+  }
+  .calc-foot {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--m-line);
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--m-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  /* Кабинет — диалог над размытым чатом */
+  .over {
+    position: relative;
+  }
+  .over .blurred {
+    filter: blur(2.5px) saturate(0.8);
+    opacity: 0.5;
+  }
+  .over .veil {
+    position: absolute;
+    inset: 0;
+    background: rgba(9, 6, 9, 0.55);
+    border-radius: 14px;
+  }
+  .dlg {
+    position: absolute;
+    inset: 22px 42px;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 196px minmax(0, 1fr);
+    background: var(--m-bg);
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  }
+  .dlg-rail {
+    border-right: 1px solid var(--m-line);
+    background: var(--m-panel);
+    padding: 10px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .srch {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 5px 10px;
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+  .dlg-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-inline: 2px;
+  }
+  .dlg-user b {
+    font-size: 12px;
+    font-weight: 600;
+    display: block;
+  }
+  .dlg-user span {
+    font-size: 11px;
+    color: var(--m-faint);
+    display: block;
+  }
+  .dlg-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .dlg-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .dlg-h b {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .dlg-h p {
+    font-size: 11.5px;
+    color: var(--m-faint);
+  }
+  .dlg-body {
+    padding: 11px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    overflow: hidden;
+  }
+  .dlg-foot {
+    margin-top: auto;
+    border-top: 1px solid var(--m-line);
+    padding: 8px 14px;
+    display: flex;
+    gap: 7px;
+  }
+  .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .fld {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .fld em {
+    font-style: normal;
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .fld b {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .fld.is-empty {
+    border-color: var(--m-est);
+    border-style: dashed;
+  }
+  .cards2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* Телефон */
+  .phone {
+    width: 360px;
+    min-width: 360px;
+    max-width: 100%;
+    border: 1px solid var(--m-line2);
+    border-radius: 26px;
+    padding: 8px;
+    background: var(--m-panel);
+  }
+  .pscr {
+    border-radius: 19px;
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .ptop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .pbody {
+    padding: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    min-width: 0;
+  }
+  .pfoot {
+    border-top: 1px solid var(--m-line);
+    padding: 8px 11px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .phones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .btn2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .btn2 .b {
+    justify-content: center;
+  }
+
+  /* Две карточки экрана M — рядом, но каждая со своей прокруткой */
+  .pair {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  /* На узком экране рамка телефона тянется по ширине, иначе страница уезжает вбок. */
+  @media (max-width: 470px) {
+    .stand {
+      padding: 8px;
+      border-radius: 10px;
+    }
+    .phone {
+      min-width: 0;
+      width: 100%;
+    }
+    .caps {
+      border-radius: 8px;
+    }
+  }
+
+  /* Ничего не двигается само; правило — на случай будущей анимации. */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+  /* ── Макет быстрого поиска после комментариев ── */
+  .page {
+    max-width: 1240px;
+  }
+  .chg {
+    box-shadow: inset 0 -2px 0 var(--m-acc);
+  }
+  .qtiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .qtile {
+    border: 1px solid var(--m-line2);
+    border-radius: 9px;
+    background: transparent;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .qtile b {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .qtile .cost {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--m-dim);
+  }
+  .app.is-xl {
+    width: 1040px;
+    min-width: 1040px;
+  }
+  .stage.has-panel.xl {
+    grid-template-columns: minmax(0, 1fr) 480px;
+  }
+  .gone {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: baseline;
+    font-size: 11px;
+    color: var(--m-faint);
+    border: 1px dashed var(--m-line2);
+    border-radius: 8px;
+    padding: 6px 9px;
+  }
+  .gone s {
+    text-decoration-color: var(--m-bad);
+  }
+  .rhead {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .rhead > b {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--m-text);
+  }
+  .rhead .sub {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .bigcard {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 6px 12px;
+  }
+  .bigph {
+    width: 120px;
+    height: 120px;
+    grid-row: span 1;
+    font-size: 10px;
+  }
+  .bc-b {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .bc-nm {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .bc-zh {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .bc-pr {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 6px;
+  }
+  .bc-pr .cny {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--m-faint);
+  }
+  .bc-moq {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--m-dim);
+  }
+  .bc-moq::before {
+    content: '· ';
+    color: var(--m-faint);
+  }
+  .bc-sku {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .bc-sep {
+    height: 1px;
+    background: var(--m-line);
+    margin: 3px 0;
+  }
+  .bc-sl {
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .bc-sl2 {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .bc-act {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .panel.solo {
+    width: 540px;
+    max-width: 100%;
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    color: var(--m-text);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .feed.solo {
+    width: 620px;
+    max-width: 100%;
+    background: var(--m-bg);
+    color: var(--m-text);
+    border: 1px solid var(--m-line2);
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .grp {
+    font-size: 11.5px;
+    color: var(--m-dim);
+    font-weight: 600;
+    padding-top: 2px;
+  }
+  .det {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .det-top {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .detph {
+    width: 180px;
+    height: 180px;
+    font-size: 10px;
+  }
+  .thumbs {
+    display: flex;
+    gap: 6px;
+  }
+  .dt {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .dt th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--m-faint);
+    padding: 3px 5px;
+    border-bottom: 1px solid var(--m-line);
+  }
+  .dt td {
+    padding: 4px 5px;
+    border-bottom: 1px solid var(--m-line);
+    color: var(--m-dim);
+  }
+  .dt td b {
+    color: var(--m-text);
+  }
+  .dt td i {
+    font-style: normal;
+    color: var(--m-faint);
+    font-size: 10px;
+  }
+  .dt tr.is-on td {
+    background: var(--m-acc-soft);
+  }
+  .qs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 22px;
+    max-width: 80ch;
+    color: var(--dim);
+    font-size: 15px;
+  }
+  .qs b {
+    color: var(--text);
+  }
+
+  .b.is-busy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.75;
+    cursor: progress;
+  }
+  .spin {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--m-line2);
+    border-top-color: var(--m-acc);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -1px;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation: none;
+    }
+  }
+  .ph-24 {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 4px;
+  }
+  .ph.is-on {
+    outline: 2px solid var(--m-acc);
+    outline-offset: 1px;
+  }
+  .door {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+    border-top: 1px solid var(--m-line);
+    padding-top: 10px;
+    margin-top: 2px;
+  }
+  .door .sub,
+  .panel .sub {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .duo {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .duo .panel.solo {
+    width: 480px;
+  }
+  .props {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  @media (max-width: 900px) {
+    .props {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .prop {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .solo.mini {
+    width: auto;
+    padding: 12px;
+  }
+  .pnote {
+    font-size: 13.5px;
+    color: var(--dim);
+  }
+  .prog {
+    height: 4px;
+    border-radius: 99px;
+    background: var(--m-line);
+    overflow: hidden;
+    max-width: 320px;
+  }
+  .prog i {
+    display: block;
+    height: 100%;
+    background: var(--m-acc);
+  }
+  .bigcard.is-cand {
+    border-color: var(--m-acc-line);
+  }
+  .cand {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--m-acc);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ck {
+    font-size: 10.5px;
+    border: 1px solid var(--m-line2);
+    border-radius: 6px;
+    padding: 1px 7px;
+    color: var(--m-dim);
+  }
+  .ck.is-on {
+    border-color: var(--m-acc-line);
+    color: var(--m-acc);
+    background: var(--m-acc-soft);
+  }
+  .nl {
+    font-size: 12.5px;
+    color: var(--m-text);
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 60ch;
+  }
+  .b-off {
+    opacity: 0.55;
+  }
+  .skurow.is-pick {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .ck.is-x {
+    border-color: transparent;
+    color: var(--m-faint);
+  }
+  .divl {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    text-align: center;
+    border-top: 1px dashed var(--m-line2);
+    padding-top: 4px;
+  }
+  .branch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 9px;
+  }
+  .branch b {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(
+        0,
+        1fr
+      );
+    gap: 10px;
+    align-items: center;
+  }
+  @media (max-width: 900px) {
+    .flow {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .farr {
+      transform: rotate(90deg);
+      justify-self: center;
+    }
+  }
+  .fstep {
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 13px;
+    color: var(--dim);
+  }
+  .fstep b {
+    color: var(--text);
+    font-size: 14px;
+  }
+  .fstep i {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .fstep.is-to {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+  .fl {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .farr {
+    font-size: 22px;
+    color: var(--accent);
+  }
+  .bc-cn {
+    font-size: 10px;
+    color: var(--m-faint);
+    opacity: 0.8;
+    line-height: 1.2;
+  }
+  /* ── Макет автономных исследований: поверх каркаса быстрого поиска ── */
+  .rplates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .rplate {
+    border: 1px solid var(--m-line2);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+  .rplate b {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .rplate span {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--m-dim);
+  }
+  .rplate .out {
+    font-size: 10.5px;
+    color: var(--m-faint);
+    border-top: 1px solid var(--m-line);
+    padding-top: 5px;
+  }
+  .rplate .cost {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--m-text);
+  }
+  .rplate.is-main {
+    background: var(--m-acc);
+    border-color: var(--m-acc);
+  }
+  .rplate.is-main span,
+  .rplate.is-main .out {
+    color: rgba(255, 255, 255, 0.86);
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .rplate.is-main .cost {
+    color: #fff;
+  }
+  .was {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .was s {
+    text-decoration-color: var(--m-bad);
+  }
+
+  /* Форма запуска: одно обязательное поле, остальное подписано «необязательно». */
+  .upl {
+    border: 1.5px dashed var(--m-acc-line);
+    border-radius: 9px;
+    background: var(--m-acc-soft);
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .upl .grow {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .upl .grow b {
+    font-size: 12.5px;
+  }
+  .upl .grow span {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .txt {
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 7px 10px;
+    font-size: 12px;
+    color: var(--m-faint);
+    min-height: 44px;
+  }
+  .reqs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .req {
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    min-width: 0;
+  }
+  .req .in {
+    margin-left: auto;
+    border-bottom: 1px dashed var(--m-line2);
+    min-width: 46px;
+    text-align: right;
+    color: var(--m-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .req.is-set {
+    border-color: var(--m-acc-line);
+    color: var(--m-text);
+  }
+  .req.is-set .in {
+    color: var(--m-text);
+    border-bottom-style: solid;
+  }
+  .opt {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    color: var(--m-faint);
+    border: 1px solid var(--m-line2);
+    border-radius: var(--r-pill);
+    padding: 0 6px;
+  }
+  .launch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--m-line);
+    padding-top: 9px;
+  }
+  .launch .b-pri {
+    padding: 7px 16px;
+    font-size: 12.5px;
+  }
+
+  /* Прогресс: этапы списком. Не кнопки — ни рамок, ни ховера. */
+  .rp-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .rp-h b {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--m-fact);
+  }
+  .live i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--m-fact);
+    box-shadow: 0 0 0 3px rgba(79, 192, 166, 0.2);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live i {
+      animation: none;
+    }
+  }
+  .calm {
+    font-size: 12px;
+    color: var(--m-dim);
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .stp {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--m-faint);
+    align-items: baseline;
+    margin: 0;
+  }
+  .stp .ic {
+    text-align: center;
+    font-size: 11px;
+  }
+  .stp.is-done {
+    color: var(--m-dim);
+  }
+  .stp.is-done .ic {
+    color: var(--m-fact);
+  }
+  .stp.is-now {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .stp.is-now .ic {
+    color: var(--m-acc);
+  }
+  .stp .now {
+    display: block;
+    font-weight: 400;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    margin-top: 1px;
+  }
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    border-top: 1px solid var(--m-line);
+    padding-top: 7px;
+  }
+  .facts b {
+    color: var(--m-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .dirs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--m-dim);
+    padding-left: 2px;
+  }
+  .dirs span::before {
+    content: '— ';
+    color: var(--m-faint);
+  }
+  .menu {
+    position: relative;
+  }
+  .menu-pop {
+    position: absolute;
+    right: 0;
+    top: 26px;
+    z-index: 3;
+    background: var(--m-panel);
+    border: 1px solid var(--m-line2);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+    min-width: 190px;
+  }
+  .menu-pop div {
+    font-size: 11.5px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--m-bad);
+  }
+
+  /* Состояния прогона */
+  .st {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .st-run {
+    background: rgba(79, 192, 166, 0.14);
+    color: var(--m-fact);
+  }
+  .st-wait {
+    background: rgba(226, 164, 66, 0.15);
+    color: var(--m-est);
+  }
+  .st-bad {
+    background: rgba(239, 106, 82, 0.15);
+    color: var(--m-bad);
+  }
+  .st-ok {
+    background: var(--m-acc-soft);
+    color: var(--m-acc);
+  }
+
+  /* Результат: анализ агента */
+  .an {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 12.5px;
+    max-width: 64ch;
+  }
+  .an h5 {
+    margin: 3px 0 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--m-text);
+  }
+  .an ul {
+    padding-left: 1.05em;
+    color: var(--m-dim);
+    font-size: 12px;
+  }
+  .an ul li {
+    margin-block: 1px;
+  }
+  .an .asm {
+    font-size: 11.5px;
+    color: var(--m-faint);
+    border-left: 2px solid var(--m-est);
+    padding-left: 8px;
+  }
+  .obj {
+    border: 1px solid var(--m-acc-line);
+    background: var(--m-acc-soft);
+    border-radius: 10px;
+    padding: 9px 11px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 64ch;
+  }
+  .obj .ic {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--m-acc);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex: none;
+  }
+  .obj .grow {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .obj .grow b {
+    font-size: 12.5px;
+  }
+  .obj .grow span {
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+
+  /* Шорт-лист: карточка = большая карточка выдачи + «почему» и риски */
+  .why {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--m-dim);
+    border-left: 2px solid var(--m-acc);
+    padding-left: 8px;
+  }
+  .why b {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .rsk {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--m-est);
+  }
+  .grph {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding-top: 4px;
+  }
+  .grph b {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .grph span {
+    font-size: 10.5px;
+    color: var(--m-faint);
+  }
+  .bigcard.is-gone {
+    opacity: 0.4;
+  }
+  .bigcard.is-gone .bc-nm {
+    text-decoration: line-through;
+  }
+  .bigcard.is-add {
+    border-color: var(--m-fact);
+  }
+  .bigcard.is-out {
+    border-style: dashed;
+  }
+  .xr {
+    font-size: 10.5px;
+    color: var(--m-bad);
+  }
+  .sumbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    border: 1px solid var(--m-line);
+    border-radius: 8px;
+    background: var(--m-surf);
+    padding: 6px 9px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+  }
+  .sumbar b {
+    color: var(--m-text);
+  }
+  .sumbar .hd-sp {
+    flex: 1;
+  }
+  .b.is-dis {
+    opacity: 0.45;
+  }
+
+  /* Поставщики */
+  .supl {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-surf);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .supl-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .supl-h b {
+    font-size: 12.5px;
+  }
+  .supl-h .hd-sp {
+    flex: 1;
+  }
+  .supl .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    font-size: 11px;
+    color: var(--m-dim);
+  }
+  .supl .row b {
+    color: var(--m-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .supl .plus {
+    font-size: 11px;
+    color: var(--m-fact);
+  }
+  .supl .minus {
+    font-size: 11px;
+    color: var(--m-est);
+  }
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .inc {
+    columns: 2;
+    column-gap: 18px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    padding-left: 1.05em;
+    max-width: 60ch;
+  }
+
+  table.t tr.is-new td {
+    border-top: 2px solid var(--accent-line);
+  }
+  .supl-h .bc-zh {
+    flex-basis: 100%;
+    order: 9;
+    margin-top: -3px;
+  }
+  /* Ред. 2: свёрнутая форма, анализ по SKU, PDF в панели */
+  .launched {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 7px 11px;
+    font-size: 12px;
+    color: var(--m-dim);
+    max-width: 600px;
+  }
+  .launched b {
+    color: var(--m-fact);
+    font-weight: 600;
+  }
+  .ska {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 4px 10px;
+    max-width: 64ch;
+    padding: 8px 0;
+    border-top: 1px solid var(--m-line);
+  }
+  .ska:first-of-type {
+    border-top: 0;
+  }
+  .ska .ph {
+    grid-row: span 3;
+  }
+  .ska .nm {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .ska .sl {
+    font-size: 11px;
+    color: var(--m-faint);
+  }
+  .ska .tx {
+    font-size: 12.5px;
+    color: var(--m-text);
+    line-height: 1.5;
+  }
+  .ska .tg {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    color: var(--m-acc);
+    margin-right: 6px;
+    text-transform: uppercase;
+  }
+  .full {
+    border: 1px solid var(--m-line);
+    border-radius: 10px;
+    background: var(--m-panel);
+    padding: 9px 11px;
+    max-width: 64ch;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .full ul {
+    columns: 2;
+    column-gap: 18px;
+    font-size: 11.5px;
+    color: var(--m-dim);
+    padding-left: 1.05em;
+  }
+  .vs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .vs > div {
+    border: 1px solid var(--m-line);
+    border-radius: 9px;
+    background: var(--m-surf);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .vs > div.is-full {
+    border-color: var(--m-acc-line);
+    background: var(--m-acc-soft);
+  }
+  .vs b {
+    font-size: 12px;
+  }
+  .vs ul {
+    font-size: 11px;
+    color: var(--m-dim);
+    padding-left: 1.05em;
+  }
+
+  /* Лоадер ленты: шиммер текста, как .loading-shimmer форка (03.10). */
+  .shim {
+    background: linear-gradient(
+      90deg,
+      var(--m-faint) 0%,
+      var(--m-text) 50%,
+      var(--m-faint) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation: shim 4s linear infinite;
+  }
+  @keyframes shim {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shim {
+      animation: none;
+      background: none;
+      color: var(--m-dim);
+      -webkit-text-fill-color: var(--m-dim);
+    }
+  }
+</style>
+
+<style>
+  /* Своё у «Расширить ассортимент»: метка «хит» рядом с направлением и тост
+     подписки. Остальное — стили макета исследований, без правок. */
+  .tg-hit {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--m-est);
+    border: 1px solid var(--m-est);
+    border-radius: 999px;
+    padding: 0 6px;
+    margin-right: 6px;
+  }
+  .toast {
+    align-self: flex-end;
+    background: var(--m-surf);
+    border: 1px solid var(--m-fact);
+    color: var(--m-text);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+  }
+  .plan-dirs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--m-dim);
+  }
+  .plan-dirs b {
+    color: var(--m-text);
+    font-weight: 600;
+  }
+  .plan-dirs .is-empty {
+    color: var(--m-faint);
+  }
+</style>
+
+<div class="page">
+  <header class="hero">
+    <p class="eyebrow">PANDAPOISK · расширить ассортимент · 04.10</p>
+    <h1>Расширить ассортимент: соседние товары по направлениям</h1>
+    <p class="lead">
+      Отдельный сценарий со своей задачей: найти не копии товара, а соседние
+      позиции, которыми можно дополнить ассортимент, — по направлениям
+      расширения из плана агента. Каркас у него общий с «Найти лучшие условия
+      закупки»: форма запуска, блок прогресса, лоадеры, элемент шорт-листа в
+      ленте, панель с теми же вкладками, вкладка «Отчёт», покупка полной версии.
+      Общие экраны здесь не перерисованы — у каждого ссылка на
+      <a href="Автономные_исследования_макет.html">макет исследований</a>.
+      Подробно нарисовано только своё.
+    </p>
+    <p class="lead">
+      <b>Пример — термокружка 450 мл из стали 304.</b> Направления — шесть осей
+      расширения агента: форм-фактор, материал, аудитория, сценарий
+      использования, комплектность, ценовой сегмент. Одна выдача на весь макет:
+      214 предложений просмотрено, 23 кандидата, 7 в шорт-листе по 5
+      направлениям от 7 поставщиков, выборка агента 68 карточек, 39 поставщиков.
+    </p>
+    <div class="legend">
+      <span>Цена: рубли крупно, юани рядом мелко, по курсу 11,95 ₽/¥.</span>
+      <span
+        ><span class="chg" style="color: var(--text)">розовая линия</span> — чем
+        сценарий отличается от исследования или от сегодняшнего экрана</span
+      >
+      <span
+        ><span class="tag tag-est">вопрос</span> — решение за вами, список в
+        конце</span
+      >
+    </div>
+  </header>
+
+  <!-- ───────────── E1 Плитка ───────────── -->
+  <section class="sec" id="e1">
+    <div class="spine">Плитка</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Плитка на главной обещает направления, а не копии</h2>
+        <p class="lead">
+          Плитка стоит второй в блоке «Автономные исследования от ИИ-агента»,
+          рядом с «Найти лучшие условия закупки». Текст — как в профиле
+          сценария, слово в слово. Цена 15 кредитов видна до нажатия.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E1</span
+          ><span class="ttl">Главная, блок исследований</span
+          ><span class="dev">компьютер</span>
+        </div>
+        <div class="stand scroller">
+          <div class="app">
+            <div class="app-side">
+              <div class="side-new">+ Новый чат</div>
+              <p class="side-lbl">Сегодня</p>
+              <div class="side-rows">
+                <div class="side-row">исследование: термокружка 450 мл</div>
+              </div>
+              <div class="side-foot">
+                <span class="av is-plain">А</span> Личный кабинет
+              </div>
+            </div>
+            <div class="app-main">
+              <div class="app-top">
+                <span class="logo">PANDAPOISK</span><span class="hd-sp"></span
+                ><span class="bal">Баланс: 40 кредитов</span
+                ><span class="b b-xs">Купить</span><span class="hd-ico"></span
+                ><span class="av">А</span>
+              </div>
+              <div class="stage">
+                <div class="feed is-empty">
+                  <div class="entry" style="width: 620px">
+                    <div>
+                      <p class="entry-h">Что ищем на 1688?</p>
+                    </div>
+                    <div class="zone">
+                      <div class="zone-h">
+                        <b>Автономные исследования от ИИ-агента</b
+                        ><span class="mlbl">как в R1</span>
+                      </div>
+                      <div class="rplates">
+                        <div class="rplate">
+                          <b>Найти лучшие условия закупки</b>
+                          <span
+                            >Исследую товар глазами байера: найду сопоставимые
+                            предложения, разберу SKU и поставщиков.</span
+                          >
+                          <span class="cost">12 кредитов</span>
+                        </div>
+                        <div class="rplate is-main">
+                          <b>Расширить ассортимент</b>
+                          <span
+                            >Найду связанные товарные направления и позиции,
+                            которыми можно дополнить текущий ассортимент.</span
+                          >
+                          <span class="out"
+                            >На выходе: анализ направлений расширения,
+                            сокращённый шорт-лист, 60–80 карточек из выборки,
+                            SKU, поставщики и основные риски.</span
+                          >
+                          <span class="cost">15 кредитов</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Плитку с обещанием: анализ направлений, шорт-лист, выборка, SKU,
+              поставщики, риски. До сих пор «выборку» и «поставщиков» сценарий
+              не показывал — теперь обещание выполняется.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Откуда запускается</b
+            ><span class="chg"
+              >Только с этой плитки (и с двери агента, которая ведёт сюда же), в
+              новом чате. Из-под результата «Найти лучшие условия закупки»
+              расширение больше не запускается.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Дальше</b
+            ><span
+              >Проверка баланса по цене 15 кредитов, затем форма запуска (E2).
+              Кредитов не хватает — причина внутри формы, как в R2.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── E2 Форма ───────────── -->
+  <section class="sec" id="e2">
+    <div class="spine">Запуск</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Та же форма, своя цена и своя подсказка</h2>
+        <p class="lead">
+          Форма — та же, что в R2: одно обязательное поле, требования
+          необязательны, цена на кнопке. Меняются заголовок, цена и строка под
+          полем товара. Ссылку на 1688 система читает до прогона: из карточки
+          берёт фото, вес, цену и лист категории — он понадобится кнопке
+          «Следить за категорией» в конце (E4).
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E2</span
+          ><span class="ttl"
+            >Нажал «Расширить ассортимент», вставлена ссылка 1688</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="mcard" style="max-width: 600px">
+              <div class="mcard-h">
+                <b class="chg">Расширить ассортимент</b
+                ><span class="mono">~6 минут · можно закрыть вкладку</span>
+              </div>
+              <p class="mlbl">Фото или ссылка на ваш товар</p>
+              <div class="upl">
+                <span class="ph ph-48">фото</span>
+                <div class="grow">
+                  <b>Термокружка 450 мл, сталь 304 ✓</b
+                  ><span>прочитал карточку 1688: фото, цена, категория</span>
+                </div>
+                <span class="b b-xs b-gh">Заменить</span>
+              </div>
+              <p class="mlbl">
+                Описание <span class="opt">необязательно</span>
+              </p>
+              <div class="txt chg">
+                Что у вас уже продаётся и куда хотите расширяться
+              </div>
+              <p class="mlbl">
+                Дополнительные требования
+                <span class="opt">необязательно</span>
+              </p>
+              <div class="reqs">
+                <div class="req">
+                  <span class="sw"><i></i></span>Только фабрики
+                </div>
+                <div class="req is-set">
+                  MOQ до<span class="in">100 шт</span>
+                </div>
+                <div class="req">Цена до<span class="in">— ₽</span></div>
+                <div class="req">Объём партии<span class="in">— шт</span></div>
+              </div>
+              <p class="hintline chg">
+                Требования применяются к соседним товарам так же, как в
+                исследовании: MOQ, цена и «только фабрики» отсеивают кандидатов
+                в каждом направлении.
+              </p>
+              <div class="launch">
+                <span class="b b-pri"
+                  >Начать исследование
+                  <span class="cost chg">· 15 кредитов</span></span
+                >
+                <span class="hintline"
+                  >спишутся после запуска · ничего подтверждать не нужно</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Форму из R2 с заголовком «Расширить ассортимент» и ценой 15
+              кредитов. Ссылка на 1688 уже прочитана — видно название товара, а
+              не только адрес.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что изменилось</b
+            ><span class="chg"
+              >Сегодня требования формы в этом сценарии молча игнорируются.
+              Теперь MOQ, цена и «только фабрики» работают, как в
+              исследовании.</span
+            >
+          </div>
+          <div class="cap">
+            <b>После нажатия</b
+            ><span
+              >Форма сворачивается в строку «✓ Исследование запущено · …», как в
+              R2.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── E3 Прогресс ───────────── -->
+  <section class="sec" id="e3">
+    <div class="spine">Работа</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Тот же блок прогресса, в плане — направления расширения</h2>
+        <p class="lead">
+          Блок прогресса и шесть этапов — как в R3. Своё — список «Ищу по
+          направлениям»: это не способы найти тот же товар, а шесть осей
+          расширения. Каждое направление показано текстом пункта плана — этим же
+          текстом потом подписана группа в шорт-листе.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E3</span
+          ><span class="ttl">Исследование идёт, этап 3 из 6</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="launched">
+              <span class="ph ph-24"></span><b>✓ Исследование запущено</b> ·
+              термокружка 450 мл · MOQ до 100 шт
+            </div>
+            <div class="msg">
+              Понял: расширяем ассортимент — подбираю связанные товары, которые
+              берут рядом с вашим.
+            </div>
+            <div class="mcard is-acc" style="max-width: 600px">
+              <div class="rp-h">
+                <b>Исследование идёт</b
+                ><span class="live"><i></i>работает</span>
+              </div>
+              <p class="calm">
+                Ничего нажимать не нужно. Можно закрыть вкладку — результат
+                сохранится в этом чате.
+              </p>
+              <ul class="steps">
+                <li class="stp is-done">
+                  <span class="ic">✓</span><span>Понял товар и требования</span>
+                </li>
+                <li class="stp is-done">
+                  <span class="ic">✓</span
+                  ><span>Сформировал направления поиска</span>
+                </li>
+                <li class="stp is-now">
+                  <span class="ic">●</span
+                  ><span
+                    >Собираю предложения 1688
+                    <span class="now chg"
+                      >сейчас: материал, 2-е направление из 6</span
+                    ></span
+                  >
+                </li>
+                <li class="stp">
+                  <span class="ic">○</span><span>Разбираю товары и SKU</span>
+                </li>
+                <li class="stp">
+                  <span class="ic">○</span><span>Сравниваю поставщиков</span>
+                </li>
+                <li class="stp">
+                  <span class="ic">○</span
+                  ><span>Формирую шорт-лист и итоговую выборку</span>
+                </li>
+              </ul>
+              <div class="facts">
+                <span>Собрано <b>58</b> предложений</span
+                ><span>Последнее обновление <b>5 секунд</b> назад</span>
+              </div>
+              <div class="brow">
+                <span class="b b-pri">Закрыть и продолжить в фоне</span>
+              </div>
+            </div>
+            <div class="mcard" style="max-width: 600px">
+              <div class="mcard-h">
+                <b class="chg">Ищу по направлениям расширения</b
+                ><span class="mono">для информации</span>
+              </div>
+              <ul class="plan-dirs">
+                <li>
+                  <b>Форм-фактор</b> — термостаканы, термосы-бутылки,
+                  кружки-непроливайки другого объёма
+                </li>
+                <li>
+                  <b>Материал</b> — керамика внутри, бамбук, стекло с двойной
+                  стенкой
+                </li>
+                <li>
+                  <b>Аудитория</b> — детские поилки, подарочные кружки, кружки
+                  для офиса
+                </li>
+                <li>
+                  <b>Сценарий использования</b> — ситечки-заварники, держатели в
+                  машину, крышки на замену
+                </li>
+                <li>
+                  <b>Комплектность</b> — подарочные наборы, пары, кружка с
+                  чехлом
+                </li>
+                <li><b>Ценовой сегмент</b> — тот же ряд дешевле и дороже</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Блок из R3 без изменений: этапы, живые цифры, «ничего нажимать не
+              нужно». У текущего этапа — какое направление собирается сейчас.
+              Ниже — шесть направлений, без крестиков.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Направления</b
+            ><span class="chg"
+              >Шесть осей расширения агента. Подпись — пункт плана для этого
+              товара, а не общее название. Тем же текстом подписаны чипы и
+              бейджи шорт-листа (E4, E5), так что человек узнаёт свои
+              направления в результате.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Пауза и сбой</b
+            ><span
+              >Как в R4: цифры стоят — пишем, что происходит; задача замолчала —
+              повтор этапа без списания; не вышло — ошибка и «Повторить этап ·
+              бесплатно». Меню «⋯» — как в R3.1.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── E4 Финал в ленте ───────────── -->
+  <section class="sec" id="e4">
+    <div class="spine">Результат</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Готово: 7 вариантов по 5 направлениям» и четыре кнопки</h2>
+        <p class="lead">
+          Путь к финалу — как в исследовании: шорт-лист лёг в панель, внизу
+          ленты лоадер «⏳ Разбираю кандидатов и пишу итог…» (R11.1), блок
+          прогресса сворачивается, разбор дописывается в элементе (R11.2). Своё
+          — итог по направлениям, бейдж направления у каждой позиции, метка
+          «хит» и четвёртая кнопка «Следить за категорией».
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E4</span
+          ><span class="ttl">Исследование готово, лента</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo" style="max-width: 640px">
+            <div class="rp-h">
+              <span class="st st-ok">готово</span
+              ><span class="mlbl">6 этапов из 6 · 5 мин 40 с</span>
+            </div>
+            <div class="msg">
+              <b class="chg"
+                >Готово: 7 вариантов по 5 направлениям от 7 поставщиков на
+                «термокружка 450 мл», выбрал из 214 предложений.</b
+              >
+              <span class="sub">Учёл: MOQ до 100 шт.</span>
+            </div>
+            <div class="msg chg">
+              <b>Как выбирал</b><br />
+              — смотрел 6 направлений расширения вокруг вашей кружки, из каждого
+              брал 1–2 лучших по кругу;<br />
+              — внутри направления — по продажам, отзывам и надёжности
+              продавца;<br />
+              — в «ценовом сегменте» никто не прошёл MOQ до 100 шт, поэтому
+              направлений в шорт-листе 5;<br />
+              — «хит» — самый продаваемый в своём направлении, по продажам на
+              1688, не по спросу в России.
+            </div>
+            <div>
+              <div class="ska">
+                <span class="ph ph-48">фото</span>
+                <span class="nm"
+                  >Термостакан 600 мл с ручкой и соломинкой · графит</span
+                >
+                <span class="sl"
+                  >Yongkang Shengda Cup · 永康盛达杯业 (Yongkang Shengda Beiye)
+                  · фабрика</span
+                >
+                <span class="tx"
+                  ><span class="tg">форм-фактор</span
+                  ><span class="tg-hit">хит</span>Тот же покупатель, что у вашей
+                  кружки, но берут на целый день: объём больше, ручка,
+                  соломинка. Продаётся лучше всех в направлении. Проверьте, не
+                  течёт ли крышка с соломинкой.</span
+                >
+              </div>
+              <div class="ska">
+                <span class="ph ph-48">фото</span>
+                <span class="nm"
+                  >Термокружка с керамическим покрытием внутри · 400 мл</span
+                >
+                <span class="sl"
+                  >Zhejiang Feijian · 浙江飞剑工贸 (Zhejiang Feijian Gongmao) ·
+                  фабрика</span
+                >
+                <span class="tx"
+                  ><span class="tg">материал</span
+                  ><span class="tg-hit">хит</span>Та же кружка для тех, кому
+                  мешает привкус металла: керамика внутри. Хорошо продаётся и у
+                  того же типа продавцов, что ваш. Уточните, выдерживает ли
+                  покрытие посудомойку.</span
+                >
+              </div>
+              <div class="ska">
+                <span class="ph ph-48">фото</span>
+                <span class="nm"
+                  >Детский термос-поилка 300 мл с трубочкой · голубой</span
+                >
+                <span class="sl"
+                  >Ningbo Baby Home · 宁波宝贝家居 (Ningbo Baobei Jiaju) ·
+                  посредник</span
+                >
+                <span class="tx"
+                  ><span class="tg">аудитория</span
+                  ><span class="tg-hit">хит</span>Ваш товар для детей: меньше
+                  объём, трубочка, яркие цвета. Продавец — посредник, для
+                  детского товара попросите сертификат на пищевую сталь.</span
+                >
+              </div>
+              <p class="ledge">
+                ещё 4 позиции · форм-фактор, материал, сценарий использования,
+                комплектность
+              </p>
+            </div>
+            <div class="brow">
+              <span class="b">Открыть шорт-лист</span>
+              <span class="b b-pri"
+                >Купить полный шорт-лист
+                <span class="cost">· 4 кредита</span></span
+              >
+              <span class="b b-gh">Задать вопрос</span>
+              <span class="b b-gh chg">Следить за категорией</span>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Свёрнутый блок прогресса, итог по направлениям, «Как выбирал»
+              голосом расширения и элемент шорт-листа: у каждой позиции бейдж
+              направления, у самой продаваемой в направлении — «хит». Ни слова
+              про «дешевле медианы»: соседи с кружкой по цене не
+              сравниваются.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Четыре кнопки</b
+            ><span
+              >«Открыть шорт-лист» и «Купить полный шорт-лист · 4 кредита» — как
+              в R11.2. «Задать вопрос» — разговор о направлениях. «Следить за
+              категорией» — второстепенная, только в этом сценарии.</span
+            >
+          </div>
+          <div class="cap">
+            <b>«Следить за категорией»</b
+            ><span class="chg"
+              >Заводит ветку категории вашего товара в «Моих категориях» вместе
+              с направлениями из шорт-листа. Категория — лист из карточки 1688
+              (запуск по ссылке) или та, что определил первый этап.</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="props">
+        <div class="prop" id="e4-1">
+          <p class="mlbl">E4.1 · листа категории нет</p>
+          <div class="feed solo mini">
+            <div class="msg">
+              <b>Готово: 7 вариантов по 5 направлениям от 7 поставщиков…</b>
+            </div>
+            <div class="brow">
+              <span class="b b-xs">Открыть шорт-лист</span>
+              <span class="b b-xs b-pri"
+                >Купить полный шорт-лист
+                <span class="cost">· 4 кредита</span></span
+              >
+              <span class="b b-xs b-gh">Задать вопрос</span>
+            </div>
+          </div>
+          <p class="pnote">
+            Запуск по фото, и первый этап не определил лист категории — кнопки
+            нет. Корень («Дом и кухня») не годится: подписка на него следила бы
+            за всем разделом.
+          </p>
+        </div>
+        <div class="prop" id="e4-2">
+          <p class="mlbl">E4.2 · нажал «Следить за категорией»</p>
+          <div class="feed solo mini">
+            <div class="toast">
+              Слежу за веткой: Термокружки и термосы — она в «Моих категориях».
+            </div>
+          </div>
+          <p class="pnote">
+            Ветка называется узлом каталога, а не вашим товаром. Направления
+            шорт-листа уходят в неё; новых кредитов кнопка не берёт.
+          </p>
+        </div>
+        <div class="prop">
+          <p class="mlbl">до этого · как в исследовании</p>
+          <div class="feed solo mini">
+            <div class="msg">
+              <span class="shim">⏳ Разбираю кандидатов и пишу итог…</span>
+            </div>
+          </div>
+          <p class="pnote">
+            Лоадер закрытия — как в
+            <a href="Автономные_исследования_макет.html#r11-1">R11.1</a>,
+            «дописываю разбор…» в элементе — как в
+            <a href="Автономные_исследования_макет.html#r11-2">R11.2</a>.
+            Сегодня у этого сценария лоадера нет, а блок прогресса исчезает.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── E5 Панель ───────────── -->
+  <section class="sec" id="e5">
+    <div class="spine">Панель</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Шорт-лист по направлениям: 7 мест, 1–2 на направление</h2>
+        <p class="lead">
+          Вкладки и строка — как в исследовании: «Шорт-лист · Расчёт · Выборка
+          агента · 68 · Поставщики · 39 · Отчёт». Своё — чипы: вместо «дешевле
+          всех / надёжные / баланс» направления расширения. Семь мест раздаются
+          по кругу в порядке плана: каждое направление сначала получает одно
+          место, потом лучшие получают второе. Одно направление не забирает весь
+          шорт-лист.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E5</span><span class="ttl">Вкладка «Шорт-лист»</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo" style="width: 640px">
+            <div class="tabs">
+              <span class="tab is-on">Шорт-лист</span
+              ><span class="tab">Расчёт</span
+              ><span class="tab chg">Выборка агента · 68</span
+              ><span class="tab chg">Поставщики · 39</span
+              ><span class="tab">Отчёт</span>
+            </div>
+            <div class="panel-h">
+              <b>Шорт-лист</b
+              ><span class="mono">23 кандидата · в шорт-листе 7</span>
+            </div>
+            <div class="mchips chg">
+              <span class="mchip is-on">все · 23</span
+              ><span class="mchip">в шорт-листе · 7</span
+              ><span class="mchip">форм-фактор · 7</span
+              ><span class="mchip">материал · 6</span
+              ><span class="mchip">аудитория · 4</span
+              ><span class="mchip">сценарий использования · 4</span
+              ><span class="mchip">комплектность · 2</span
+              ><span class="mchip is-off">убраны вами · 0</span>
+            </div>
+            <div class="sumbar">
+              <span>В шорт-листе <b>7</b> · изменений нет</span
+              ><span class="hd-sp"></span
+              ><span class="b b-xs is-dis">Сформировать шорт-лист заново</span>
+            </div>
+            <div class="pcards">
+              <div class="skurow is-pick">
+                <div class="ph ph-64">фото SKU</div>
+                <div class="meta">
+                  <span class="nm"
+                    >Термостакан 600 мл с ручкой и соломинкой</span
+                  >
+                  <span class="mlbl"
+                    >графит · 600 мл · Yongkang Shengda · фабрика · MOQ 50</span
+                  ><span class="bc-zh"
+                    >永康市盛达杯业有限公司 (Yongkang Shengda Beiye)</span
+                  >
+                  <span class="why chg" style="grid-column: auto"
+                    ><span class="tg-hit">хит</span>форм-фактор: тот же
+                    покупатель, объём на день · 3,1 тыс. продаж за месяц ·
+                    проверить: крышка с соломинкой</span
+                  >
+                  <div class="brow">
+                    <span class="ck is-on">✓ в шорт-листе</span
+                    ><span class="ck">Подробнее</span
+                    ><span class="ck">Все варианты · 6</span
+                    ><span class="ck is-x">×</span>
+                  </div>
+                </div>
+                <div class="right">
+                  <span class="sup">24,5 ¥ · 293 ₽</span
+                  ><span class="tot">412 ₽</span
+                  ><span class="mtag mtag-est">оценка</span>
+                </div>
+              </div>
+              <div class="skurow is-pick">
+                <div class="ph ph-64">фото SKU</div>
+                <div class="meta">
+                  <span class="nm">Термос-бутылка 350 мл, компактная</span>
+                  <span class="mlbl"
+                    >белый · 350 мл · Wuyi Hongtai · фабрика · MOQ 30</span
+                  ><span class="bc-zh"
+                    >武义宏泰工贸有限公司 (Wuyi Hongtai Gongmao)</span
+                  >
+                  <span class="why chg" style="grid-column: auto"
+                    >форм-фактор: в сумку вместо кружки · 1,4 тыс. продаж ·
+                    проверить: держит ли тепло 6 часов</span
+                  >
+                  <div class="brow">
+                    <span class="ck is-on">✓ в шорт-листе</span
+                    ><span class="ck">Подробнее</span
+                    ><span class="ck">Все варианты · 4</span
+                    ><span class="ck is-x">×</span>
+                  </div>
+                </div>
+                <div class="right">
+                  <span class="sup">18,0 ¥ · 215 ₽</span
+                  ><span class="tot">318 ₽</span
+                  ><span class="mtag mtag-est">оценка</span>
+                </div>
+              </div>
+              <div class="skurow is-pick">
+                <div class="ph ph-64">фото SKU</div>
+                <div class="meta">
+                  <span class="nm"
+                    >Термокружка с керамическим покрытием внутри</span
+                  >
+                  <span class="mlbl"
+                    >молочный · 400 мл · Zhejiang Feijian · фабрика · MOQ
+                    40</span
+                  ><span class="bc-zh"
+                    >浙江飞剑工贸有限公司 (Zhejiang Feijian Gongmao)</span
+                  >
+                  <span class="why chg" style="grid-column: auto"
+                    ><span class="tg-hit">хит</span>материал: без привкуса
+                    металла · 2,2 тыс. продаж · проверить: посудомойка</span
+                  >
+                  <div class="brow">
+                    <span class="ck is-on">✓ в шорт-листе</span
+                    ><span class="ck">Подробнее</span
+                    ><span class="ck">Все варианты · 5</span
+                    ><span class="ck is-x">×</span>
+                  </div>
+                </div>
+                <div class="right">
+                  <span class="sup">27,8 ¥ · 332 ₽</span
+                  ><span class="tot">448 ₽</span
+                  ><span class="mtag mtag-est">оценка</span>
+                </div>
+              </div>
+              <p class="divl">
+                ещё 4 в шорт-листе: материал · аудитория · сценарий
+                использования · комплектность — дальше 16 кандидатов без метки
+              </p>
+              <div class="skurow">
+                <div class="ph ph-64">фото SKU</div>
+                <div class="meta">
+                  <span class="nm">Кружка-непроливайка 380 мл для машины</span>
+                  <span class="mlbl"
+                    >чёрный · 380 мл · Yiwu Kaile · посредник · MOQ 20</span
+                  ><span class="bc-zh"
+                    >义乌市凯乐日用品有限公司 (Yiwu Kaile Riyongpin)</span
+                  >
+                  <span class="why" style="grid-column: auto"
+                    >форм-фактор · 600 продаж</span
+                  >
+                  <div class="brow">
+                    <span class="ck">+ в шорт-лист</span
+                    ><span class="ck">Подробнее</span
+                    ><span class="ck">Все варианты · 3</span
+                    ><span class="ck is-x">×</span>
+                  </div>
+                </div>
+                <div class="right">
+                  <span class="sup">15,2 ¥ · 182 ₽</span
+                  ><span class="tot">279 ₽</span
+                  ><span class="mtag mtag-est">оценка</span>
+                </div>
+              </div>
+              <p class="ledge">
+                ещё 15 кандидатов · по направлениям в порядке плана
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Чипы</b
+            ><span class="chg"
+              >все / в шорт-листе / по одному на направление, давшее кандидатов,
+              в порядке плана / убраны вами. Число на чипе направления — все его
+              кандидаты, не только отмеченные. «Ценовой сегмент» ничего не дал —
+              чипа нет.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Строка</b
+            ><span
+              >Как в R5: фото, подпись, продавец латиницей и по-китайски, цена
+              «на складе» с плашкой «оценка», «Подробнее», «Все варианты · N»,
+              «×». Своё — «почему»: направление, зачем этот сосед, продажи, что
+              проверить.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Метки</b
+            ><span
+              >7 мест, «в шорт-листе / + в шорт-лист», переставляются как в R6.
+              «Сформировать шорт-лист заново · бесплатно» включается после
+              первой правки. Метить можно и с карточки во вкладке «Выборка
+              агента».</span
+            >
+          </div>
+        </div>
+      </div>
+      <p class="note">
+        <b>Остальные вкладки — без своего:</b> «Расчёт» как в R5.1, «Подробнее»
+        и «Все варианты» как в R6.5, «Выборка агента · 68» как в R7 (у карточки
+        — бейдж направления), «Поставщики · 39» как в R8. Порядок вкладок один
+        на все сценарии.
+      </p>
+    </div>
+  </section>
+
+  <!-- ───────────── E6 Отчёт ───────────── -->
+  <section class="sec" id="e6">
+    <div class="spine">Отчёт</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>«Расширение ассортимента — термокружка 450 мл»</h2>
+        <p class="lead">
+          Вкладка «Отчёт» — тот же элемент в трёх состояниях, что в R5.2, R11.3
+          и R11.4. Своё — заголовок и абзац «Как отбирали» в PDF: по
+          направлениям, а не по трём ценовым группам.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E6</span
+          ><span class="ttl">«Открыть шорт-лист» — бесплатная версия</span
+          ><span class="dev">панель справа</span>
+        </div>
+        <div class="stand scroller">
+          <div class="panel solo" style="width: 600px">
+            <div class="tabs">
+              <span class="tab">Шорт-лист</span><span class="tab">Расчёт</span
+              ><span class="tab">Выборка агента · 68</span
+              ><span class="tab">Поставщики · 39</span
+              ><span class="tab is-on is-new">Отчёт</span>
+            </div>
+            <div class="panel-h">
+              <b class="chg">Расширение ассортимента — термокружка 450 мл</b
+              ><span class="mono">бесплатная версия · PDF</span>
+            </div>
+            <div class="mcard chg">
+              <p class="mlbl">Как отбирали · абзац PDF</p>
+              <p class="calm">
+                Смотрел 6 направлений расширения вокруг термокружки 450 мл:
+                форм-фактор, материал, аудитория, сценарий использования,
+                комплектность, ценовой сегмент — всего 214 предложений. Из
+                каждого направления взял 1–2 лучших по продажам, отзывам и
+                надёжности продавца, места раздавал по кругу в порядке плана. В
+                шорт-лист вошли 7 позиций: форм-фактор — 2, материал — 2,
+                аудитория, сценарий использования и комплектность — по одной. В
+                «ценовом сегменте» никто не прошёл MOQ до 100 шт. «Хит» — самый
+                продаваемый в своём направлении на 1688; это не спрос в России.
+              </p>
+            </div>
+            <div class="ph" style="width: 100%; height: 130px">
+              страница PDF: 7 позиций с фото, направлением, ценой в ₽, MOQ,
+              продавцом и «почему»
+            </div>
+            <div class="brow">
+              <span class="b b-pri">Скачать PDF</span>
+            </div>
+            <div class="vs">
+              <div>
+                <b>Бесплатная версия</b>
+                <ul>
+                  <li>как в R5.2</li>
+                </ul>
+              </div>
+              <div class="is-full">
+                <b>Полная версия · 4 кредита</b>
+                <ul>
+                  <li>как в R5.2</li>
+                </ul>
+              </div>
+            </div>
+            <div class="brow">
+              <span class="b b-pri"
+                >Купить полный шорт-лист
+                <span class="cost">· 4 кредита</span></span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что своё</b
+            ><span class="chg"
+              >Заголовок «Расширение ассортимента — &lt;предмет&gt;» и абзац
+              «Как отбирали» по направлениям — в бесплатном и полном PDF.
+              Остальное содержимое версий общее.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Покупка</b
+            ><span
+              >Как в исследовании: лоадер сразу и «собирается…» (<a
+                href="Автономные_исследования_макет.html#r11-3"
+                >R11.3</a
+              >), вкладка «полная» (<a
+                href="Автономные_исследования_макет.html#r11-4"
+                >R11.4</a
+              >), в ленте строка и «Открыть отчёт» / «Задать вопрос» (<a
+                href="Автономные_исследования_макет.html#r11-5"
+                >R11.5</a
+              >). 4 кредита — отдельно от 15 за исследование.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что ушло</b
+            ><span class="chg"
+              >Сегодняшняя дорога отчёта этого сценария: вопрос «Собрать по
+              отмеченным / Изменить набор», бесплатный PDF в ленту, «Полный
+              отчёт / Хватит бесплатного».</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── E7 Пустой прогон ───────────── -->
+  <section class="sec" id="e7">
+    <div class="spine">Пусто</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Пустой прогон — один бесплатный повтор</h2>
+        <p class="lead">
+          Прогон оплачен, а в шорт-листе ноль позиций — человек получает один
+          бесплатный повтор в этом чате. Пустым считается шорт-лист без единой
+          позиции, даже если факты о прогоне записаны.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E7</span
+          ><span class="ttl">Ни одно направление не дало кандидатов</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="rp-h">
+              <span class="st st-ok">готово</span
+              ><span class="mlbl">6 этапов из 6 · 3 мин 10 с</span>
+            </div>
+            <div class="msg">
+              <b>Прогон закончен, а кандидатов не набралось.</b>
+              <span class="sub"
+                >Повторю бесплатно — нажмите «Повторить исследование» и добавьте
+                фото товара или пару слов о нём.</span
+              >
+            </div>
+            <div class="brow">
+              <span class="b b-pri"
+                >Повторить исследование
+                <span class="cost">· бесплатно</span></span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="caps">
+          <div class="cap">
+            <b>Что видит</b
+            ><span
+              >Одну строку и одну кнопку. Кнопка открывает форму E2 с прежним
+              вводом — ссылкой, словами, требованиями.</span
+            >
+          </div>
+          <div class="cap">
+            <b>Правило</b
+            ><span
+              >Повтор один на пустой оплаченный прогон: пустой повтор второго не
+              получает. Второе нажатие — «Бесплатный повтор в этом чате уже
+              использован».</span
+            >
+          </div>
+          <div class="cap">
+            <b>Что изменилось</b
+            ><span class="chg"
+              >Повтор теперь положен по пустому шорт-листу, а не по «фактов нет»
+              — иначе исследование с записанными фактами и нулём позиций повтора
+              не получало бы. Общее для обоих сценариев.</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Отменяет ───────────── -->
+  <section class="sec" id="cancels">
+    <div class="spine">Отменяет</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Что уходит</h2>
+        <p class="lead">
+          Решение владельца 04.10: расширение — отдельный прогон с плитки, в
+          своём чате. Второй проход внутри «Найти лучшие условия закупки» удалён
+          целиком.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="shot-eye">
+          <span class="ltr">E8</span
+          ><span class="ttl">Убрано из ленты и панели</span
+          ><span class="dev">лента слева</span>
+        </div>
+        <div class="stand scroller">
+          <div class="feed solo">
+            <div class="gone">
+              <span class="mlbl">проход Б в треде «Найти лучшие условия»</span
+              ><s>Расширить линейку</s> <s>Дописал их в тот же шорт-лист</s>
+              <s>7 + 42</s> <s>группы прохода Б под строками прохода А</s>
+            </div>
+            <div class="gone">
+              <span class="mlbl">старый ряд под итогом</span
+              ><s>Собрать отчёт · 4 кредита</s> <s>Рядом по категории</s>
+              <s>В подборку</s> <s>Письмо на китайском</s>
+            </div>
+            <div class="gone">
+              <span class="mlbl">старый итог и отчёт</span
+              ><s>строка-шаблон с отдельной оговоркой про «хит»</s>
+              <s>Собрать по отмеченным / Изменить набор</s>
+              <s>бесплатный PDF в ленту</s> <s>Хватит бесплатного</s>
+              <s>вкладка «Карточки» с «Другой категорией»</s>
+              <s>5 мест в отчёте</s>
+            </div>
+            <p class="was">
+              остаётся, но переезжает: «Следить за категорией» — в ряд из
+              четырёх кнопок; «Собрать отчёт» → «Купить полный шорт-лист · 4
+              кредита»
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Вопросы ───────────── -->
+  <section class="sec">
+    <div class="spine">Вопросы</div>
+    <div class="sec-body">
+      <div class="sec-head">
+        <h2>Что я додумал и что решать вам</h2>
+        <p class="lead">
+          В задании этого нет, а для макета решение понадобилось. Везде принята
+          рекомендация, её можно поменять.
+        </p>
+      </div>
+      <ol class="qs">
+        <li>
+          <b>Решено 04.10.</b> «Следить за категорией» — четвёртая
+          второстепенная кнопка, только здесь; нет листа — нет кнопки. Проход Б
+          удалён. Группы шорт-листа — направления, по кругу, 1–2 на направление,
+          7 мест, «хит» у самого продаваемого в направлении. Кнопка «Расширить
+          линейку» в старых чатах открывает плитку в новом чате с предметом
+          треда.
+        </li>
+        <li>
+          <b>Направление без кандидатов.</b> Чип не показываем (как «ценовой
+          сегмент» в E5), а в «Как выбирал» одна строка, почему оно пусто.
+          Альтернатива — погашенный чип «· 0».
+        </li>
+        <li>
+          <b>«Хит» в направлении из одной позиции.</b> По правилу он ставится и
+          там (E4: «аудитория»). Если на экране это шум — ставить «хит» только в
+          направлениях с двумя позициями.
+        </li>
+        <li>
+          <b>Подписи этапов.</b> «Сравниваю поставщиков» оставлен общим. По
+          смыслу здесь сравниваются варианты внутри направлений — можно
+          подписать этапы по сценарию.
+        </li>
+      </ol>
+    </div>
+  </section>
+</div>

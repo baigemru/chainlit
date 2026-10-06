@@ -25,10 +25,11 @@ interface Props {
  * reads as three paragraphs of the same weight.
  */
 const APPEARANCE: Record<string, string> = {
-  lead: 'text-lg font-semibold',
-  muted: 'text-sm text-muted-foreground',
+  // Not bold as a whole: the amount is `**…**` in the text, «в месяц» is not.
+  lead: 'text-xl',
+  muted: 'text-sm leading-snug text-muted-foreground',
   boxed:
-    'rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground'
+    'rounded-md border border-dashed px-3 py-2 text-sm leading-snug text-muted-foreground'
 };
 
 const asList = (value: unknown): unknown[] =>

@@ -211,7 +211,7 @@ free to carry `{field}` placeholders the client fills from the card — while
 listing which of those actions that card offers, so a subscription offers «Оплатить» only
 while it waits for payment. On a card's string or enum field `x-widget: "badge"` draws the
 value as a status chip in the card's header, worded by `x-enum-labels` and coloured by
-`x-tones: {value: "success"|"warning"|"danger"|"muted"}`. `x-pinned: true` on a section field
+`x-tones: {value: "success"|"warning"|"danger"|"muted"}`. A `markdown` field may add `x-appearance: "lead"|"muted"|"boxed"` to read as a price, a status line or fine print. `x-pinned: true` on a section field
 marks it for the pinned block in the left panel, and `x-key: true` on a field of a list's
 element names that element, which is what lets a save be merged into a list a background write
 has since reordered. `[UI.account]` in `config.toml`

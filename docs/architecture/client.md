@@ -545,7 +545,7 @@ control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link`, and on a
 `list[Struct]` the `cards` grid, whose items read `image`, `title` and `input` — the one
 string a card lets the user edit, next to its switch — and `badge`, a string or enum drawn
 as a pill beside the title, its words from `x-enum-labels` and its colour from `x-tones`
-(`success`/`warning`/`danger`/`muted`, the default; an empty value draws no pill); `hidden` resolves to
+(`success`/`warning`/`danger`/`muted`, the default; an empty value draws no pill); a `markdown` read-out takes `x-appearance: lead|muted|boxed` — a price, a line of state, fine print in a dashed box — set on the `prose` root itself, since only a utility on that element outranks it; `hidden` resolves to
 a kind of its own that neither `Field` nor a card draws and search does not find — the
 value rides in the form's values and goes back with every save, and a hidden Struct at the
 top is not made a section) and

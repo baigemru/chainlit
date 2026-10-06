@@ -19,6 +19,18 @@ interface Props {
   field: ResolvedField;
 }
 
+/**
+ * `x-appearance` of a Markdown read-out. The page is otherwise one loudness of
+ * text, and a card that is a price, a line of state and a block of fine print
+ * reads as three paragraphs of the same weight.
+ */
+const APPEARANCE: Record<string, string> = {
+  lead: 'text-lg font-semibold',
+  muted: 'text-sm text-muted-foreground',
+  boxed:
+    'rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground'
+};
+
 const asList = (value: unknown): unknown[] =>
   Array.isArray(value) ? value : [];
 
@@ -90,8 +102,20 @@ const Field = ({ field }: Props) => {
         switch (field.kind) {
           case 'markdown':
             return (
-              <div className="flex flex-col gap-1">
-                <Markdown>{String(rhf.value ?? '')}</Markdown>
+              <div
+                className="flex flex-col gap-1"
+                data-appearance={field.schema['x-appearance'] ?? undefined}
+              >
+                {/* On the Markdown root, not around it: `prose` sets its own
+                    size and colour, and only a utility on the same element
+                    outranks it. */}
+                <Markdown
+                  className={
+                    APPEARANCE[String(field.schema['x-appearance'] ?? '')]
+                  }
+                >
+                  {String(rhf.value ?? '')}
+                </Markdown>
               </div>
             );
 

@@ -280,3 +280,43 @@ describe('fillLabel', () => {
     expect(fillLabel('Тариф {constructor}', {})).toBe('Тариф');
   });
 });
+
+describe('how loud a Markdown read-out reads', () => {
+  const withNotes = (appearance?: string): IJsonSchema => {
+    const defs = SCHEMA.$defs as Record<string, IJsonSchema>;
+    return {
+      ...SCHEMA,
+      $defs: {
+        ...defs,
+        Subscription: {
+          ...defs.Subscription,
+          properties: {
+            ...defs.Subscription.properties,
+            notes: {
+              'x-widget': 'markdown',
+              ...(appearance ? { 'x-appearance': appearance } : {}),
+              readOnly: true,
+              type: 'string',
+              default: ''
+            }
+          }
+        }
+      }
+    };
+  };
+
+  it('sets fine print apart in a dashed box', () => {
+    mount([sub({ notes: 'что входит' })], withNotes('boxed'));
+
+    const root = screen.getByText('что входит').closest('.prose');
+    expect(root?.className).toContain('border-dashed');
+    expect(root?.className).toContain('text-muted-foreground');
+  });
+
+  it('leaves body text alone without the key', () => {
+    mount([sub({ notes: 'что входит' })], withNotes());
+
+    const root = screen.getByText('что входит').closest('.prose');
+    expect(root?.className).not.toContain('text-muted-foreground');
+  });
+});

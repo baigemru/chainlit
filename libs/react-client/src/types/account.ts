@@ -49,6 +49,12 @@ export interface IJsonSchema {
   'x-actions-field'?: string;
   /** On an `x-widget: "badge"` field: the chip's tone per value; `muted` otherwise. */
   'x-tones'?: Record<string, IAccountTone>;
+  /**
+   * On an `x-widget: "markdown"` field: how loud it reads. `lead` for the one
+   * line a card is about (a price), `muted` for a status line under it, `boxed`
+   * for a block of fine print set apart from the rest; absent, body text.
+   */
+  'x-appearance'?: 'lead' | 'muted' | 'boxed';
   /** A lucide name, on a nested Struct: the icon of its row in the section menu. */
   'x-icon'?: string;
   'x-enum-labels'?: Record<string, string>;

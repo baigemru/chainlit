@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 
-import type { IAccountAction } from '@chainlit/react-client';
+import type { IAccountAction, IAccountTone } from '@chainlit/react-client';
 
 import Icon from '@/components/Icon';
 import { Translator } from '@/components/i18n';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, type ButtonProps } from '@/components/ui/button';
 
 import { optionLabel } from './EnumSelect';
 import Field from './Field';
@@ -40,6 +40,73 @@ export type ActionHandler = (
   item: unknown
 ) => Promise<void> | void;
 
+/**
+ * A weight, not a colour, as on a message's actions: the application says
+ * how loudly a button asks to be pressed and the theme decides the look.
+ * Anything unrecognised is the outlined button every action had before the
+ * key existed -- a switch rather than a lookup, so a `variant` of
+ * `"constructor"` cannot reach the object prototype.
+ */
+const buttonVariant = (
+  variant: IAccountAction['variant']
+): ButtonProps['variant'] => {
+  switch (variant) {
+    case 'primary':
+      return 'default';
+    case 'ghost':
+      return 'ghost';
+    default:
+      return 'outline';
+  }
+};
+
+// The separators a label puts between its words and a value: `·`, `•`,
+// `|`, dashes, `:` and `,`.
+const SEPARATOR = '[·•|—–:,-]';
+const PLACEHOLDER = new RegExp(
+  `(\\s*${SEPARATOR}\\s*)?\\{([A-Za-z_][A-Za-z0-9_]*)\\}`,
+  'g'
+);
+const EDGES = new RegExp(`^(?:\\s|${SEPARATOR})+|(?:\\s|${SEPARATOR})+$`, 'g');
+
+/** A scalar as label text; anything else has no words to put in a button. */
+const placeholderText = (value: unknown): string =>
+  typeof value === 'string'
+    ? value.trim()
+    : typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : '';
+
+/**
+ * An action's `label` with its `{field}` placeholders filled from the card.
+ *
+ * A placeholder whose field is missing, empty or not a scalar is removed
+ * together with the separator in front of it, so `"Оплатить · {due_label}"`
+ * on a card with no amount reads `"Оплатить"`, not `"Оплатить · "`; a
+ * separator left dangling at either end -- `"{amount} · Оплатить"` -- is
+ * trimmed off with it. A tab action has no card, so every placeholder in its
+ * label is empty. The result is a React text child, never markup: a value
+ * carrying `<b>` is drawn as the four characters it is.
+ */
+export const fillLabel = (label: string, item: unknown): string => {
+  const record =
+    item !== null && typeof item === 'object'
+      ? (item as Record<string, unknown>)
+      : {};
+  let emptied = false;
+  const filled = label.replace(
+    PLACEHOLDER,
+    (_match, separator: string | undefined, key: string) => {
+      const text = Object.prototype.hasOwnProperty.call(record, key)
+        ? placeholderText(record[key])
+        : '';
+      if (!text) emptied = true;
+      return text ? `${separator ?? ''}${text}` : '';
+    }
+  );
+  return emptied ? filled.replace(EDGES, '').replace(/\s{2,}/g, ' ') : filled;
+};
+
 interface ActionButtonsProps {
   actions?: IAccountAction[];
   /** Dotted address the route resolves the element type from. */
@@ -50,7 +117,9 @@ interface ActionButtonsProps {
 }
 
 /**
- * The `x-actions` buttons, on a card or in a tab header.
+ * The `x-actions` buttons, on a card or in a tab header: each label filled
+ * by `fillLabel`, each weight picked by `buttonVariant`. Which of them a
+ * card offers is decided by its caller, `Cards`, out of `x-actions-field`.
  *
  * `type="button"` is load-bearing: the default inside a `<form>` is `submit`,
  * so a card action would save the whole account on the way to the route.
@@ -74,7 +143,7 @@ export const ActionButtons = ({
             key={action.name}
             type="button"
             size="sm"
-            variant="outline"
+            variant={buttonVariant(action.variant)}
             disabled={busy}
             aria-busy={busy}
             onClick={async () => {
@@ -94,7 +163,7 @@ export const ActionButtons = ({
             {busy ? (
               <Translator path="account.actions.working" />
             ) : (
-              action.label
+              fillLabel(action.label, item)
             )}
           </Button>
         );
@@ -109,6 +178,74 @@ interface Props {
 
 const asText = (value: unknown): string =>
   value === null || value === undefined ? '' : String(value);
+
+/**
+ * The status chip's colours, written out whole so Tailwind finds every class
+ * in this file; a class assembled from the tone name would never be built.
+ */
+const TONE_CLASS: Record<IAccountTone, string> = {
+  success: 'border-transparent bg-success/15 text-success',
+  warning: 'border-transparent bg-warning/15 text-warning',
+  danger: 'border-transparent bg-destructive/15 text-destructive',
+  muted: 'border-transparent bg-muted text-muted-foreground'
+};
+
+const isBadge = (field: ResolvedField): boolean =>
+  (field.kind === 'string' || field.kind === 'enum') &&
+  field.widget === 'badge';
+
+/**
+ * `x-widget: "badge"`: a value drawn as a pill in the card's header -- a
+ * subscription's "Активна", "Ждёт оплаты". Its words are `x-enum-labels`
+ * when they name the value, the value otherwise; its tone is `x-tones`,
+ * `muted` for anything that does not name one. An empty value draws
+ * nothing -- a pill with no words is a coloured dot nobody can read -- and
+ * `Cards` drops such a field before it gets here, so the header row it
+ * would have sat in is not drawn empty either.
+ */
+const StatusChip = ({
+  field,
+  value
+}: {
+  field: ResolvedField;
+  value: unknown;
+}) => {
+  const key = asText(value);
+  const text = optionLabel(value, field.enumLabels);
+  const tone: IAccountTone =
+    field.tones && Object.prototype.hasOwnProperty.call(field.tones, key)
+      ? field.tones[key]
+      : 'muted';
+  return (
+    <Badge
+      variant="outline"
+      data-testid="account-card-badge"
+      data-tone={tone}
+      className={`shrink-0 ${TONE_CLASS[tone]}`}
+    >
+      {text}
+    </Badge>
+  );
+};
+
+/**
+ * The actions one card offers. Without `x-actions-field`, all of them. With
+ * it, the ones the card's own list names, in `x-actions` order -- the order
+ * the application declared the buttons in, not whichever order its state
+ * machine happened to list them. A card whose field is not a list at all
+ * offers none: it opted into saying what is valid in its state, and a
+ * button its state does not admit is worse than a missing one.
+ */
+const offeredActions = (
+  actions: IAccountAction[] | undefined,
+  actionsField: string | undefined,
+  record: Record<string, unknown>
+): IAccountAction[] | undefined => {
+  if (!actionsField) return actions;
+  const names = record[actionsField];
+  if (!Array.isArray(names)) return undefined;
+  return actions?.filter((action) => names.includes(action.name));
+};
 
 /** A field the resolver refused that is, specifically, a nested Struct. */
 const isNestedObject = (field: ResolvedField): boolean =>
@@ -135,10 +272,12 @@ const Cards = ({ field }: Props) => {
   // `hidden` is the application's bookkeeping -- a card's id, a run, a
   // "seen" -- and a card that printed it would show the user a number they
   // would take for something that matters. Its value rides in the element.
+  const badges = itemFields.filter(isBadge);
   const rest = itemFields.filter(
     (child) =>
       child !== image &&
       child !== title &&
+      !isBadge(child) &&
       child.kind !== 'hidden' &&
       !isNestedObject(child)
   );
@@ -207,6 +346,9 @@ const Cards = ({ field }: Props) => {
         });
         const src = image ? asText(record[image.name]) : '';
         const heading = title ? asText(record[title.name]) : '';
+        // Only the chips with something to say, so an empty status does not
+        // leave an empty header row behind.
+        const shown = badges.filter((child) => asText(record[child.name]));
 
         return (
           <div
@@ -222,8 +364,21 @@ const Cards = ({ field }: Props) => {
               />
             ) : null}
             <div className="flex min-w-0 flex-1 flex-col gap-2">
-              {heading ? (
-                <span className="font-medium leading-tight">{heading}</span>
+              {heading || shown.length > 0 ? (
+                // The title and the status on one line, the chip after the
+                // title or, on a card without one, on the line by itself.
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  {heading ? (
+                    <span className="font-medium leading-tight">{heading}</span>
+                  ) : null}
+                  {shown.map((child) => (
+                    <StatusChip
+                      key={child.name}
+                      field={child}
+                      value={record[child.name]}
+                    />
+                  ))}
+                </div>
               ) : null}
               {rest.map((child) => {
                 // The kinds a card shares with the rest of the form are drawn
@@ -242,7 +397,11 @@ const Cards = ({ field }: Props) => {
                 return out ? <div key={child.name}>{out}</div> : null;
               })}
               <ActionButtons
-                actions={field.actions}
+                actions={offeredActions(
+                  field.actions,
+                  field.actionsField,
+                  record
+                )}
                 path={prefix.join('.')}
                 item={record}
                 onAction={onAction}

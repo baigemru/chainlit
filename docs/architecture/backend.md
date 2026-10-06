@@ -204,7 +204,14 @@ redirect — `cards`, `image`, `title` for a `list[Struct]` drawn as one card pe
 entry, whether it was seen. The form carries a hidden leaf and sends it back untouched, and it is
 the opposite of `readOnly` on the server too — `strip_readonly` leaves it alone even when the
 same field also says `readOnly`, since resetting it would drop the value it exists to hold),
-and `x-actions` puts buttons on a card array or on a tab, `x-pinned: true` on a section field
+and `x-actions` puts buttons on a card array or on a tab — each `{name, label, icon?,
+variant?}`, `variant` one of `primary`/`ghost` (absent is the outlined button) and `label`
+free to carry `{field}` placeholders the client fills from the card — while
+`x-actions-field: "<field>"` on a card array names the element field (normally `hidden`)
+listing which of those actions that card offers, so a subscription offers «Оплатить» only
+while it waits for payment. On a card's string or enum field `x-widget: "badge"` draws the
+value as a status chip in the card's header, worded by `x-enum-labels` and coloured by
+`x-tones: {value: "success"|"warning"|"danger"|"muted"}`. `x-pinned: true` on a section field
 marks it for the pinned block in the left panel, and `x-key: true` on a field of a list's
 element names that element, which is what lets a save be merged into a list a background write
 has since reordered. `[UI.account]` in `config.toml`
@@ -233,16 +240,18 @@ is then `msgspec.convert`ed to that type, so the hook is handed a typed object. 
 action is a 404, an unaddressable `path` or an item that does not fit is a 400 carrying
 msgspec's own message, and the hook is stored unwrapped like the other two.
 
-The hook returns one of three Structs, and the answer is a **tagged union** discriminated on
-`t` — not one Struct with three optional fields, which could mean two things at once:
+The hook returns one of four Structs, and the answer is a **tagged union** discriminated on
+`t` — not one Struct with an optional field per outcome, which could mean two things at once:
 
-| returns                                                                 | answer                                                                                                    | what the client does                                                                            |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `cl.AccountToast(message)`                                              | `{"t": "toast", …}`                                                                                       | toasts                                                                                          |
-| `cl.AccountRefresh(message=None, account=None)`                         | `{"t": "page", "page": …}`                                                                                | replaces the page without a reload; the page is built by the same `_render` the GET and PUT use |
-| `cl.AccountOpenThread(chat_profile, transit_message=None, parent=None)` | `{"t": "open_thread", "thread_id" (null when nothing was parked), "chat_profile", "has_transit_message"}` | takes the same code path `session.handoff` takes                                                |
+| returns                                                                 | answer                                                                                                    | what the client does                                                                             |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `cl.AccountToast(message)`                                              | `{"t": "toast", …}`                                                                                       | toasts                                                                                           |
+| `cl.AccountRefresh(message=None, account=None)`                         | `{"t": "page", "page": …}`                                                                                | replaces the page without a reload; the page is built by the same `_render` the GET and PUT use  |
+| `cl.AccountOpenThread(chat_profile, transit_message=None, parent=None)` | `{"t": "open_thread", "thread_id" (null when nothing was parked), "chat_profile", "has_transit_message"}` | takes the same code path `session.handoff` takes                                                 |
+| `cl.AccountOpenUrl(url, message=None)`                                  | `{"t": "open_url", "url", "message"}`                                                                     | `window.location.assign(url)` in the same tab — a `window.open` after the await is popup-blocked |
 
-Anything else is a `TypeError` and a 500.
+Anything else is a `TypeError` and a 500 — and so is an `AccountOpenUrl` whose scheme is not
+`http` or `https`, since the client would execute a `javascript:` address in the page's origin.
 
 `AccountRefresh(account=…)` is how an action **changes** what is stored — «Убрать» on a notice,
 say. The engine writes it with the request's own session, `strip_readonly` first, and then draws

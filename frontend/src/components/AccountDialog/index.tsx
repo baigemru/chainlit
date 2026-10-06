@@ -158,7 +158,7 @@ function AccountBody({ onClose }: { onClose: () => void }) {
    * A button declared by `x-actions` was pressed.
    *
    * The dialog does not know what the action means; it posts the element the
-   * form is holding and applies whichever of the three outcomes came back.
+   * form is holding and applies whichever of the four outcomes came back.
    * Same silenced client as the save, for the same reason: one failure, one
    * toast, carrying the server's `detail`.
    */
@@ -195,6 +195,13 @@ function AccountBody({ onClose }: { onClose: () => void }) {
             keepTranscript: false,
             hasTransitMessage: outcome.has_transit_message
           });
+          break;
+        case 'open_url':
+          // This tab, not a new one: the address arrived after an awaited
+          // request, and a `window.open` that late is a popup Safari blocks.
+          // The route has already refused anything but http and https.
+          if (outcome.message) toast.success(outcome.message);
+          window.location.assign(outcome.url);
           break;
       }
     } catch (err) {

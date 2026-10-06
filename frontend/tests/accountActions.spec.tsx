@@ -9,8 +9,8 @@ import AccountDialog from '@/components/AccountDialog';
  *
  * The form draws the buttons `x-actions` declares (agent D's subject) and
  * hands the press up as `(name, path, item)`. From there the dialog owns the
- * whole round trip: one POST, and one of three outcomes — a toast, the page
- * rebuilt, or a hand-off into a fresh chat. The form is stubbed down to a
+ * whole round trip: one POST, and one of four outcomes — a toast, the page
+ * rebuilt, a hand-off into a fresh chat, or another site in this tab. The form is stubbed down to a
  * button that presses one action, so what is pinned here is the dialog's
  * half; `accountDialog.spec.tsx` pins the other end, where a real header
  * button reaches this handler.
@@ -207,6 +207,41 @@ describe('an account action', () => {
       })
     );
     expect(mockMutate).not.toHaveBeenCalled();
+  });
+
+  it('sends this tab to the address an open_url outcome names', async () => {
+    // jsdom's `location.assign` is a navigation it does not implement; the
+    // object is swapped for one whose `assign` is a spy, and put back.
+    const assign = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...original, assign }
+    });
+    try {
+      answers({
+        t: 'open_url',
+        url: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=1',
+        message: 'Переходим к оплате'
+      });
+
+      await mount();
+      press();
+
+      await waitFor(() =>
+        expect(assign).toHaveBeenCalledWith(
+          'https://yoomoney.ru/checkout/payments/v2/contract?orderId=1'
+        )
+      );
+      expect(mockSuccess).toHaveBeenCalledWith('Переходим к оплате');
+      expect(mockHandoff).not.toHaveBeenCalled();
+      expect(mockMutate).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: original
+      });
+    }
   });
 
   it('shows the server detail when the action is refused', async () => {

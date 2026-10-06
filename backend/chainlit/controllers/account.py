@@ -17,6 +17,7 @@ a successor session would be a second set of rules about who may claim it.
 from __future__ import annotations
 
 from typing import Any, Optional, Type
+from urllib.parse import urlsplit
 
 import msgspec
 from litestar import Controller, get, post, put
@@ -42,6 +43,7 @@ from chainlit.account import (
     AccountSave,
     OpenThread,
     OpenThreadOutcome,
+    OpenUrl,
     PageOutcome,
     Refresh,
     Toast,
@@ -302,9 +304,23 @@ class AccountController(Controller):
                     has_transit_message=outcome.transit_message is not None,
                 )
             )
+        if isinstance(outcome, OpenUrl):
+            # The client hands this to ``window.location.assign``, which runs
+            # a ``javascript:`` address in the page's own origin. Only the two
+            # schemes a payment page can have get through; anything else is
+            # the application's bug, and a 500 says so louder than a button
+            # that silently does nothing.
+            if urlsplit(outcome.url).scheme.lower() not in ("http", "https"):
+                raise TypeError(
+                    f"@cl.account_action({name!r}) returned cl.AccountOpenUrl "
+                    f"with {outcome.url!r}; only http and https addresses are "
+                    "opened."
+                )
+            return AccountActionResponse(outcome=outcome)
         raise TypeError(
             f"@cl.account_action({name!r}) returned {outcome!r}. It must "
-            "return cl.AccountToast, cl.AccountRefresh or cl.AccountOpenThread."
+            "return cl.AccountToast, cl.AccountRefresh, cl.AccountOpenThread "
+            "or cl.AccountOpenUrl."
         )
 
 

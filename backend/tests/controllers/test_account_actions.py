@@ -240,7 +240,7 @@ def test_an_item_that_does_not_fit_is_a_400_naming_the_field(registered):
     assert "$.price" in response.json()["detail"]
 
 
-# --- the three outcomes ------------------------------------------------------
+# --- the outcomes ------------------------------------------------------
 
 
 def test_a_toast_outcome_is_the_hooks_message(registered):
@@ -315,6 +315,53 @@ def test_an_unknown_return_value_is_a_500(registered):
         response = _post(client, "compare", "watch.items.0", CARD)
 
     assert response.status_code == 500
+
+
+# --- leaving for another site ----------------------------------------------
+
+
+def test_an_open_url_outcome_is_the_address_and_message_verbatim(registered):
+    """A payment page: the hook names the address, the client goes there."""
+
+    @cl.account_action("compare")
+    async def compare(user, item, account):
+        return cl.AccountOpenUrl(
+            url="https://yoomoney.ru/checkout/payments/v2/contract?orderId=1",
+            message="Переходим к оплате",
+        )
+
+    with _client() as client:
+        _sign_in(client)
+        response = _post(client, "compare", "watch.items.0", CARD)
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "outcome": {
+            "t": "open_url",
+            "url": "https://yoomoney.ru/checkout/payments/v2/contract?orderId=1",
+            "message": "Переходим к оплате",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["javascript:alert(document.cookie)", "JavaScript:alert(1)", "ftp://x/y", "/pay"],
+)
+def test_an_open_url_that_is_not_http_is_a_500(registered, url):
+    """`window.location.assign` runs a `javascript:` address in the page's
+    origin, so the route is where it stops -- as the application's bug."""
+
+    @cl.account_action("compare")
+    async def compare(user, item, account):
+        return cl.AccountOpenUrl(url=url)
+
+    with _client(raise_server_exceptions=False) as client:
+        _sign_in(client)
+        response = _post(client, "compare", "watch.items.0", CARD)
+
+    assert response.status_code == 500
+    assert "open_url" not in response.text
 
 
 # --- the handover ------------------------------------------------------------

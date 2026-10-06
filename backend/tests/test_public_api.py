@@ -46,8 +46,12 @@ import chainlit
 #   matches_device, is_offered, pick_default_profile,
 #     check_one_default_per_device -- the client's own profile rules, stated
 #     once in the engine rather than copied into the application.
+# Changed 2026-10-06, subscription cards on the account page:
+#   AccountOpenUrl -- the fourth thing an action hook returns: the browser
+#     leaves for an http(s) address, a payment page.
 EXPECTED_EXPORTS = {
     "AccountOpenThread",
+    "AccountOpenUrl",
     "AccountRefresh",
     "AccountToast",
     "Action",

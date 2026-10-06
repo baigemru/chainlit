@@ -69,6 +69,8 @@ __all__ = (
     "AccountSave",
     "OpenThread",
     "OpenThreadOutcome",
+    "OpenUrl",
+    "OpenUrlOutcome",
     "PageOutcome",
     "Refresh",
     "Toast",
@@ -147,7 +149,25 @@ class OpenThread(msgspec.Struct, tag_field="t", tag="open_thread"):
     parent: Optional[str] = None
 
 
-AccountActionResult = Union[Toast, Refresh, OpenThread]
+class OpenUrl(msgspec.Struct, tag_field="t", tag="open_url"):
+    """Send the browser to an address outside the application -- a payment page.
+
+    The client navigates the tab it is in, not a new one: the address only
+    exists once the hook has answered, and a ``window.open`` after an awaited
+    request is a popup Safari blocks. The page is left behind, so ``message``
+    is a toast the user sees only for as long as the next page takes to load.
+
+    ``url`` must be ``http`` or ``https``. Anything else -- a ``javascript:``
+    address above all, which the client would execute in the page's origin --
+    is refused by the route as a bug in the application, the way any other
+    return value it cannot honour is.
+    """
+
+    url: str
+    message: Optional[str] = None
+
+
+AccountActionResult = Union[Toast, Refresh, OpenThread, OpenUrl]
 """What an ``@cl.account_action`` hook may return. Anything else is a bug in
 the application and is reported as one."""
 
@@ -156,6 +176,9 @@ the application and is reported as one."""
 # what the client is told, down to the tag. A second Struct of the same
 # shape would only be a second thing to keep in step with this one.
 ToastOutcome = Toast
+# The same for an address: what the hook returned is what the client needs,
+# once the route has checked its scheme.
+OpenUrlOutcome = OpenUrl
 
 
 class PageOutcome(msgspec.Struct, tag_field="t", tag="page"):
@@ -188,13 +211,13 @@ class OpenThreadOutcome(msgspec.Struct, tag_field="t", tag="open_thread"):
 class AccountActionResponse(msgspec.Struct):
     """The one shape ``POST /project/account/actions/{name}`` answers with.
 
-    A tagged union rather than one Struct with three optional fields: three
-    fields would let a response mean two things at once, and the client
-    would need a rule about which wins. ``t`` decides, and a switch over it
-    has no fourth case.
+    A tagged union rather than one Struct with an optional field per outcome:
+    those would let a response mean two things at once, and the client would
+    need a rule about which wins. ``t`` decides, and a switch over it has no
+    case the union does not name.
     """
 
-    outcome: Union[ToastOutcome, PageOutcome, OpenThreadOutcome]
+    outcome: Union[ToastOutcome, PageOutcome, OpenThreadOutcome, OpenUrlOutcome]
 
 
 class AccountActionCall(msgspec.Struct):

@@ -16,6 +16,7 @@ import asyncio
 
 from chainlit.account import (
     OpenThread as AccountOpenThread,
+    OpenUrl as AccountOpenUrl,
     Refresh as AccountRefresh,
     Toast as AccountToast,
 )
@@ -109,6 +110,7 @@ def sleep(duration: int):
 
 __all__ = [
     "AccountOpenThread",
+    "AccountOpenUrl",
     "AccountRefresh",
     "AccountToast",
     "Action",

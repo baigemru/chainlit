@@ -540,10 +540,12 @@ and values to `components/SchemaForm`, which resolves the schema into controls (
 top-level nested Struct becomes a section, a deeper one a fieldset; `boolean` a switch, an `enum` a
 select, a number an input or — with `x-widget: slider` — a range, `date`/`date-time` the
 native pickers, `list[str]` a tag input, `list[Literal]` a checkbox list) and reads the
-two `x-` extensions this fork puts in `Meta(extra_json_schema=…)`: `x-widget` picks the
+`x-` extensions this fork puts in `Meta(extra_json_schema=…)`: `x-widget` picks the
 control (`slider`, `textarea`, `password`, `radio`, `markdown`, `link`, and on a
 `list[Struct]` the `cards` grid, whose items read `image`, `title` and `input` — the one
-string a card lets the user edit, next to its switch; `hidden` resolves to
+string a card lets the user edit, next to its switch — and `badge`, a string or enum drawn
+as a pill beside the title, its words from `x-enum-labels` and its colour from `x-tones`
+(`success`/`warning`/`danger`/`muted`, the default; an empty value draws no pill); `hidden` resolves to
 a kind of its own that neither `Field` nor a card draws and search does not find — the
 value rides in the form's values and goes back with every save, and a hidden Struct at the
 top is not made a section) and
@@ -595,14 +597,22 @@ applied while a search shows matches from every section. Two details are bugs, n
 account is saved with and the default there is submit.
 
 **Actions on that page.** `x-actions` puts buttons on a card or in a section header; a
+`variant` of `primary` or `ghost` picks the button's weight (absent is the outlined one), and
+`{field}` in a `label` is filled from the card by `fillLabel` — an empty or missing value is
+removed together with the separator before it (`"Оплатить · {due_label}"` reads `"Оплатить"`),
+and the result is a text child, never markup. `x-actions-field` on the card array names the
+element field listing the actions that card offers: only those are drawn, in `x-actions` order,
+and a card whose field is not a list offers none. A
 press reaches the dialog as `(name, path, item)` — the dotted address of the element,
 list index included, and the value the form is holding for it; a header button passes
 the section name and a `null` item. The dialog `POST`s
 `/project/account/actions/<name>` with `{path, item}` through the same silenced client
-and applies one of three outcomes, tagged on `t`: `toast` says something, `page` carries
+and applies one of four outcomes, tagged on `t`: `toast` says something, `page` carries
 the whole page rebuilt (`mutate(page, false)` — the hook already answered with what it
 stored, so a revalidation would only ask the server to repeat itself), and `open_thread`
-names a thread the server has just minted with a hand-over record parked under it. A
+names a thread the server has just minted with a hand-over record parked under it, and
+`open_url` sends this tab to an `http(s)` address with `window.location.assign` — the same
+tab because a `window.open` after the awaited POST is a popup Safari blocks. A
 refusal toasts the `detail` and settles: a card button has nothing to restore but itself,
 and a rejection would only reach the form as an unhandled one — which is where this
 differs from the save, whose rejection is what puts the Save button back.
@@ -930,9 +940,12 @@ and on one from inside the app; the four fetch states; the menu, its icons and `
 in both directions, and on the wire; the nothing-to-save bar; the search box, including the Enter it refuses; and that a save puts
 the values back, re-renders from the response and raises exactly one toast either way.
 `accountActions.spec.tsx` pins the action round trip: the POST carries `{path, item}`,
-each of the three outcomes does its one thing (`open_thread` through the mocked handoff
-hook, with the server's ids verbatim), and a refusal toasts the `detail` without
-rejecting at the form.
+each of the four outcomes does its one thing (`open_thread` through the mocked handoff
+hook, with the server's ids verbatim, `open_url` through a spied `location.assign`), and a
+refusal toasts the `detail` without rejecting at the form.
+`schemaFormCardStates.spec.tsx` pins a card in a state: `x-actions-field` filters and
+keeps `x-actions` order, a label template fills and cleans up, variants weigh the
+buttons, and the status chip takes its words and tone and vanishes when empty.
 `useSessionHandoff.spec.tsx` drives the _listener_ — so it guards the subscription and
 the lifted switch at once: only `session.handoff` is forwarded, an unknown profile and a
 no-op are refused, a parked transit message makes a same-profile switch real, the kept

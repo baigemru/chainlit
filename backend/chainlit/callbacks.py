@@ -524,8 +524,10 @@ def account_action(
     ``@cl.account`` Struct as the store holds it -- the same value
     ``@cl.on_account_load`` and ``@cl.on_account_badge`` are handed, read
     with the request's own session. Return ``cl.AccountToast``,
-    ``cl.AccountRefresh`` or ``cl.AccountOpenThread``; anything else is a
-    bug in the application and is reported as a 500.
+    ``cl.AccountRefresh``, ``cl.AccountOpenThread`` or ``cl.AccountOpenUrl``
+    (the browser leaves for an ``http``/``https`` address -- a payment page);
+    anything else, a ``javascript:`` address included, is a bug in the
+    application and is reported as a 500.
 
     ``cl.AccountRefresh(account=...)`` is how an action changes what is
     stored: the engine writes it with the request's own session -- minus the

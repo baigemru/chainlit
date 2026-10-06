@@ -1,4 +1,8 @@
-import type { IAccountAction, IJsonSchema } from '@chainlit/react-client';
+import type {
+  IAccountAction,
+  IAccountTone,
+  IJsonSchema
+} from '@chainlit/react-client';
 
 /**
  * Flattens the JSON Schema `msgspec.json.schema` emits into the handful of
@@ -35,7 +39,8 @@ export type FieldWidget =
   | 'radio'
   | 'image'
   | 'title'
-  | 'input';
+  | 'input'
+  | 'badge';
 
 export interface ResolvedField {
   name: string;
@@ -66,6 +71,13 @@ export interface ResolvedField {
   itemFields?: ResolvedField[];
   /** `cards` only: the buttons `x-actions` put on every card. */
   actions?: IAccountAction[];
+  /**
+   * `cards` only: `x-actions-field`, the element field naming which of
+   * `actions` a card offers. Undefined, every card offers all of them.
+   */
+  actionsField?: string;
+  /** `badge` only: `x-tones`, the chip's tone per value. */
+  tones?: Record<string, IAccountTone>;
 }
 
 export interface ResolvedTab {
@@ -235,6 +247,30 @@ const actionsOf = (schema: IJsonSchema): IAccountAction[] | undefined => {
   return actions.length > 0 ? actions : undefined;
 };
 
+const TONES: readonly IAccountTone[] = [
+  'success',
+  'warning',
+  'danger',
+  'muted'
+];
+
+/**
+ * `x-tones`, keeping only the tones the chip knows. A value with a tone the
+ * client has no colour for falls to `muted` with every unlisted value, rather
+ * than drawing a chip with no colour at all.
+ */
+const tonesOf = (
+  schema: IJsonSchema
+): Record<string, IAccountTone> | undefined => {
+  const raw: unknown = schema['x-tones'];
+  if (!isSchema(raw)) return undefined;
+  return Object.fromEntries(
+    Object.entries(raw).filter(([, tone]) =>
+      TONES.includes(tone as IAccountTone)
+    )
+  ) as Record<string, IAccountTone>;
+};
+
 const iconOf = (schema: IJsonSchema): string | undefined => {
   const icon = schema['x-icon'];
   return typeof icon === 'string' && icon ? icon : undefined;
@@ -323,7 +359,10 @@ const buildField = (
       kind: 'enum',
       enumValues: orderEnum(schema.enum, enumLabels),
       enumLabels,
-      widget: widget === 'radio' ? 'radio' : undefined
+      // `badge` means something only inside a card, like `image` and
+      // `title`; outside one Field draws the select an enum always was.
+      widget: widget === 'radio' || widget === 'badge' ? widget : undefined,
+      tones: widget === 'badge' ? tonesOf(schema) : undefined
     };
   }
 
@@ -357,9 +396,14 @@ const buildField = (
         widget === 'password' ||
         widget === 'image' ||
         widget === 'title' ||
-        widget === 'input'
+        widget === 'input' ||
+        widget === 'badge'
           ? widget
-          : undefined
+          : undefined,
+      // A status kept as a plain string still wants its words and colour:
+      // the labels are read here too, not only on an `enum`.
+      enumLabels: widget === 'badge' ? labelsOf(schema) : undefined,
+      tones: widget === 'badge' ? tonesOf(schema) : undefined
     };
   }
 
@@ -375,7 +419,11 @@ const buildField = (
         ...base,
         kind: 'cards',
         itemFields: buildFields(items.schema, [], defs, false),
-        actions: actionsOf(schema)
+        actions: actionsOf(schema),
+        actionsField:
+          typeof schema['x-actions-field'] === 'string'
+            ? schema['x-actions-field']
+            : undefined
       };
     }
     if (Array.isArray(items.schema.enum)) {

@@ -4,7 +4,7 @@
  * The application declares one `msgspec.Struct`; the engine publishes its JSON
  * Schema and validates a save against the same Struct. Nothing here is a
  * mirror of a Python widget class — `IJsonSchema` is plain JSON Schema as
- * `msgspec.json.schema` emits it, plus the two `x-` keys this fork reads out of
+ * `msgspec.json.schema` emits it, plus the `x-` keys this fork reads out of
  * `Meta(extra_json_schema=...)`. A control the client does not recognise is
  * rendered as read-only JSON rather than dropped: the form has to keep
  * submitting a field it cannot draw.
@@ -39,8 +39,16 @@ export interface IJsonSchema {
     | 'link'
     | 'cards'
     | 'image'
-    | 'title';
+    | 'title'
+    | 'badge';
   'x-actions'?: IAccountAction[];
+  /**
+   * On a `cards` array: the element field holding the names of the
+   * `x-actions` that card offers. Absent, every card offers them all.
+   */
+  'x-actions-field'?: string;
+  /** On an `x-widget: "badge"` field: the chip's tone per value; `muted` otherwise. */
+  'x-tones'?: Record<string, IAccountTone>;
   /** A lucide name, on a nested Struct: the icon of its row in the section menu. */
   'x-icon'?: string;
   'x-enum-labels'?: Record<string, string>;
@@ -54,9 +62,14 @@ export interface IJsonSchema {
  */
 export interface IAccountAction {
   name: string;
+  /** May carry `{field}` placeholders, filled from the card the button is on. */
   label: string;
   icon?: string | null;
+  /** How loudly the button asks; absent is the outlined button. */
+  variant?: 'primary' | 'ghost' | null;
 }
+
+export type IAccountTone = 'success' | 'warning' | 'danger' | 'muted';
 
 export interface IAccountPage {
   schema: IJsonSchema;
@@ -80,7 +93,7 @@ export interface IAccountSave {
   base: Record<string, unknown>;
 }
 
-/** What the action route answers; the page does one of three things with it. */
+/** What the action route answers; the page does one of four things with it. */
 export type IAccountActionOutcome =
   | { t: 'toast'; message: string }
   | { t: 'page'; page: IAccountPage; message?: string | null }
@@ -90,6 +103,12 @@ export type IAccountActionOutcome =
       thread_id: string | null;
       chat_profile: string;
       has_transit_message: boolean;
+    }
+  | {
+      t: 'open_url';
+      /** `http` or `https` -- the route refuses anything else. */
+      url: string;
+      message?: string | null;
     };
 
 export interface IAccountActionResponse {

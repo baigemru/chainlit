@@ -382,15 +382,15 @@ describe('the account dialog', () => {
     expect(document.querySelectorAll('.animate-pulse')).toHaveLength(0);
   });
 
-  it('says there is nothing to save in a section with nothing to edit', async () => {
+  it('draws no footer in a section with nothing to edit', async () => {
     search = 'tab=watch';
     mockEditable.mockImplementation((name: string) => name !== 'watch');
 
     await mount();
 
     expect(mockEditable).toHaveBeenCalledWith('watch');
-    expect(screen.getByText('account.nothingToSave')).toBeInTheDocument();
     expect(screen.queryByText('stub_submit')).not.toBeInTheDocument();
+    expect(screen.queryByText('account.nothingToSave')).not.toBeInTheDocument();
   });
 
   it('offers Save over a draft left in another section', async () => {

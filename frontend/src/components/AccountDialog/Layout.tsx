@@ -75,6 +75,18 @@ export default function AccountLayout() {
   const active = sections.find((row) => row.name === shown);
   const trimmed = query.trim();
   const editable = useSectionEditable(active?.name);
+  // Per section, unlike the readonly notice, which is about the page: a
+  // section of read-outs gets no footer at all. "Save" under it would promise
+  // that something there can be changed, and a notice saying it cannot is a
+  // bar of chrome the section has no use for -- its buttons live on its cards.
+  // Not while searching (the matches come from every section), and not over a
+  // draft: the form keeps one across sections, it is still saved from here,
+  // and hiding Save over it would strand unsaved work.
+  const footer = readonly ? (
+    <Alert variant="info">{t('account.readonly')}</Alert>
+  ) : !trimmed && !editable && !isDirty ? null : (
+    <SchemaSubmit />
+  );
 
   const choose = (name: string) => {
     // A section the user picked is a section they want to read: leaving the
@@ -205,21 +217,7 @@ export default function AccountLayout() {
           ) : null}
         </div>
 
-        <div className="border-t px-6 py-3">
-          {readonly ? (
-            <Alert variant="info">{t('account.readonly')}</Alert>
-          ) : !trimmed && !editable && !isDirty ? (
-            // Per section, unlike the line above, which is about the page: a
-            // feed of read-outs under "Save" promises that something on it
-            // can be changed. Not while searching -- the matches come from
-            // every section -- and not over a draft: the form keeps one across
-            // sections, it is still saved from here, and "nothing to save"
-            // over it would send the user away from unsaved work.
-            <Alert variant="info">{t('account.nothingToSave')}</Alert>
-          ) : (
-            <SchemaSubmit />
-          )}
-        </div>
+        {footer ? <div className="border-t px-6 py-3">{footer}</div> : null}
       </div>
     </>
   );

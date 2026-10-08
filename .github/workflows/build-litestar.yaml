@@ -9,7 +9,7 @@ name: Build and Release (chainlit-litestar)
 on:
   workflow_dispatch:
   push:
-    branches: ['feat/litestar-rebuild']
+    branches: ['main']
     tags: ['litestar-v*']
 
 permissions:
@@ -40,6 +40,10 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/chainlit_pytest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history: the release check below asks whether the tagged
+          # commit is on main, which a shallow clone cannot answer.
+          fetch-depth: 0
 
       - name: Resolve release tag
         id: tag
@@ -50,6 +54,17 @@ jobs:
           else
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Releases are cut from main only: a tag on a feature branch would publish
+      # a wheel the consumer can pin while main does not contain its code.
+      - name: Refuse a release tag that is not on main
+        if: steps.tag.outputs.tag != ''
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} is not on main — merge to main, then tag there."
+            exit 1
           fi
 
       - name: Install pnpm

@@ -11,8 +11,9 @@ layers, a native `@websocket` route with a typed wire protocol instead of
 socket.io. It is published as the distribution **`chainlit-litestar`** while the
 import name stays `chainlit`; the two distributions own the same package and must
 never be installed together. **Python 3.14 only** (`requires-python = ">=3.14,<3.15"`).
-The work lives on `feat/litestar-rebuild`, and the fork's single consumer is
-`chainlit-panda`, a multi-profile product-search assistant in a sibling repository.
+Work branches off `dev` and lands in `dev`; `main` is what was last released.
+The fork's single consumer is `chainlit-panda`, a multi-profile product-search
+assistant in a sibling repository.
 
 Upstream compatibility is **abandoned, not deferred**. `BaseDataLayer`,
 `mount_chainlit`, `server_route`, `cl.current_user`, `cl.run_sync` and the
@@ -231,18 +232,19 @@ per-project only.
 ## 4. Release and consumer loop
 
 Wheels come from `.github/workflows/build-litestar.yaml`, which fires on tags
-matching `litestar-v*` on `feat/litestar-rebuild`, builds the JS assets, copies
-them into `backend/chainlit/frontend/dist/`, runs the full backend
-suite against a PostgreSQL service, builds the wheel and publishes it as a
-GitHub **pre-release**. The workflow rewrites `backend/chainlit/version.py` from
+matching `litestar-v*` on a commit of `main` (a tag elsewhere is refused), builds
+the JS assets, copies them into `backend/chainlit/frontend/dist/`, runs the full
+backend suite against a PostgreSQL service, builds the wheel and publishes it as
+a GitHub **pre-release**. The workflow rewrites `backend/chainlit/version.py` from
 the tag (`litestar-v3.0.0a12` → `3.0.0a12`), so the tag and the committed version
 must agree.
 
 The loop: fix → bump `backend/chainlit/version.py` → `chore(release): 3.0.0aN`
-→ tag `litestar-v3.0.0aN` → push branch and tag → wait for the wheel → repin the
-consumer. The consumer pins the release URL in **three** places —
-`pyproject.toml`, `requirements.txt` (its Docker image installs from
-requirements.txt, so pyproject alone changes nothing) and `uv.lock`.
+→ merge `dev` into `main` → tag `litestar-v3.0.0aN` on `main` → push `main` and
+the tag → wait for the wheel → repin the consumer. The consumer pins the release
+URL in **three** places — `pyproject.toml`, `requirements.txt` (its Docker image
+installs from requirements.txt, so pyproject alone changes nothing) and
+`uv.lock`.
 
 For a frontend-only check without a release, hot-copy the built assets into the
 running container:
